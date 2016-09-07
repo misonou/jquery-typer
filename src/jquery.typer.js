@@ -2,7 +2,7 @@
 /*globals Node,Range,DocumentFragment,Map */
 
 /*!
- * jQuery Typer Plugin v0.8.0
+ * jQuery Typer Plugin v0.8.1
  *
  * The MIT License (MIT)
  *
@@ -108,6 +108,7 @@
         $.each(props, function (i, v) {
             Object.defineProperty(obj, i, {
                 enumerable: true,
+                configurable: true,
                 get: function () {
                     Object.defineProperty(this, i, {
                         enumerable: true,
@@ -152,10 +153,13 @@
 
     function iterate(iterator, callback, from) {
         iterator.currentNode = from || iterator.currentNode;
-        if (acceptNode(iterator) === 1 && callback) {
-            callback(iterator.currentNode);
+        var value = acceptNode(iterator);
+        if (value !== 2) {
+            if (value === 1 && callback) {
+                callback(iterator.currentNode);
+            }
+            for (; iterator.nextNode(); callback && callback(iterator.currentNode));
         }
-        for (; iterator.nextNode(); callback && callback(iterator.currentNode));
     }
 
     function iterateToArray(iterator, callback, from) {
@@ -402,7 +406,7 @@
         var topElement = options.element;
         var widgets = [];
         var widgetOptions = [options].concat(options.widgets);
-        var currentSelection = new TyperSelection();
+        var currentSelection;
         var undoable = {};
         var userRange;
         var $self = $(topElement);
@@ -535,9 +539,11 @@
                     while (!rangeCovers(stack[0].element, v)) {
                         stack.shift();
                     }
-                    if (tagName(v) === 'br' && nodeMap.has(v) && (stack[0].nodeType === NODE_PARAGRAPH || stack[0].nodeType === NODE_INLINE)) {
-                        removeFromParent(nodeMap.get(v));
-                        nodeMap.delete(v);
+                    if (tagName(v) === 'br') {
+                        if (nodeMap.has(v) && (stack[0].nodeType === NODE_PARAGRAPH || stack[0].nodeType === NODE_INLINE)) {
+                            removeFromParent(nodeMap.get(v));
+                            nodeMap.delete(v);
+                        }
                         return;
                     }
 
@@ -708,6 +714,9 @@
                 };
             }
 
+            if (!is(range, Range)) {
+                range = createRange.apply(null, variadic(arguments));
+            }
             var focusElement = range.commonAncestorContainer;
             if (range.startContainer === range.endContainer && range.startOffset === range.endOffset - 1) {
                 focusElement = is(focusElement.childNodes[range.startOffset], Element) || focusElement;
@@ -896,7 +905,7 @@
                     }
                     var content = (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) && createRange(node.element, range)[mode]();
                     if (cloneNode) {
-                        if (node.nodeType === NODE_WIDGET || node.nodeType === NODE_OUTER_PARAGRAPH || (node.nodeType === NODE_EDITABLE && node.element !== topElement) || (content && content.firstChild.nodeType === 3 && range.commonAncestorContainer.nodeType !== 3)) {
+                        if (node.nodeType === NODE_WIDGET || node.nodeType === NODE_OUTER_PARAGRAPH || (node.nodeType === NODE_EDITABLE && node.element !== topElement) || (content && content.firstChild.tagName !== node.element.tagName)) {
                             var clonedNode = node.cloneDOMNodes(false);
                             stack[0][1].appendChild(clonedNode);
                             if (!is(clonedNode, DocumentFragment)) {
@@ -920,8 +929,8 @@
 
         function insertContents(content, range) {
             if (typeof content === 'string') {
-                content = $.parseHTML('<p>' + content.replace(/\u000d/g, '').replace(/\n(\n?)/g, function (v, a) {
-                    return a ? '</p><p>' : '<br>';
+                content = $.parseHTML('<p>' + ZWSP_ENTITIY + content.replace(/\u000d/g, '').replace(/\n(\n?)/g, function (v, a) {
+                    return a ? '</p><p>' + ZWSP_ENTITIY : '<br>';
                 }) + '</p>');
             }
             if (range !== undefined && !is(range, Range)) {
@@ -944,6 +953,7 @@
                 var document = createTyperDocument(content);
                 var nodes = document.rootNode.childNodes.slice(0);
                 var needGlue = !nodes[1] && (!nodes[0] || nodes[0].nodeType === NODE_PARAGRAPH || nodes[0].nodeType === NODE_INLINE) && startNode !== endNode;
+                var hasInsertedText;
                 while (nodes[0]) {
                     var node = nodes.pop();
                     if (node.nodeType === NODE_OUTER_PARAGRAPH && tagName(endNode.containingElement) === 'li') {
@@ -973,6 +983,7 @@
                                 if (contentNodes[0]) {
                                     (createRange(firstNode, COLLAPSE_START_INSIDE) || endPoint).insertNode(wrapNode(contentNodes, inlineNodes.slice(0, -1)));
                                     newPoint = createRange(contentNodes[0], COLLAPSE_END_INSIDE);
+                                    hasInsertedText = true;
                                 }
                                 continue;
                             }
@@ -983,8 +994,9 @@
                         endPoint.insertNode(node.element);
                         newPoint = newPoint || createRange(node.element, COLLAPSE_END_OUTSIDE);
                     } else if (nodes[0]) {
-                        endPoint.insertNode(wrapNode(contentNodes, inlineNodes));
+                        endPoint.insertNode(wrapNode(contentNodes, hasInsertedText ? inlineNodes : inlineNodes.slice(0, -1)));
                         newPoint = newPoint || createRange(lastNode, COLLAPSE_END_INSIDE);
+                        hasInsertedText = true;
                     } else if (contentNodes[0]) {
                         startPoint.insertNode(startNode ? createDocumentFragment(contentNodes) : wrapNode(contentNodes, inlineNodes));
                         startPoint = createRange(lastNode, COLLAPSE_END_OUTSIDE);
@@ -1005,7 +1017,7 @@
             var iterator = new TyperTreeWalker(document.rootNode, NODE_PARAGRAPH);
             var text = iterateToArray(iterator, function (v) {
                 var iterator = new TyperDOMNodeIterator(v, 5, function (v) {
-                    return v.nodeValue || tagName(v) === 'br';
+                    return v.nodeValue || tagName(v) === 'br' ? 1 : 3;
                 });
                 return iterateToArray(iterator, function (v) {
                     return v.nodeValue || '\n';
@@ -1363,7 +1375,6 @@
                 widgets.push(new TyperWidget(typer, i, null, v.options));
             }
         });
-        typerDocument = createTyperDocument(topElement);
 
         $.extend(this, {
             element: topElement,
@@ -1388,7 +1399,6 @@
             invoke: function (command) {
                 var self = this;
                 var args = [new TyperTransaction()].concat(variadic(arguments, 1));
-                select(currentSelection);
                 codeUpdate(function () {
                     if (typeof command === 'string') {
                         args[0].widget = findWidgetWithCommand(command);
@@ -1456,6 +1466,8 @@
         });
 
         $self.attr('contenteditable', 'true');
+        typerDocument = createTyperDocument(topElement);
+        currentSelection = computeSelection(topElement, COLLAPSE_START_INSIDE);
         normalize();
         triggerEvent(EVENT_ALL, 'init');
     }
@@ -1654,33 +1666,49 @@
         }
     };
 
-    function nodeIteratorCreateNodeIterator(inst, init) {
+    function nodeIteratorCreateNodeIterator(inst, dir) {
         var node = inst.typerNodeIterator.currentNode;
-        if (init && node.nodeType !== NODE_PARAGRAPH && node.nodeType !== NODE_INLINE) {
-            node = inst.typerNodeIterator.nextNode() || node;
+        if (node.nodeType !== NODE_PARAGRAPH && node.nodeType !== NODE_INLINE) {
+            return document.createNodeIterator(is(node.element, Node) || node.containingElement, 0);
         }
-        var whatToShow = (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) && inst.whatToShow;
-        if (is(node.element, Node)) {
-            return document.createTreeWalker(node.element, whatToShow, inst.filter && function (v) {
-                return +acceptNode(inst, v) === 1 ? 1 : 3;
-            }, false);
-        }
-        return document.createTreeWalker(node.containingElement, whatToShow, function (v) {
-            return !rangeIntersects(node.element, v) ? 2 : +acceptNode(inst, v) === 1 ? 1 : 3;
+        var range = is(node.element, Range);
+        var iterator = document.createTreeWalker(range ? node.containingElement : node.element, inst.whatToShow | 1, function (v) {
+            return v.nodeType === 1 || (range && !rangeIntersects(range, v)) ? 2 : acceptNode(inst, v) | 1;
         }, false);
+        if (dir === 'previousNode') {
+            var before = inst.currentNode;
+            while (iterator.lastChild());
+            while (comparePosition(before, iterator.currentNode, true) <= 0 && iterator[dir]());
+        }
+        return iterator;
     }
 
     function nodeIteratorTraverse(inst, dir) {
+        var before = inst.currentNode;
         if (inst.iterator[dir]()) {
+            if (inst.currentNode[dir === 'nextNode' ? 'previousSibling' : 'nextSibling'] !== before) {
+                if (inst.typerNodeIterator[dir]()) {
+                    inst.iteratorStack.unshift({
+                        dir: dir,
+                        iterator: inst.iterator
+                    });
+                    inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
+                    if (acceptNode(inst.iterator) === 1 || inst.iterator[dir]()) {
+                        return inst.currentNode;
+                    }
+                }
+            }
             return inst.currentNode;
         }
-        if (inst.typerNodeIterator[dir]()) {
-            inst.iterator = nodeIteratorCreateNodeIterator(inst);
-            if (dir === 'previousNode') {
-                var before = inst.currentNode;
-                while (inst.iterator.lastChild());
-                while (comparePosition(before, inst.currentNode, true) <= 0 && inst.iterator[dir]());
+        while (inst.iteratorStack[0]) {
+            var d = inst.iteratorStack.shift();
+            if (d.dir === dir) {
+                inst.iterator = d.iterator;
+                return inst.currentNode;
             }
+        }
+        while (inst.typerNodeIterator[dir]()) {
+            inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
             if (acceptNode(inst.iterator) === 1 || inst.iterator[dir]()) {
                 return inst.currentNode;
             }
@@ -1704,7 +1732,12 @@
 
     defineLazyProperties(TyperDOMNodeIterator.prototype, {
         iterator: function () {
-            return nodeIteratorCreateNodeIterator(this, true);
+            var t = this.typerNodeIterator;
+            if (t.currentNode.nodeType !== NODE_PARAGRAPH && t.currentNode.nodeType !== NODE_INLINE) {
+                t.nextNode();
+            }
+            this.iteratorStack = [];
+            return nodeIteratorCreateNodeIterator(this);
         }
     });
 
