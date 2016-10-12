@@ -50,7 +50,7 @@
     var EVENT_ALL = 1;
     var EVENT_HANDLER = 3;
     var EVENT_CURRENT = 4;
-    var IS_IE = !!window.ActiveXObject || document.body.style.msTouchAction !== undefined;
+    var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined;
 
     var isFunction = $.isFunction;
     var selection = window.getSelection();
