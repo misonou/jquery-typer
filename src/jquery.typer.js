@@ -531,7 +531,9 @@
 
                 updateNodeFromElement(stack[0]);
 
-                $(childOnly ? '>*' : '*', element).each(function (i, v) {
+                // jQuery prior to 1.12.0 cannot directly apply selector to DocumentFragment
+                var $children = childOnly ? $(element).children() : is(element, DocumentFragment) ? $(element).children().find('*').andSelf() : $('*', element);
+                $children.each(function (i, v) {
                     while (pseudoElements[0] && comparePosition(pseudoElements[0].startContainer.childNodes[pseudoElements[0].startOffset], v) < 0) {
                         stack.unshift(new TyperNode(NODE_PARAGRAPH, pseudoElements.shift(), stack[0].widget));
                         addChild(stack[1], stack[0]);
@@ -624,11 +626,6 @@
                     }
                 }
             };
-        }
-
-        function getEditableElement(element) {
-            var node = typerDocument.getNode(element);
-            return node.nodeType === NODE_WIDGET ? node.widget.element : element;
         }
 
         function findWidgetWithCommand(name) {
@@ -770,6 +767,10 @@
             codeUpdate(function () {
                 var allowedAttributes = String(options.attributes || '').split(' ');
                 var iterator = computeSelection(range).createTreeWalker(-1);
+                if (iterator.currentNode.nodeType === NODE_EDITABLE && !iterator.currentNode.childNodes[0]) {
+                    $(EMPTY_LINE).appendTo(iterator.currentNode.element);
+                    return;
+                }
                 iterate(iterator, function (node) {
                     if (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) {
                         // WebKit adds dangling <BR> element when a line is empty
@@ -928,10 +929,11 @@
         }
 
         function insertContents(content, range) {
-            if (typeof content === 'string') {
-                content = $.parseHTML('<p>' + ZWSP_ENTITIY + content.replace(/\u000d/g, '').replace(/\n(\n?)/g, function (v, a) {
-                    return a ? '</p><p>' + ZWSP_ENTITIY : '<br>';
-                }) + '</p>');
+            if (!content) {
+                content = [];
+            } else if (typeof content === 'string') {
+                content = content.replace(/\u000d/g, '').replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>').replace(/<p>(<|$)/g, '<p>' + ZWSP_ENTITIY + '$1') || ZWSP_ENTITIY;
+                content = $.parseHTML('<p>' + content + '</p>');
             }
             if (range !== undefined && !is(range, Range)) {
                 range = createRange.apply(null, variadic(arguments, 1));
@@ -965,7 +967,7 @@
                     // paragraph or outer paragraph has to been splitted to two
                     // if multiple paragraphs of text or a widget are being inserted
                     var splitOuter = node.nodeType === NODE_WIDGET && outerEndNode !== endNode || is(endNode.element, Range);
-                    if (splitOuter || (nodes[0] && startNode === endNode)) {
+                    if (splitOuter || ((nodes[0] || node.nodeType === NODE_WIDGET) && startNode === endNode)) {
                         var e = (splitOuter ? outerEndNode : endNode).element;
                         var splitEnd = is(e, Range) ? createRange(e, false) : createRange(e, COLLAPSE_END_OUTSIDE);
                         var splitContent = createRange(endPoint, splitEnd).extractContents();
@@ -1334,14 +1336,14 @@
             $self.bind('mouseup', function (e) {
                 // disable resize handle on image element on IE and Firefox
                 // also select the whole widget when clicking on uneditable elements
-                var targetElement = getEditableElement(e.target);
-                if (targetElement !== e.target) {
+                var node = typerDocument.getNode(e.target);
+                if (node.nodeType === NODE_WIDGET) {
                     if (IS_IE) {
                         setTimeout(function () {
-                            select(targetElement);
+                            select(node.widget.element);
                         });
                     }
-                    select(targetElement);
+                    select(node.widget.element);
                 }
             });
 
