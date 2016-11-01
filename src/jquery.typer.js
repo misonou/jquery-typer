@@ -48,6 +48,7 @@
     var NODE_INLINE = 16;
     var NODE_SHOW_EDITABLE = 4096;
     var EVENT_ALL = 1;
+    var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
     var EVENT_CURRENT = 4;
     var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined;
@@ -419,6 +420,8 @@
             switch (eventMode) {
             case EVENT_ALL:
                 return widgets.concat(currentSelection.widgets);
+            case EVENT_STATIC:
+                return widgets;
             case EVENT_HANDLER:
                 return currentSelection.widgets.slice(0).reverse().concat(widgets);
             case EVENT_CURRENT:
@@ -438,6 +441,11 @@
                     return options[eventName].apply(options, args) !== false || eventMode !== EVENT_HANDLER;
                 }
             });
+            if (is(eventMode, TyperWidget)) {
+                setTimeout(function () {
+                   triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), eventMode);
+                });
+            }
             return handlerCalled;
         }
 
@@ -473,6 +481,7 @@
                     var index = node.parentNode.childNodes.indexOf(node);
                     if (index >= 0) {
                         if (!noevent && node.widget.element === node.element && containsOrEquals(document, rootElement)) {
+                            node.widget.destroyed = true;
                             triggerEvent(node.widget, 'destroy');
                         }
                         node.parentNode.childNodes.splice(index, 1);
@@ -489,7 +498,8 @@
 
                 function getWidget(node) {
                     if (!node.widget || !is(node.element, widgetOptions[node.widget.id].element)) {
-                        if (containsOrEquals(document, rootElement)) {
+                        if (node.widget && containsOrEquals(document, rootElement)) {
+                            node.widget.destroyed = true;
                             triggerEvent(node.widget, 'destroy');
                         }
                         delete node.widget;
@@ -942,6 +952,14 @@
             extractContents(range, function (startPoint, endPoint) {
                 var range = createRange(startPoint, endPoint);
                 var state = computeSelection(range);
+                
+                // check if current insertion point is an empty editable element
+                // normalize before inserting content
+                if (state.startNode.nodeType === NODE_EDITABLE && state.startNode === state.endNode) {
+                    normalize(range);
+                    state = computeSelection(createRange(state.startNode.element, true));
+                }
+
                 var startNode = state.startNode;
                 var endNode = state.endNode;
                 var outerEndNode = endNode.parentNode.nodeType === NODE_OUTER_PARAGRAPH ? endNode.parentNode : endNode;
@@ -1192,6 +1210,15 @@
             var modifiedKeyCode;
             var keyDefaultPrevented;
             var hasKeyEvent;
+            var activeWidget;
+
+            function triggerWidgetFocusout() {
+                var widget = activeWidget;
+                if (activeWidget && !activeWidget.destroyed) {
+                    activeWidget = null;
+                    triggerEvent(widget, 'focusout');
+                }
+            }
 
             $self.mousedown(function () {
                 mousedown = true;
@@ -1221,6 +1248,7 @@
             });
 
             $self.bind('keydown keypress keyup', function (e) {
+                triggerWidgetFocusout();
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1337,6 +1365,9 @@
                 // disable resize handle on image element on IE and Firefox
                 // also select the whole widget when clicking on uneditable elements
                 var node = typerDocument.getNode(e.target);
+                if (activeWidget !== node.widget) {
+                    triggerWidgetFocusout();
+                }
                 if (node.nodeType === NODE_WIDGET) {
                     if (IS_IE) {
                         setTimeout(function () {
@@ -1344,6 +1375,10 @@
                         });
                     }
                     select(node.widget.element);
+                    if (activeWidget !== node.widget) {
+                        activeWidget = node.widget;
+                        triggerEvent(node.widget, 'focusin');
+                    }
                 }
             });
 
@@ -1368,10 +1403,10 @@
             // to avoid unknown behavior while editing
             element: ':not(' + INNER_PTAG + ',br,a,b,em,i,u,small,strong,sub,sup,ins,del,mark,span)'
         }, {
-            ctrlZ: undoable.undo,
-            ctrlY: undoable.redo,
-            ctrlShiftZ: undoable.redo
-        });
+                ctrlZ: undoable.undo,
+                ctrlY: undoable.redo,
+                ctrlShiftZ: undoable.redo
+            });
         $.each(widgetOptions, function (i, v) {
             if (!v.element) {
                 widgets.push(new TyperWidget(typer, i, null, v.options));
@@ -1469,9 +1504,9 @@
 
         $self.attr('contenteditable', 'true');
         typerDocument = createTyperDocument(topElement);
+        triggerEvent(EVENT_STATIC, 'init');
         currentSelection = computeSelection(topElement, COLLAPSE_START_INSIDE);
         normalize();
-        triggerEvent(EVENT_ALL, 'init');
     }
 
     window.Typer = Typer;
@@ -1994,7 +2029,7 @@
             document.designMode = 'on';
             document.execCommand('enableObjectResizing', false, false);
             document.execCommand('enableInlineTableEditing', false, false);
-        } catch (e) {}
+        } catch (e) { }
         document.designMode = 'off';
     }
     $(document.body).bind('mscontrolselect', function (e) {
@@ -2025,4 +2060,4 @@
         };
     }
 
-}(jQuery, window, document, String, Node, Range, DocumentFragment, Map, []));
+} (jQuery, window, document, String, Node, Range, DocumentFragment, Map, []));
