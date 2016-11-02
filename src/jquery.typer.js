@@ -199,6 +199,10 @@
         return $(element).is(selector) && element;
     }
 
+    function isParagraphOrInline(node) {
+        return node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE;
+    }
+
     function attrs(element) {
         var value = {};
         $.each($.makeArray(element && element.attributes), function (i, v) {
@@ -274,8 +278,12 @@
             }
         } else if (is(startNode, Range)) {
             range = startNode.cloneRange();
-            if (typeof startOffset === 'boolean' && !range.collapsed) {
-                range.collapse(startOffset);
+            if (!range.collapsed) {
+                if (typeof startOffset === 'boolean') {
+                    range.collapse(startOffset);
+                } else if (startOffset & 2) {
+                    range.collapse(!!(startOffset & 4));
+                }
             }
         }
         if (is(startOffset, Range)) {
@@ -410,6 +418,7 @@
         var currentSelection;
         var undoable = {};
         var userRange;
+        var userFocus;
         var $self = $(topElement);
 
         function TyperTransaction() {
@@ -418,14 +427,14 @@
 
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
-            case EVENT_ALL:
-                return widgets.concat(currentSelection.widgets);
-            case EVENT_STATIC:
-                return widgets;
-            case EVENT_HANDLER:
-                return currentSelection.widgets.slice(0).reverse().concat(widgets);
-            case EVENT_CURRENT:
-                return currentSelection.widgets.slice(-1);
+                case EVENT_ALL:
+                    return widgets.concat(currentSelection.widgets);
+                case EVENT_STATIC:
+                    return widgets;
+                case EVENT_HANDLER:
+                    return currentSelection.widgets.slice(0).reverse().concat(widgets);
+                case EVENT_CURRENT:
+                    return currentSelection.widgets.slice(-1);
             }
         }
 
@@ -443,7 +452,7 @@
             });
             if (is(eventMode, TyperWidget)) {
                 setTimeout(function () {
-                   triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), eventMode);
+                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), eventMode);
                 });
             }
             return handlerCalled;
@@ -552,7 +561,7 @@
                         stack.shift();
                     }
                     if (tagName(v) === 'br') {
-                        if (nodeMap.has(v) && (stack[0].nodeType === NODE_PARAGRAPH || stack[0].nodeType === NODE_INLINE)) {
+                        if (nodeMap.has(v) && isParagraphOrInline(stack[0])) {
                             removeFromParent(nodeMap.get(v));
                             nodeMap.delete(v);
                         }
@@ -782,7 +791,7 @@
                     return;
                 }
                 iterate(iterator, function (node) {
-                    if (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) {
+                    if (isParagraphOrInline(node)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
                         var lastBr = $('br:last-child', node.element)[0];
@@ -914,7 +923,7 @@
                         }
                         return 2;
                     }
-                    var content = (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) && createRange(node.element, range)[mode]();
+                    var content = isParagraphOrInline(node) && createRange(node.element, range)[mode]();
                     if (cloneNode) {
                         if (node.nodeType === NODE_WIDGET || node.nodeType === NODE_OUTER_PARAGRAPH || (node.nodeType === NODE_EDITABLE && node.element !== topElement) || (content && content.firstChild.tagName !== node.element.tagName)) {
                             var clonedNode = node.cloneDOMNodes(false);
@@ -927,7 +936,7 @@
                             stack[0][1].appendChild(content);
                         }
                     }
-                    return node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE ? 2 : 1;
+                    return isParagraphOrInline(node) ? 2 : 1;
                 }));
             }
             if (isFunction(callback)) {
@@ -952,7 +961,7 @@
             extractContents(range, function (startPoint, endPoint) {
                 var range = createRange(startPoint, endPoint);
                 var state = computeSelection(range);
-                
+
                 // check if current insertion point is an empty editable element
                 // normalize before inserting content
                 if (state.startNode.nodeType === NODE_EDITABLE && state.startNode === state.endNode) {
@@ -965,60 +974,67 @@
                 var outerEndNode = endNode.parentNode.nodeType === NODE_OUTER_PARAGRAPH ? endNode.parentNode : endNode;
                 var newPoint;
 
-                var inlineNodes = startNode.containingElement === state.startElement ? [state.startElement] : $(state.startElement).parentsUntil(is(startNode.containingElement.parentNode, OUTER_PTAG) || startNode.containingElement || typerDocument.getNode(startNode.containingElement).widget.element).andSelf().get().reverse();
-                if (!inlineNodes[0]) {
-                    inlineNodes.push(createElement('p'));
+                var formattingNodes;
+                if (startNode.nodeType === NODE_PARAGRAPH) {
+                    formattingNodes = [state.startElement];
+                } else if (startNode.nodeType === NODE_INLINE) {
+                    var until = is(startNode.containingElement.parentNode, OUTER_PTAG) || startNode.containingElement || typerDocument.getNode(startNode.containingElement).widget.element;
+                    formattingNodes = $(state.startElement).parentsUntil(until).andSelf().get().reverse();
+                } else {
+                    formattingNodes = [createElement('p')];
                 }
 
                 var document = createTyperDocument(content);
                 var nodes = document.rootNode.childNodes.slice(0);
-                var needGlue = !nodes[1] && (!nodes[0] || nodes[0].nodeType === NODE_PARAGRAPH || nodes[0].nodeType === NODE_INLINE) && startNode !== endNode;
+                var needGlue = !nodes[1] && (!nodes[0] || isParagraphOrInline(nodes[0])) && startNode !== endNode;
                 var hasInsertedText;
+
                 while (nodes[0]) {
                     var node = nodes.pop();
                     if (node.nodeType === NODE_OUTER_PARAGRAPH && tagName(endNode.containingElement) === 'li') {
                         array.push.apply(nodes, slice(node.childNodes));
                         continue;
                     }
-                    var contentNodes = node.nodeType === NODE_INLINE ? [node.element] : node.childDOMNodes.slice(0);
+                    var inlineNodes = node.nodeType === NODE_INLINE ? [node.element] : node.childDOMNodes.slice(0);
+                    var splitOuter = (node.nodeType === NODE_WIDGET || !isParagraphOrInline(endNode));
+                    var splitInner = nodes[0] && !hasInsertedText;
 
-                    // paragraph or outer paragraph has to been splitted to two
-                    // if multiple paragraphs of text or a widget are being inserted
-                    var splitOuter = node.nodeType === NODE_WIDGET && outerEndNode !== endNode || is(endNode.element, Range);
-                    if (splitOuter || ((nodes[0] || node.nodeType === NODE_WIDGET) && startNode === endNode)) {
-                        var e = (splitOuter ? outerEndNode : endNode).element;
-                        var splitEnd = is(e, Range) ? createRange(e, false) : createRange(e, COLLAPSE_END_OUTSIDE);
+                    if (splitOuter || splitInner) {
+                        var splitEnd = createRange((splitOuter ? outerEndNode : endNode).element, COLLAPSE_END_OUTSIDE);
                         var splitContent = createRange(endPoint, splitEnd).extractContents();
-                        var firstNode = splitContent.childNodes[0];
+                        var splitFirstNode = splitContent.childNodes[0];
 
-                        if (splitContent.textContent || node.nodeType === NODE_WIDGET || node.nodeType === NODE_OUTER_PARAGRAPH || contentNodes[0]) {
+                        if (splitContent.textContent || (splitFirstNode && (!isParagraphOrInline(node) || inlineNodes[0]))) {
                             splitEnd.insertNode(splitContent);
                             endNode = computeSelection(splitEnd).focusNode;
                             outerEndNode = splitOuter ? endNode : outerEndNode;
                             endPoint = splitEnd;
-                            newPoint = is(endNode.element, Range) && createRange(endNode.element, false) || createRange(endNode.element, COLLAPSE_START_INSIDE);
-
-                            // insert the last paragraph of text being inserted to the newly created paragraph if any
-                            if (node.nodeType === NODE_PARAGRAPH || node.nodeType === NODE_INLINE) {
-                                if (contentNodes[0]) {
-                                    (createRange(firstNode, COLLAPSE_START_INSIDE) || endPoint).insertNode(wrapNode(contentNodes, inlineNodes.slice(0, -1)));
-                                    newPoint = createRange(contentNodes[0], COLLAPSE_END_INSIDE);
-                                    hasInsertedText = true;
+                            newPoint = newPoint || createRange(endNode.element, COLLAPSE_START_INSIDE);
+                        }
+                        // insert the last paragraph of text being inserted to the newly created paragraph if any
+                        if (isParagraphOrInline(node)) {
+                            if (inlineNodes[0]) {
+                                if (isParagraphOrInline(endNode)) {
+                                    (createRange(splitFirstNode, COLLAPSE_START_INSIDE) || endPoint).insertNode(wrapNode(inlineNodes, formattingNodes.slice(0, -1)));
+                                } else {
+                                    splitEnd.insertNode(wrapNode(inlineNodes, formattingNodes));
                                 }
-                                continue;
+                                newPoint = newPoint || createRange(inlineNodes[0], COLLAPSE_END_INSIDE);
+                                hasInsertedText = true;
                             }
+                            continue;
                         }
                     }
-                    var lastNode = contentNodes.slice(-1)[0];
+                    var lastNode = inlineNodes.slice(-1)[0];
                     if (node.nodeType === NODE_WIDGET || node.nodeType === NODE_OUTER_PARAGRAPH) {
                         endPoint.insertNode(node.element);
                         newPoint = newPoint || createRange(node.element, COLLAPSE_END_OUTSIDE);
                     } else if (nodes[0]) {
-                        endPoint.insertNode(wrapNode(contentNodes, hasInsertedText ? inlineNodes : inlineNodes.slice(0, -1)));
+                        endPoint.insertNode(wrapNode(inlineNodes, hasInsertedText ? formattingNodes : formattingNodes.slice(0, -1)));
                         newPoint = newPoint || createRange(lastNode, COLLAPSE_END_INSIDE);
                         hasInsertedText = true;
-                    } else if (contentNodes[0]) {
-                        startPoint.insertNode(startNode ? createDocumentFragment(contentNodes) : wrapNode(contentNodes, inlineNodes));
+                    } else if (inlineNodes[0]) {
+                        startPoint.insertNode(startNode ? createDocumentFragment(inlineNodes) : wrapNode(inlineNodes, formattingNodes));
                         startPoint = createRange(lastNode, COLLAPSE_END_OUTSIDE);
                         newPoint = newPoint || createRange(lastNode, COLLAPSE_END_INSIDE);
                     }
@@ -1383,7 +1399,14 @@
             });
 
             $self.bind('focusin focusout', function (e) {
-                triggerEvent(EVENT_ALL, e.type);
+                setTimeout(function () {
+                    if (!userFocus) {
+                        if (e.type === 'focusout') {
+                            triggerWidgetFocusout();
+                        }
+                        triggerEvent(EVENT_ALL, e.type);
+                    }
+                });
             });
         }
 
@@ -1413,6 +1436,21 @@
             }
         });
 
+        var retainFocusHandlers = {
+            focusin: function (e) {
+                userFocus = e.currentTarget;
+            },
+            focusout: function (e) {
+                var focusoutTarget = e.currentTarget;
+                setTimeout(function () {
+                    if (userFocus === focusoutTarget && !getActiveRange()) {
+                        userFocus = null;
+                        $self.trigger('focusout');
+                    }
+                });
+            }
+        };
+
         $.extend(this, {
             element: topElement,
             canUndo: undoable.canUndo,
@@ -1432,6 +1470,9 @@
             moveCaret: function (node, offset) {
                 moveCaret(node, offset);
                 undoable.snapshot();
+            },
+            retainFocus: function (element) {
+                $(element).bind(retainFocusHandlers);
             },
             invoke: function (command) {
                 var self = this;
@@ -1705,7 +1746,7 @@
 
     function nodeIteratorCreateNodeIterator(inst, dir) {
         var node = inst.typerNodeIterator.currentNode;
-        if (node.nodeType !== NODE_PARAGRAPH && node.nodeType !== NODE_INLINE) {
+        if (!isParagraphOrInline(node)) {
             return document.createNodeIterator(is(node.element, Node) || node.containingElement, 0);
         }
         var range = is(node.element, Range);
@@ -1770,7 +1811,7 @@
     defineLazyProperties(TyperDOMNodeIterator.prototype, {
         iterator: function () {
             var t = this.typerNodeIterator;
-            if (t.currentNode.nodeType !== NODE_PARAGRAPH && t.currentNode.nodeType !== NODE_INLINE) {
+            if (!isParagraphOrInline(t.currentNode)) {
                 t.nextNode();
             }
             this.iteratorStack = [];

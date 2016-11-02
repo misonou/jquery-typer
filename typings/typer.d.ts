@@ -1,5 +1,23 @@
 type NodeFilterResult = 1 | 2 | 3;
 
+type CollapseMode = boolean | CollapseModeIntValue;
+
+declare enum CollapseModeIntValue {
+    COLLAPSE_START_INSIDE = 7,
+    COLLAPSE_START_OUTSIDE = 6,
+    COLLAPSE_END_INSIDE = 3,
+    COLLAPSE_END_OUTSIDE = 2,
+}
+
+declare enum TyperNodeType {
+    NODE_WIDGET = 1,
+    NODE_EDITABLE = 2,
+    NODE_PARAGRAPH = 4,
+    NODE_OUTER_PARAGRAPH = 8,
+    NODE_INLINE = 16,
+    NODE_SHOW_EDITABLE = 4096,
+}
+
 interface Map<T> {
     [name: string]: T;
 }
@@ -34,10 +52,10 @@ interface TyperWidgetBase {
 }
 
 interface TyperStatic {
-    readonly COLLAPSE_START_INSIDE: number;
-    readonly COLLAPSE_START_OUTSIDE: number;
-    readonly COLLAPSE_END_INSIDE: number;
-    readonly COLLAPSE_END_OUTSIDE: number;
+    readonly COLLAPSE_START_INSIDE: CollapseModeIntValue;
+    readonly COLLAPSE_START_OUTSIDE: CollapseModeIntValue;
+    readonly COLLAPSE_END_INSIDE: CollapseModeIntValue;
+    readonly COLLAPSE_END_OUTSIDE: CollapseModeIntValue;
 
     new (options: TyperOptions): Typer;
 
@@ -54,9 +72,9 @@ interface TyperStatic {
     getRangeFromMouseEvent(e: MouseEvent): Range;
 
     createRange(selection: TyperSelection): Range;
-    createRange(startNode: Node, collapse: number | boolean): Range;
+    createRange(startNode: Node, collapse: CollapseMode): Range;
     createRange(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): Range;
-    createRange(range: Range, collapse?: boolean): Range;
+    createRange(range: Range, collapse?: CollapseMode): Range;
     createRange(start: Range, end: Range): Range;
 }
 
@@ -69,13 +87,14 @@ interface Typer extends TyperWidgetBase {
     redo(): void;
     hasCommand(commandName: string): boolean;
     getSelection(): TyperSelection;
+    retainFocus(element: Element): void;
     moveCaret(node: Node, offset: number): void;
     invoke(command: string | TyperCommand): void;
 
     select(selection: TyperSelection): void;
-    select(startNode: Node, collapse: number | boolean): void;
+    select(startNode: Node, collapse: CollapseMode): void;
     select(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): void;
-    select(range: Range, collapse?: boolean): void;
+    select(range: Range, collapse?: CollapseMode): void;
     select(start: Range, end: Range): void;
 }
 
@@ -146,9 +165,9 @@ interface TyperTransaction {
     restoreSelection(): void;
 
     select(selection: TyperSelection): void;
-    select(startNode: Node, collapse: number | boolean): void;
+    select(startNode: Node, collapse: CollapseMode): void;
     select(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): void;
-    select(range: Range, collapse?: boolean): void;
+    select(range: Range, collapse?: CollapseMode): void;
     select(start: Range, end: Range): void;
 }
 
@@ -160,6 +179,7 @@ interface TyperNode {
     readonly childDOMNodes: Node[];
     readonly firstChild: Node;
     readonly lastChild: Node;
+    readonly nodeType: TyperNodeType;
 
     selectedInRange(range: Range): boolean;
     createRange(collapse: number): Range;
