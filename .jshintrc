@@ -1,0 +1,6 @@
+{
+    "regexp": true,
+    "browser": true,
+    "jquery": true,
+    "loopfunc": true
+}

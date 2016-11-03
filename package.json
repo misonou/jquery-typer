@@ -1,0 +1,16 @@
+{
+  "name": "jquery-typer",
+  "version": "0.8.2",
+  "devDependencies": {
+    "grunt": "^1.0.1",
+    "grunt-contrib-concat": "^1.0.1",
+    "grunt-contrib-uglify": "^2.0.0"
+  },
+  "author": "misonou",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/misonou/jquery-typer.git"
+  },
+  "homepage": "https://github.com/misonou/jquery-typer"
+}

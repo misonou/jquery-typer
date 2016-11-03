@@ -1,5 +1,3 @@
-/*jshint regexp:true,browser:true,jquery:true,debug:true,-W083 */
-
 (function ($, Typer) {
     'use strict';
 

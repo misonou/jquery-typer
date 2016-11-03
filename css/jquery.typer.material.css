@@ -1,0 +1,461 @@
+.typer-toolbar {
+    font-family: 'Roboto';
+    font-size: 14px;
+    line-height: 1.2;
+}
+
+.typer-toolbar input,
+.typer-toolbar textarea,
+.typer-toolbar select,
+.typer-toolbar button,
+.typer-toolbar label {
+    font-family: inherit;
+    font-size: 100%;
+}
+
+.typer-toolbar a {
+    color: #aeb8c2;
+    text-decoration: none;
+}
+
+.typer-toolbar a:hover {
+    color: #555;
+}
+
+.typer-toolbar *:active,
+.typer-toolbar *:focus {
+    outline: none;
+}
+
+.typer-toolbar-floating {
+    position: absolute;
+    padding-left: 10px;
+    background-color: white;
+    box-shadow: 0 0 10px;
+    white-space: nowrap;
+}
+
+.typer-toolbar-floating:before {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 1px;
+    width: 10px;
+    cursor: move;
+}
+
+
+/* Material Icons */
+
+.typer-toolbar-label {
+    display: inline-block;
+}
+
+.typer-toolbar-label .material-icons {
+    display: inline-block;
+    position: relative;
+    top: -1px;
+    min-width: 1em;
+    font-size: 16px;
+    line-height: 1;
+    vertical-align: middle;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.typer-toolbar-label .material-icons + span {
+    margin-left: 0.5em;
+}
+
+.typer-toolbar-label .material-icons:empty,
+.typer-toolbar-label .material-icons + span:empty {
+    display: none;
+}
+
+
+/* Buttons */
+
+.typer-toolbar label,
+.typer-toolbar button {
+    display: inline-block;
+    position: relative;
+    margin: 0;
+    padding: 0 0.75em;
+    height: 2.67em;
+    border-style: none;
+    background-color: transparent;
+    background-image: none;
+    line-height: 2.67;
+    text-align: left;
+    vertical-align: top;
+    cursor: pointer;
+    color: inherit;
+    font-weight: inherit;
+    text-transform: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    box-sizing: border-box;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+.typer-toolbar label.hidden,
+.typer-toolbar button.hidden {
+    display: none !important;
+}
+
+.typer-toolbar label.disabled,
+.typer-toolbar button.disabled {
+    background-color: transparent;
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: default;
+}
+
+.typer-toolbar label:hover,
+.typer-toolbar label:focus,
+.typer-toolbar label.active,
+.typer-toolbar button:hover,
+.typer-toolbar button:focus,
+.typer-toolbar button.active {
+    background-color: rgba(211, 211, 211, 0.4);
+    color: #212121;
+}
+
+.typer-toolbar button.warn:hover,
+.typer-toolbar button.warn:focus,
+.typer-toolbar button.warn.active {
+    background-color: rgba(255, 128, 128, 0.4);
+}
+
+.typer-toolbar input[type="color"] {
+    width: 1em;
+    height: 1em;
+}
+
+.typer-toolbar input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.typer-toolbar input[type="color"]::-webkit-color-swatch {
+    border-style: none;
+}
+
+.typer-toolbar input[type="checkbox"],
+.typer-toolbar input[type="radio"] {
+    position: relative;
+    margin: 0 0.5em 0 0;
+    width: 1em;
+    height: 1em;
+    font-size: 16px;
+    overflow: visible;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+.typer-toolbar input[type="checkbox"]:disabled,
+.typer-toolbar input[type="radio"]:disabled {
+    color: #999;
+    pointer-events: none;
+}
+
+.typer-toolbar input[type="checkbox"]:before,
+.typer-toolbar input[type="radio"]:before {
+    content: '';
+    display: inline-block;
+    margin: -1px 0 0 -1px;
+    width: 1em;
+    height: 1em;
+    border: 1px solid #d3d3d3;
+    background-color: white;
+    box-shadow: inset 0 0 2px rgba(128, 128, 128, 0.5);
+    font-family: 'Material Icons';
+    line-height: 1;
+    vertical-align: top;
+    font-feature-settings: "liga" 1;
+}
+
+.typer-toolbar input[type="checkbox"]:hover:before,
+.typer-toolbar input[type="radio"]:hover:before {
+    border-color: #aeb8c2;
+}
+
+.typer-toolbar input[type="checkbox"]:disabled:before,
+.typer-toolbar input[type="radio"]:disabled:before {
+    border-color: #d3d3d3;
+}
+
+.typer-toolbar input[type="checkbox"]:checked:before,
+.typer-toolbar input[type="radio"]:checked:before {
+    content: 'done';
+}
+
+.typer-toolbar input[type="checkbox"]:active:after,
+.typer-toolbar input[type="radio"]:active:after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    box-shadow: 0 0 4px #103492;
+    pointer-events: none;
+}
+
+.typer-toolbar input[type="checkbox"]:disabled:after,
+.typer-toolbar input[type="radio"]:disabled:after {
+    box-shadow: none;
+}
+
+.typer-toolbar input[type="text"],
+.typer-toolbar input[type="date"],
+.typer-toolbar input[type="month"],
+.typer-toolbar input[type="password"] {
+    position: relative;
+    display: inline-block;
+    margin: 0.33em -0.2em 0;
+    min-width: 0;
+    border-color: #aeb8c2;
+    border-style: none none solid;
+    background-color: transparent !important;
+    font-weight: normal;
+    line-height: 2;
+    vertical-align: top;
+}
+
+.typer-toolbar input[type="text"]:not(:first-child),
+.typer-toolbar input[type="date"]:not(:first-child),
+.typer-toolbar input[type="month"]:not(:first-child),
+.typer-toolbar input[type="password"]:not(:first-child) {
+    margin-left: 0.5em;
+}
+
+.typer-toolbar input[type="text"]:hover,
+.typer-toolbar input[type="date"]:hover,
+.typer-toolbar input[type="month"]:hover,
+.typer-toolbar input[type="password"]:hover,
+.typer-toolbar input[type="number"]:hover {
+    border-color: #aeb8c2;
+}
+
+.typer-toolbar input[type="text"].error,
+.typer-toolbar input[type="date"].error,
+.typer-toolbar input[type="month"].error,
+.typer-toolbar input[type="password"].error,
+.typer-toolbar input[type="number"].error {
+    border-color: #ff9494;
+    box-shadow: inset 0 0 2px #ff9494;
+}
+
+.typer-toolbar input[type="text"].disabled,
+.typer-toolbar input[type="date"].disabled,
+.typer-toolbar input[type="month"].disabled,
+.typer-toolbar input[type="password"].disabled,
+.typer-toolbar input[type="number"].disabled {
+    color: #999;
+    border-color: #d3d3d3;
+    pointer-events: none;
+}
+
+.typer-toolbar input[type="text"],
+.typer-toolbar input[type="date"],
+.typer-toolbar input[type="month"],
+.typer-toolbar input[type="password"],
+.typer-toolbar input[type="number"]  {
+    padding: 0.5em;
+}
+
+.typer-toolbar-controlpane input[type="text"],
+.typer-toolbar-controlpane input[type="date"],
+.typer-toolbar-controlpane input[type="month"],
+.typer-toolbar-controlpane input[type="password"],
+.typer-toolbar-controlpane input[type="number"] {
+    padding: 0 0.2em;
+}
+
+.typer-toolbar input::-webkit-inner-spin-button,
+.typer-toolbar input::-webkit-calendar-picker-indicator {
+    max-height: 1em;
+    padding: 0;
+    align-self: center;
+}
+
+.typer-toolbar input::-webkit-datetime-edit-fields-wrapper,
+.typer-toolbar input::-webkit-datetime-edit-ampm-field,
+.typer-toolbar input::-webkit-datetime-edit-day-field,
+.typer-toolbar input::-webkit-datetime-edit-hour-field,
+.typer-toolbar input::-webkit-datetime-edit-millisecond-field,
+.typer-toolbar input::-webkit-datetime-edit-minute-field,
+.typer-toolbar input::-webkit-datetime-edit-month-field,
+.typer-toolbar input::-webkit-datetime-edit-second-field,
+.typer-toolbar input::-webkit-datetime-edit-week-field,
+.typer-toolbar input::-webkit-datetime-edit-year-field {
+    padding: 0;
+}
+
+.typer-toolbar input[type="text"]:focus,
+.typer-toolbar input[type="date"]:focus,
+.typer-toolbar input[type="month"]:focus,
+.typer-toolbar input[type="password"]:focus,
+.typer-toolbar input[type="number"]:focus {
+    box-shadow: inset 0 0 2px rgba(128, 128, 128, 0.5), 0 0 4px #103492;
+    border-color: #8696b8;
+}
+
+.typer-toolbar input[type="text"]:focus,
+.typer-toolbar input[type="date"]:focus,
+.typer-toolbar input[type="month"]:focus,
+.typer-toolbar input[type="password"]:focus,
+.typer-toolbar input[type="number"]:focus {
+    box-shadow: none;
+}
+
+/* Composite Control */
+
+.typer-toolbar-group,
+.typer-toolbar-menu {
+    display: inline-block;
+    position: relative;
+    vertical-align: top;
+}
+
+.typer-toolbar-menu .typer-toolbar-controlpane {
+    display: flex;
+    flex-direction: column;
+}
+
+.typer-toolbar-menu > .typer-toolbar-controlpane {
+    display: none;
+    position: absolute;
+    min-width: 100%;
+    background-color: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+    z-index: 10;
+    overflow: hidden;
+}
+
+.typer-toolbar-menu:hover > .typer-toolbar-controlpane,
+.typer-toolbar-menu.active > .typer-toolbar-controlpane {
+    display: block;
+    display: flex;
+    flex-direction: column;
+}
+
+.typer-toolbar-menu .typer-toolbar-controlpane button,
+.typer-toolbar-menu .typer-toolbar-controlpane label {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    align-items: stretch;
+    flex-shrink: 0;
+}
+
+@supports (display: flex) {
+    .typer-toolbar-menu .typer-toolbar-controlpane button,
+    .typer-toolbar-menu .typer-toolbar-controlpane label {
+        width: auto;
+    }
+}
+
+.typer-toolbar-dropdown {
+    position: relative;
+    background-color: white;
+    line-height: 1;
+}
+
+.typer-toolbar-controlpane .typer-toolbar-dropdown {
+    background-color: transparent;
+    border-style: none;
+    box-shadow: none;
+    min-height: 2.67em;
+    min-width: 2em;
+}
+
+.typer-toolbar-dropdown.disabled {
+    color: #999;
+    pointer-events: none;
+}
+
+.typer-toolbar-dropdown[data-selected-value]:before {
+    content: attr(data-selected-value);
+    display: inline-block;
+    padding: 0.5em 1.5em 0.5em 0.5em;
+    min-height: 1em;
+    line-height: 1;
+    vertical-align: top;
+}
+
+.typer-toolbar-dropdown.active:before {
+    box-shadow: 0 0 4px #103492;
+}
+
+.typer-toolbar-controlpane .typer-toolbar-dropdown:before {
+    padding-top: 0;
+    padding-bottom: 0;
+    min-height: 2.67em;
+    line-height: 2.67;
+    box-shadow: none;
+}
+
+.typer-toolbar-dropdown:after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 0;
+    margin: -0.25em 0.5em 0 0;
+    border-top: 0.5em solid #555;
+    border-left: 0.4em solid transparent;
+    border-right: 0.4em solid transparent;
+}
+
+.typer-toolbar-dropdown:hover:after {
+    border-top-color: #212121;
+}
+
+.typer-toolbar-dropdown.disabled:after {
+    border-top-color: #999;
+}
+
+.typer-toolbar-dropdown > button {
+    padding-right: 2em !important;
+}
+
+.typer-toolbar-dropdown .typer-toolbar-controlpane button {
+    padding-left: 2.25em;
+}
+
+.typer-toolbar-dropdown .typer-toolbar-controlpane button.active {
+    background-color: transparent;
+}
+
+.typer-toolbar-dropdown .typer-toolbar-controlpane button.active:before {
+    position: absolute;
+    content: 'done';
+    font-family: 'Material Icons';
+    font-feature-settings: "liga" 1;
+    top: 50%;
+    left: 0.25em;
+    line-height: 1;
+    margin-top: -0.5em;
+    text-transform: none;
+    font-size: 150%;
+    color: #999;
+}
+
+.typer-toolbar-menu-label {
+    display: table-cell;
+    width: 100%;
+}
+
+.typer-toolbar-menu-label-annotate {
+    display: table-cell;
+    color: #aeb8c2;
+    padding-left: 4em;
+    font-weight: normal;
+}
