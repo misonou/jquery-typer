@@ -94,7 +94,9 @@
             });
             var controls = [];
             $.each(controlsProto, function (i, v) {
-                controls.push(v); 
+                v.name = v.name || i;
+                v.label = v.label || Typer.toolbar.labels[v.name] || v.name;
+                controls.push(v);
             });
             control.controls = controls;
         } else if (typeof control.createChildren === 'function') {
@@ -111,15 +113,26 @@
         control = control || toolbar;
         control.bindData = [];
 
-        function replacePlaceholder(t) {
-            var element = $(toolbar.renderer[t] || '<div><br x:t="children"></div>')[0];
+        function bindPlaceholder(element) {
             $(element).find('*').andSelf().filter('[x\\:bind]').each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:bind'));
                 control.bindData.push([v, t.params]);
-            });
+            }).removeAttr('x:bind');
+        }
+
+        function replacePlaceholder(t) {
+            var element = $(toolbar.renderer[t] || '<div><br x:t="children"></div>')[0];
+            bindPlaceholder(element);
             $('[x\\:t]', element).each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:t'));
-                $(v).replaceWith(typeof toolbar.renderer[t.name] === 'function' ? toolbar.renderer[t.name](toolbar, control, t.params) : replacePlaceholder(t.name));
+                var element;
+                if (typeof toolbar.renderer[t.name] === 'function') {
+                    element = $(toolbar.renderer[t.name](toolbar, control, t.params));
+                    bindPlaceholder(element);
+                } else {
+                    element = replacePlaceholder(t.name);
+                }
+                $(v).replaceWith(element);
             });
             return element;
         }
@@ -128,6 +141,9 @@
         $(control.element).bind(toolbar.renderer[control.type + 'ExecuteOn'], function () {
             toolbar.execute(control);
         });
+        if (toolbar.renderer[control.type + 'Init']) {
+            toolbar.renderer[control.type + 'Init'](toolbar, control);
+        }
         return control.element;
     }
 
@@ -168,7 +184,7 @@
                     });
                 });
             }
-            
+
             var $elm = $(control.element);
             $elm.prop('disabled', disabled);
             if (toolbar.options.controlDisabledClass) {
@@ -196,11 +212,11 @@
         resolveControls(toolbar);
         toolbar.element = renderControl(toolbar);
 
-        var $elm = $(toolbar.element).addClass('typer-toolbar');
+        var $elm = $(toolbar.element).addClass('typer-ui typer-ui-toolbar');
         if (container) {
             $elm.appendTo(container);
         } else {
-            $elm.addClass('typer-toolbar-floating').css('z-index', 1000);
+            $elm.addClass('typer-ui-toolbar-floating').css('z-index', 1000);
             $elm.mousedown(function (e) {
                 var pos = $elm.position();
                 if (e.target === toolbar.element) {
@@ -276,6 +292,7 @@
     }
 
     Typer.widgets.toolbar = {
+        inline: true,
         options: {
             container: '',
             controlActiveClass: 'active',
@@ -303,6 +320,7 @@
         },
         init: function (e) {
             var toolbar = e.widget;
+            toolbar.state = {};
             toolbar.controls = toolbar.options.controls || '__root__';
             toolbar.renderer = toolbarRenderer[toolbar.options.renderer] || toolbarRenderer.default;
             initToolbar(toolbar, toolbar.options.container);
@@ -380,6 +398,7 @@
         stateChange: function (e) {
             if (activeToolbar) {
                 updateControl(activeToolbar);
+                showToolbar(activeToolbar);
             }
         }
     };
@@ -392,8 +411,8 @@
         type: 'button'
     });
 
-    var toolbarDropDown = define({
-        type: 'dropDown',
+    var toolbarDropdown = define({
+        type: 'dropdown',
         stateChange: function (toolbar, self) {
             $.each(self.controls, function (i, v) {
                 if (toolbar.active(v)) {
@@ -420,9 +439,12 @@
         $.extend(this, params);
     });
 
+    var toolbarTextbox = define({
+        type: 'textbox'
+    });
+
     var formattingButton = define(toolbarButton, function (command) {
         this._super({
-            name: command,
             dependsOn: command,
             execute: function (toolbar) {
                 toolbar.typer.invoke(command);
@@ -438,7 +460,6 @@
 
     var insertElementButton = define(toolbarButton, function (name, tagName, defaultAttr, callback) {
         this._super({
-            name: name,
             execute: function (toolbar) {
                 $.when((callback || defaultAttr)(toolbar)).done(function (attrs) {
                     toolbar.typer.invoke(function (tx) {
@@ -462,9 +483,12 @@
         // Basic controls groups
         '__root__': toolbarGroup('g:* -g:widget'),
         'g:history': toolbarGroup('history:*'),
-        'g:insert': toolbarGroup('insert:*'),
+        'g:insert': toolbarGroup('insert:*', {
+            enabled: function (toolbar) {
+                return toolbar.typer.document.rootNode.nodeType !== Typer.NODE_EDITABLE_INLINE;
+            }
+        }),
         'g:formatting': toolbarGroup('formatting:paragraph formatting:inlineStyle formatting:*', {
-            hiddenWhenDisabled: true,
             enabled: function (toolbar) {
                 return !!toolbar.state.formatting;
             }
@@ -483,8 +507,7 @@
         'formatting:justifyRight': formattingButton('justifyRight'),
 
         // Text style and formatting drop-down menus
-        'formatting:paragraph': toolbarDropDown({
-            name: 'paragraph',
+        'formatting:paragraph': toolbarDropdown({
             dependsOn: 'formatting',
             hiddenWhenDisabled: true,
             createChildren: function (toolbar) {
@@ -502,8 +525,7 @@
                 });
             }
         }),
-        'formatting:inlineStyle': toolbarDropDown({
-            name: 'inlineStyle',
+        'formatting:inlineStyle': toolbarDropdown({
             dependsOn: 'applyClass',
             hiddenWhenDisabled: true,
             createChildren: function (toolbar) {
@@ -530,7 +552,6 @@
             return $.when(toolbar.options.selectImage());
         }),
         'insert:link': toolbarButton({
-            name: 'insertLink',
             dependsOn: 'createLink',
             execute: function (toolbar) {
                 $.when(toolbar.options.selectLink({
@@ -547,7 +568,6 @@
 
         // History controls
         'history:undo': toolbarButton({
-            name: 'undo',
             execute: function (toolbar) {
                 toolbar.typer.undo();
             },
@@ -556,7 +576,6 @@
             }
         }),
         'history:redo': toolbarButton({
-            name: 'redo',
             execute: function (toolbar) {
                 toolbar.typer.redo();
             },
@@ -583,7 +602,6 @@
             }
         }),
         'widget:delete': toolbarButton({
-            name: 'delete',
             execute: function (toolbar) {
                 toolbar.widget.remove();
             },
@@ -594,9 +612,8 @@
 
         // Multimedia controls
         'media:filePicker': toolbarButton({
-            name: 'filePicker',
             stateChange: function (toolbar, self) {
-                self.label = (/(?:^|\/)(.+)$/.exec($(toolbar.widget.element).attr('src')) || [''])[0];
+                self.label = (/(?:^|\/)([^/]+)$/.exec($(toolbar.widget.element).attr('src')) || [])[1] || '';
             },
             execute: function (toolbar) {
                 var currentValue = $(toolbar.widget.element).attr('src');
@@ -613,58 +630,20 @@
      * Built-in Renderers
      * ********************************/
 
-    var DEFAULT_BUTTONS_LABEL = {
-        createLink: 'Insert Link',
-        bold: 'Bold',
-        insertAnchor: 'Insert Anchor',
-        insertImage: 'Insert Photo',
-        italic: 'Italic',
-        indent: 'Indent',
-        insertUnorderedList: 'Bullet List',
-        insertOrderedList: 'Numbered List',
-        justifyCenter: 'Align Center',
-        justifyLeft: 'Align Left',
-        justifyRight: 'Align Right',
-        outdent: 'Outdent',
-        redo: 'Redo',
-        underline: 'Underlined',
-        undo: 'Undo',
-        delete: 'Delete',
-        formatting: 'Formatting',
-        inlineStyle: 'Inline Style'
-    };
-    
-    var MATERIAL_ICONS = {
-        undo: 'undo',
-        redo: 'redo',
-        insertAnchor: 'label',
-        insertImage: 'insert_photo',
-        insertVideo: 'videocam',
-        tableTable: 'border_all',
-        bold: 'format_bold',
-        italic: 'format_italic',
-        underline: 'format_underlined',
-        insertUnorderedList: 'format_list_bulleted',
-        insertOrderedList: 'format_list_numbered',
-        indent: 'format_indent_increase',
-        outdent: 'format_indent_decrease',
-        justifyLeft: 'format_align_left',
-        justifyCenter: 'format_align_center',
-        justifyRight: 'format_align_right',
-        insertLink: 'insert_link',
-        delete: 'delete'
-    };
-
     var toolbarRenderer = define({
-        group: '<div class="typer-toolbar-group"><br x:t="children"/></div>',
-        label: '<span class="typer-toolbar-label"><br x:t="icon"/><span x:bind="(_:label)"></span></span>',
-        button: '<button x:bind="(title:label)"><br x:t="label"/></button>',
+        group: '<div class="typer-ui-group" x:bind="(role:name)"><br x:t="children"/></div>',
+        label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
+        labelText: '<span x:bind="(_:label)"></span>',
+        labelIcon: '',
+        button: '<button x:bind="(title:label,role:name)"><br x:t="label"/></button>',
         buttonExecuteOn: 'click',
-        dropDown: '<div class="typer-toolbar-dropdown" x:bind="(title:label)"><select><option x:t="children(t:dropDownItem)"/></select></div>',
-        dropDownExecuteOn: 'change',
-        dropDownStateChange: null,
-        dropDownItem: '<option x:bind="(value:name,_:label)"></option>',
-        children: renderChildControls
+        dropdown: '<div class="typer-ui-dropdown" x:bind="(title:label,role:name)"><select><option x:t="children(t:dropdownItem)"/></select></div>',
+        dropdownExecuteOn: 'change',
+        dropdownItem: '<option x:bind="(value:name,_:label)"></option>',
+        children: renderChildControls,
+        getIcon: function (control, iconSet) {
+            return (Typer.toolbar.icons[control.icon] || Typer.toolbar.icons[control.name] || '')[iconSet] || '';
+        }
     });
 
     toolbarRenderer.default = toolbarRenderer();
@@ -673,26 +652,87 @@
         resources: [
             'https://fonts.googleapis.com/css?family=Roboto:400,500,700',
             'https://fonts.googleapis.com/icon?family=Material+Icons',
-            'https://raw.githubusercontent.com/misonou/jquery-typer/master/css/jquery.typer.material.css'
+            'https://cdn.rawgit.com/misonou/jquery-typer/master/css/jquery.typer.material.css'
         ],
         labelText: function (toolbar, control) {
-            return (MATERIAL_ICONS[control.id] || MATERIAL_ICONS[control.name]) ? '' : control.label;
+            return this.getIcon(control, 'material') ? '' : toolbarRenderer.default.labelText;
         },
-        dropDown: '<div class="typer-toolbar-dropdown typer-toolbar-menu"><button x:bind="(title:label)"><span class="typer-toolbar-label"><br x:t="icon"/><span x:bind="(_:selectedValue)"></span></span></button><div class="typer-toolbar-controlpane"><br x:t="children"></div></div>',
-        dropDownStateChange: function (toolbar, control) { },
-        icon: function (toolbar, control) {
-            var mi = MATERIAL_ICONS[control.icon] || MATERIAL_ICONS[control.name];
-            return mi ? '<i class="material-icons">' + mi + '</i>' : '';
+        labelIcon: function (toolbar, control) {
+            return this.getIcon(control, 'material').replace(/(.+)/, '<i class="material-icons">$1</i>');
+        },
+        dropdown: '<div class="typer-ui-dropdown typer-ui-menu" x:bind="(role:name)"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedValue)"></span></span></button><div class="typer-ui-controlpane"><br x:t="children"></div></div>',
+        textbox: '<div class="typer-ui-textbox" x:bind="(role:name)"><label><br x:t="label"/><div spellcheck="false"></div></label></div>',
+        textboxInit: function (toolbar, control) {
+            $(control.element).toggleClass('empty', !control.value);
+            $('>label>div', control.element).text(control.value || '').typer({
+                inline: true,
+                lineBreak: false,
+                change: function (e, value) {
+                    control.value = value;
+                    $(control.element).toggleClass('empty', !control.value);
+                }
+            });
         }
     });
 
+    /* ********************************
+     * Resources
+     * ********************************/
+
     Typer.toolbar = {
-        labels: DEFAULT_BUTTONS_LABEL,
+        labels: {},
+        icons: {},
         controls: definedControls,
         renderer: toolbarRenderer,
         button: toolbarButton,
-        dropDown: toolbarDropDown,
-        group: toolbarGroup
+        dropdown: toolbarDropdown,
+        group: toolbarGroup,
+        textbox: toolbarTextbox
     };
+
+    $.extend(Typer.toolbar.labels, {
+        'formatting:bold': 'Bold',
+        'formatting:italic': 'Italic',
+        'formatting:underline': 'Underlined',
+        'formatting:unorderedList': 'Bullet List',
+        'formatting:orderedList': 'Numbered List',
+        'formatting:indent': 'Indent',
+        'formatting:outdent': 'Outdent',
+        'formatting:justifyLeft': 'Align Left',
+        'formatting:justifyCenter': 'Align Center',
+        'formatting:justifyRight': 'Align Right',
+        'formatting:paragraph': 'Formatting',
+        'formatting:inlineStyle': 'Text Style',
+        'insert:anchor': 'Insert Anchor',
+        'insert:image': 'Insert Photo',
+        'insert:link': 'Insert Link',
+        'history:undo': 'Undo',
+        'history:redo': 'Redo',
+        'widget:delete': 'Delete',
+        'media:filePicker': 'Pick File'
+    });
+
+    $.each({
+        'formatting:bold': 'format_bold',
+        'formatting:italic': 'format_italic',
+        'formatting:underline': 'format_underlined',
+        'formatting:unorderedList': 'format_list_bulleted',
+        'formatting:orderedList': 'format_list_numbered',
+        'formatting:indent': 'format_indent_increase',
+        'formatting:outdent': 'format_indent_decrease',
+        'formatting:justifyLeft': 'format_align_left',
+        'formatting:justifyCenter': 'format_align_center',
+        'formatting:justifyRight': 'format_align_right',
+        'insert:anchor': 'label',
+        'insert:image': 'insert_photo',
+        'insert:link': 'insert_link',
+        'insert:video': 'videocam',
+        'history:undo': 'undo',
+        'history:redo': 'redo',
+        'widget:delete': 'delete',
+    }, function (i, v) {
+        Typer.toolbar.icons[i] = {};
+        Typer.toolbar.icons[i].material = v;
+    });
 
 } (jQuery, window.Typer));

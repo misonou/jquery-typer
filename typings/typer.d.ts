@@ -15,6 +15,7 @@ declare enum TyperNodeType {
     NODE_PARAGRAPH = 4,
     NODE_OUTER_PARAGRAPH = 8,
     NODE_INLINE = 16,
+    NODE_EDITABLE_INLINE = 32,
     NODE_SHOW_EDITABLE = 4096,
 }
 
@@ -22,11 +23,7 @@ interface Map<T> {
     [name: string]: T;
 }
 
-interface Iterable<T> {
-    currentNode: T;
-
-    previousNode(): T;
-    nextNode(): T;
+interface Iterator<T> {
 }
 
 interface Callback<T> {
@@ -34,14 +31,14 @@ interface Callback<T> {
 }
 
 interface TyperEventHandler {
-    (event: TyperEvent): any;
+    (event: TyperEvent, ...rest): any;
 }
 
 interface TyperCommand {
     (tx: TyperTransaction, ...rest): any;
 }
 
-interface TyperWidgetBase {
+interface TyperEventReceiver extends Map<TyperEventHandler> {
     init?: TyperEventHandler;
     destroy?: TyperEventHandler;
     change?: TyperEventHandler;
@@ -49,6 +46,10 @@ interface TyperWidgetBase {
     stateChange?: TyperEventHandler;
     focusin?: TyperEventHandler;
     focusout?: TyperEventHandler;
+    widgetInit?: TyperEventHandler;
+    widgetDestory?: TyperEventHandler;
+    widgetFocusin?: TyperEventHandler;
+    widgetFocusout?: TyperEventHandler;
 }
 
 interface TyperStatic {
@@ -56,13 +57,22 @@ interface TyperStatic {
     readonly COLLAPSE_START_OUTSIDE: CollapseModeIntValue;
     readonly COLLAPSE_END_INSIDE: CollapseModeIntValue;
     readonly COLLAPSE_END_OUTSIDE: CollapseModeIntValue;
+    readonly NODE_WIDGET: TyperNodeType;
+    readonly NODE_EDITABLE: TyperNodeType;
+    readonly NODE_PARAGRAPH: TyperNodeType;
+    readonly NODE_OUTER_PARAGRAPH: TyperNodeType;
+    readonly NODE_INLINE: TyperNodeType;
+    readonly NODE_EDITABLE_INLINE: TyperNodeType;
+    readonly NODE_SHOW_EDITABLE: TyperNodeType;
+    readonly ZWSP: string;
+    readonly ZWSP_ENTITY: string;
 
     new (options: TyperOptions): Typer;
 
     widgets: Map<TyperWidgetDefinition>;
 
-    iterate<T>(iterator: Iterable<T>, callback: Callback<T>, from?: T): void;
-    iterateToArray<T>(iterator: Iterable<T>, callback: Callback<T>, from?: T): any[];
+    iterate<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): void;
+    iterateToArray<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): any[];
     compareAttrs(a: Node, b: Node): boolean;
     comparePosition(a: Node, b: Node): number;
     compareRangePosition(a: Range | Node, b: Range | Node): number;
@@ -78,8 +88,9 @@ interface TyperStatic {
     createRange(start: Range, end: Range): Range;
 }
 
-interface Typer extends TyperWidgetBase {
+interface Typer {
     readonly element: Element;
+    readonly document: TyperDocument;
 
     canUndo(): boolean;
     canRedo(): boolean;
@@ -98,7 +109,7 @@ interface Typer extends TyperWidgetBase {
     select(start: Range, end: Range): void;
 }
 
-interface TyperOptions extends Map<any>, TyperWidgetBase {
+interface TyperOptions extends Map<any>, TyperEventReceiver {
     element: Element;
     controlClasses?: string;
     controlElements?: string;
@@ -107,8 +118,9 @@ interface TyperOptions extends Map<any>, TyperWidgetBase {
     widgets?: TyperWidgetDefinition[];
 }
 
-interface TyperWidgetDefinition extends Map<any>, TyperWidgetBase {
-    element: string | Element;
+interface TyperWidgetDefinition extends Map<any>, TyperEventReceiver {
+    element?: string | Element;
+    editable?: string;
     inline?: boolean;
     commands?: Map<TyperCommand>;
 }
@@ -171,6 +183,12 @@ interface TyperTransaction {
     select(start: Range, end: Range): void;
 }
 
+interface TyperDocument {
+    readonly rootNode: TyperNode;
+
+    getNode(node: Node): TyperNode;
+}
+
 interface TyperNode {
     readonly containingElement: Element;
     readonly element: Element | Range;
@@ -187,9 +205,7 @@ interface TyperNode {
     cloneDOMNodes(deep: boolean): Node;
 }
 
-interface TyperTreeWalker extends Iterable<TyperNode> {
-    new (root: TyperNode, whatToShow: number, filter?: (node: TyperNode) => NodeFilterResult): TyperTreeWalker;
-
+interface TyperTreeWalker extends Iterator<TyperNode> {
     readonly whatToShow: number;
     readonly filter: (node: TyperNode) => NodeFilterResult;
     readonly root: TyperNode;
@@ -198,15 +214,13 @@ interface TyperTreeWalker extends Iterable<TyperNode> {
     previousSibling(): TyperNode;
     nextSibling(): TyperNode;
     firstChild(): TyperNode;
-    nextSlastChildibling(): TyperNode;
+    lastChild(): TyperNode;
     parentNode(): TyperNode;
     previousNode(): TyperNode;
     nextNode(): TyperNode;
 }
 
-interface TyperDOMNodeIterator extends Iterable<Node> {
-    new (root: Node | TyperTreeWalker, whatToShow: number, filter?: (node: Node) => NodeFilterResult): TyperDOMNodeIterator;
-
+interface TyperDOMNodeIterator extends Iterator<Node> {
     readonly whatToShow: number;
     readonly filter: (node: Node) => NodeFilterResult;
     currentNode: Node;
