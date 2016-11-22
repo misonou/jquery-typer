@@ -1,3 +1,11 @@
+## 0.8.3 / 2016-11-22
+
+- Add support for single paragraph mode
+- Updates on toolbar widget
+- Fix: reference error for browser without native Map support
+- Fix: issue on inserting new line
+- Fix: issue related with copy and paste
+
 ## 0.8.2 / 2016-11-03
 
 - Add widget events
@@ -7,7 +15,6 @@
 - Fix: insert content in empty editable area
 - Fix: insert text content before or after widgets
 - Fix: issue with jQuery < 1.12
-
 
 ## 0.8.1 / 2016-09-06
 

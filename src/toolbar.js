@@ -269,8 +269,8 @@
                     toolbar.position = 'bottom';
                 }
                 $(toolbar.element).css({
-                    left: rect.left + document.body.scrollLeft,
-                    top: (toolbar.position === 'bottom' ? (rect.top + rect.height) + 10 : rect.top - height - 10) + document.body.scrollTop
+                    left: rect.left + $(window).scrollLeft(),
+                    top: (toolbar.position === 'bottom' ? (rect.top + rect.height) + 10 : rect.top - height - 10) + $(window).scrollTop()
                 });
             }
         }

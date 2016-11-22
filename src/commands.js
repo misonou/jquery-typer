@@ -46,7 +46,7 @@
             var selector = tagName + (className || '').replace(/^(.)/, '.$1');
             if (v.tagName.toLowerCase() !== 'li') {
                 var list = $(v).prev(selector)[0] || $(v).next(selector)[0] || $(createElement(tagName, className)).insertAfter(v)[0];
-                $(v).wrap('<li>')[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list).contents().unwrap();
+                $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
             } else if (!$(v.parentNode).is(selector)) {
                 $(v.parentNode).wrap(createElement(tagName, className)).contents().unwrap();
             }

@@ -917,7 +917,7 @@
                     }
                     var content = isParagraphOrInline(node) && createRange(node.element, range)[mode]();
                     if (cloneNode) {
-                        if (is(node, NODE_WIDGET | NODE_OUTER_PARAGRAPH) || (is(node, NODE_EDITABLE | NODE_EDITABLE_INLINE) && node.element !== topElement) || (content && content.firstChild.nodeType === 1 && content.firstChild.tagName !== node.element.tagName)) {
+                        if (is(node, NODE_WIDGET | NODE_OUTER_PARAGRAPH) || (is(node, NODE_EDITABLE | NODE_EDITABLE_INLINE) && node.element !== topElement) || (content && tagName(content.firstChild) !== tagName(node.element))) {
                             var clonedNode = node.cloneDOMNodes(false);
                             stack[0][1].appendChild(clonedNode);
                             if (!is(clonedNode, DocumentFragment)) {
@@ -941,21 +941,18 @@
         }
 
         function normalizeRawContents(content) {
-            if (!content) {
-                return [];
-            }
-            if (typeof content === 'string') {
-                content = content.replace(/\u000d/g, '').replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>').replace(/<p>(<|$)/g, '<p>' + ZWSP_ENTITIY + '$1') || ZWSP_ENTITIY;
+            if (typeof content !== 'string' || content.charAt(0) !== '<') {
+                content = String(content).replace(/\u000d/g, '').replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>').replace(/<p>(<|$)/g, '<p>' + ZWSP_ENTITIY + '$1') || ZWSP_ENTITIY;
                 return $.parseHTML('<p>' + content + '</p>');
             }
-            return $.map($.makeArray(content), function (v) {
+            return $.map($.parseHTML(content), function (v) {
                 // make sure no dangling text exists in the inserting document
                 return v.nodeType === 3 ? $(v).wrap('<p>').parent()[0] : v;
             });
         }
 
         function insertContents(content, range) {
-            content = normalizeRawContents(content);
+            content = is(content, Node) || normalizeRawContents(content);
             if (range !== undefined && !is(range, Range)) {
                 range = createRange.apply(null, variadic(arguments, 1));
             }
@@ -1239,7 +1236,8 @@
                 }
             }
 
-            $self.mousedown(function () {
+            $self.mousedown(function (e) {
+                e.stopPropagation();
                 mousedown = true;
                 var handlers = {
                     mousemove: function (e) {
@@ -1263,10 +1261,12 @@
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
+                e.stopPropagation();
                 composition = e.type.substr(-3) !== 'end';
             });
 
             $self.bind('keydown keypress keyup', function (e) {
+                e.stopPropagation();
                 triggerWidgetFocusout();
                 if (composition) {
                     e.stopImmediatePropagation();
@@ -1311,6 +1311,7 @@
             });
 
             $self.bind('textInput', function () {
+                e.stopPropagation();
                 if (!hasKeyEvent) {
                     undoable.snapshot(50);
                 }
@@ -1331,6 +1332,7 @@
             });
 
             $self.bind('dragstart', function (e) {
+                e.stopPropagation();
                 var handlers = {
                     drop: function (e) {
                         var content = extractContents(!e.ctrlKey);
@@ -1355,6 +1357,7 @@
                     clipboardData.setData('text/html', $('<div id="Typer">').append(content)[0].outerHTML);
                     clipboardData.setData('application/x-typer', 'true');
                 }
+                e.stopPropagation();
                 e.preventDefault();
             });
 
@@ -1362,7 +1365,7 @@
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
                 if ($.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
-                    var content = $(html).filter('#Typer').contents().get();
+                    var content = createDocumentFragment($(html).filter('#Typer').contents());
                     insertContents(content);
                 } else if ($.inArray('text/plain', clipboardData.types) >= 0) {
                     insertContents(clipboardData.getData('text/plain'));
@@ -1370,6 +1373,7 @@
                     insertContents(clipboardData.getData('Text'));
                 }
                 undoable.snapshot();
+                e.stopPropagation();
                 e.preventDefault();
                 if (IS_IE) {
                     // IE put the caret in the wrong position after user code
@@ -1955,7 +1959,7 @@
         e.preventDefault();
     });
 
-    // polyfill for Map by jQuery.data()
+    // polyfill for Map
     // simple and good enough as we only need to associate data to a DOM object
     if (typeof Map === 'undefined') {
         Map = function () {
@@ -1965,18 +1969,18 @@
         };
         Map.prototype = {
             get: function (key) {
-                return $(key).data(this.__dataKey__);
+                return key[this.__dataKey__];
             },
             set: function (key, value) {
-                $(key).data(this.__dataKey__, value);
+                key[this.__dataKey__] = value;
             },
             has: function (key) {
-                return this.__dataKey__ in $(key).data();
+                return this.__dataKey__ in key;
             },
             delete: function (key) {
-                delete $(key).data()[this.__dataKey__];
+                delete key[this.__dataKey__];
             }
         };
     }
 
-} (jQuery, window, document, String, Node, Range, DocumentFragment, Map, []));
+} (jQuery, window, document, String, Node, Range, DocumentFragment, window.Map, []));

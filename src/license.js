@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.8.2
+ * jQuery Typer Plugin v0.8.3
  *
  * The MIT License (MIT)
  *
