@@ -19,15 +19,13 @@
         subscript: 'sub'
     };
 
-    var createElement = Typer.createElement;
-
     function justifyCommand(tx) {
         $(tx.selection.paragraphElements).attr('align', aligns[tx.commandName]);
     }
 
     function inlineStyleCommand(tx) {
         if (tx.selection.isCaret) {
-            tx.insertHtml(createElement(inlineStyleTagNames[tx.commandName]));
+            tx.insertHtml(Typer.createElement(inlineStyleTagNames[tx.commandName]));
         } else {
             // IE will nest <sub> and <sup> elements on the subscript and superscript command
             // clear the subscript or superscript format before applying the opposite command
@@ -45,10 +43,10 @@
         $.each(tx.selection.paragraphElements, function (i, v) {
             var selector = tagName + (className || '').replace(/^(.)/, '.$1');
             if (v.tagName.toLowerCase() !== 'li') {
-                var list = $(v).prev(selector)[0] || $(v).next(selector)[0] || $(createElement(tagName, className)).insertAfter(v)[0];
+                var list = $(v).prev(selector)[0] || $(v).next(selector)[0] || $(Typer.createElement(tagName, className)).insertAfter(v)[0];
                 $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
             } else if (!$(v.parentNode).is(selector)) {
-                $(v.parentNode).wrap(createElement(tagName, className)).contents().unwrap();
+                $(v.parentNode).wrap(Typer.createElement(tagName, className)).contents().unwrap();
             }
         });
         tx.restoreSelection();
@@ -58,6 +56,7 @@
         Typer.widgets[name] = {
             commands: commands
         };
+        Typer.defaultOptions[name] = true;
         (hotkeys || '').replace(/(\w+):(\w+)/g, function (v, a, b) {
             Typer.widgets[name][a] = function (e) {
                 e.typer.invoke(b);
@@ -73,11 +72,11 @@
         subscript: inlineStyleCommand,
         applyClass: function (tx, className) {
             var paragraphs = tx.selection.paragraphElements;
-            $(tx.getSelectedTextNodes()).wrap(createElement('span', className));
+            $(tx.getSelectedTextNodes()).wrap(Typer.createElement('span', className));
             $('span:has(span)', paragraphs).each(function (i, v) {
                 $(v).contents().unwrap().filter(function (i, v) {
                     return v.nodeType === 3;
-                }).wrap(createElement('span', v.className));
+                }).wrap(Typer.createElement('span', v.className));
             });
             $('span[class=""]', paragraphs).contents().unwrap();
             tx.restoreSelection();
@@ -94,7 +93,7 @@
             if (m[1] === 'ol' || m[1] === 'ul') {
                 insertListCommand(tx, m[1], m[2]);
             } else {
-                $(tx.selection.paragraphElements).not('li').wrap(createElement(m[1] || 'p', m[2])).contents().unwrap();
+                $(tx.selection.paragraphElements).not('li').wrap(Typer.createElement(m[1] || 'p', m[2])).contents().unwrap();
             }
             tx.restoreSelection();
         },
@@ -133,7 +132,7 @@
                         $(v).children(OUTER_PTAG).insertAfter(list);
                     }
                 }
-                $(createElement(parentList ? 'li' : 'p')).append(v.childNodes).insertAfter(parentList || list);
+                $(Typer.createElement(parentList ? 'li' : 'p')).append(v.childNodes).insertAfter(parentList || list);
                 tx.remove(v);
             });
         },

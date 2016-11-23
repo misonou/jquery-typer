@@ -1,4 +1,4 @@
-(function ($, window, document, String, Node, Range, DocumentFragment, Map, array) {
+(function ($, window, document, String, Node, Range, DocumentFragment, WeakMap, array) {
     'use strict';
 
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
@@ -369,30 +369,14 @@
     }
 
     function Typer(options) {
-        options = $.extend({
-            element: null,
-            controlClasses: '',
-            controlElements: '',
-            attributes: 'title target href src align name class width height',
-            historyLevel: 100,
-            widgets: [],
-            inline: false,
-            lineBreak: true,
-            inlineStyle: true,
-            formatting: true,
-            list: true,
-            link: true,
-            change: null,
-            beforeStateChange: null,
-            stateChange: null
-        }, options);
+        options = $.extend({}, Typer.defaultOptions, options);
 
         var typer = this;
         var typerDocument;
         var topElement = options.element;
         var topNodeType = options.inline || is(topElement, INNER_PTAG) ? NODE_EDITABLE_INLINE : NODE_EDITABLE;
         var widgets = [];
-        var widgetOptions = [options].concat(options.widgets);
+        var widgetOptions = {};
         var currentSelection;
         var undoable = {};
         var userRange;
@@ -444,7 +428,7 @@
         }
 
         function createTyperDocument(rootElement) {
-            var nodeMap = new Map();
+            var nodeMap = new WeakMap();
             var dirtyElements = [];
             var observer;
 
@@ -654,8 +638,6 @@
                 } else if (1 / offset < 0) {
                     while (iterator.nextNode());
                     offset = iterator.currentNode.length;
-                } else {
-                    iterator.nextNode();
                 }
                 node = iterator.currentNode;
             }
@@ -1412,36 +1394,42 @@
                             triggerWidgetFocusout();
                         }
                         triggerEvent(EVENT_ALL, e.type);
+                    } else if (e.type === 'focusin') {
+                        userFocus = null;
                     }
                 });
             });
         }
 
-        initUndoable();
-        normalizeInputEvent();
-
-        $.each(Typer.widgets, function (i, v) {
-            if ((options[i] === true || $.isPlainObject(options[i])) && (v.inline || topNodeType !== NODE_EDITABLE_INLINE)) {
-                var inst = Object.create(v);
-                inst.options = Object.create(inst.options || null);
-                $.extend(inst.options, options[i]);
-                widgetOptions.push(inst);
-            }
-        });
-        widgetOptions.push({
-            // make all other tags that are not considered paragraphs and inlines to be widgets
-            // to avoid unknown behavior while editing
-            element: ':not(' + INNER_PTAG + ',br,a,b,em,i,u,small,strong,sub,sup,ins,del,mark,span)'
-        }, {
+        function initWidgets() {
+            $.extend(widgetOptions, [options].concat(options.widgets));
+            $.each(Typer.widgets, function (i, v) {
+                if ((options[i] === true || $.isPlainObject(options[i])) && (v.inline || topNodeType !== NODE_EDITABLE_INLINE)) {
+                    widgetOptions[i] = Object.create(v);
+                    widgetOptions[i].options = Object.create(widgetOptions[i].options || null);
+                    $.extend(widgetOptions[i].options, options[i]);
+                }
+            });
+            widgetOptions.__unknown__ = {
+                // make all other tags that are not considered paragraphs and inlines to be widgets
+                // to avoid unknown behavior while editing
+                element: ':not(' + INNER_PTAG + ',br,a,b,em,i,u,small,strong,sub,sup,ins,del,mark,span)'
+            };
+            widgetOptions.__history__ = {
                 ctrlZ: undoable.undo,
                 ctrlY: undoable.redo,
                 ctrlShiftZ: undoable.redo
+            };
+            $.each(widgetOptions, function (i, v) {
+                if (!v.element) {
+                    widgets.push(new TyperWidget(typer, i, null, v.options));
+                }
             });
-        $.each(widgetOptions, function (i, v) {
-            if (!v.element) {
-                widgets.push(new TyperWidget(typer, i, null, v.options));
-            }
-        });
+        }
+
+        initUndoable();
+        initWidgets();
+        normalizeInputEvent();
 
         var retainFocusHandlers = {
             focusin: function (e) {
@@ -1582,6 +1570,12 @@
         rangeIntersects: rangeIntersects,
         rangeCovers: rangeCovers,
         getRangeFromMouseEvent: getRangeFromMouseEvent,
+        defaultOptions: {
+            controlClasses: '',
+            controlElements: '',
+            attributes: 'title target href src align name class width height',
+            historyLevel: 100
+        },
         widgets: {}
     });
 
@@ -1959,15 +1953,15 @@
         e.preventDefault();
     });
 
-    // polyfill for Map
+    // polyfill for WeakMap
     // simple and good enough as we only need to associate data to a DOM object
-    if (typeof Map === 'undefined') {
-        Map = function () {
+    if (typeof WeakMap === 'undefined') {
+        WeakMap = function () {
             Object.defineProperty(this, '__dataKey__', {
                 value: 'typer' + Math.random().toString(36).substr(2, 8)
             });
         };
-        Map.prototype = {
+        WeakMap.prototype = {
             get: function (key) {
                 return key[this.__dataKey__];
             },
@@ -1983,4 +1977,4 @@
         };
     }
 
-} (jQuery, window, document, String, Node, Range, DocumentFragment, window.Map, []));
+} (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, []));

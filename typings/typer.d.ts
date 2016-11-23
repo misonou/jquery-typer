@@ -70,6 +70,7 @@ interface TyperStatic {
     new (options: TyperOptions): Typer;
 
     widgets: Map<TyperWidgetDefinition>;
+    defaultOptions: TyperOptions;
 
     iterate<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): void;
     iterateToArray<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): any[];
