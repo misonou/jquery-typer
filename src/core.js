@@ -369,7 +369,7 @@
     }
 
     function Typer(options) {
-        options = $.extend({}, Typer.defaultOptions, options);
+        options = $.extend(true, {}, Typer.defaultOptions, options);
 
         var typer = this;
         var typerDocument;
@@ -698,11 +698,12 @@
                 range = createRange.apply(null, variadic(arguments));
             }
             var focusElement = range.commonAncestorContainer;
-            if (range.startContainer === range.endContainer && range.startOffset === range.endOffset - 1) {
+            if (range.startContainer === range.endContainer && range.endOffset - range.startOffset <= 1) {
                 focusElement = is(focusElement.childNodes[range.startOffset], Element) || focusElement;
             }
             if (!containsOrEquals(topElement, focusElement)) {
                 focusElement = topElement;
+                range = createRange(topElement);
             }
             var focusNode = typerDocument.getNode(focusElement);
             if (is(focusNode, NODE_WIDGET)) {
@@ -1292,7 +1293,7 @@
                 }
             });
 
-            $self.bind('textInput', function () {
+            $self.bind('textInput', function (e) {
                 e.stopPropagation();
                 if (!hasKeyEvent) {
                     undoable.snapshot(50);
