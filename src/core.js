@@ -28,6 +28,7 @@
     var isFunction = $.isFunction;
     var selection = window.getSelection();
     var suppressIETextInput;
+    var windowFocusedOut;
 
     function TyperSelection(selection) {
         if (is(selection, TyperSelection)) {
@@ -1388,15 +1389,20 @@
                 }
             });
 
-            $self.bind('focusin focusout', function (e) {
+            $self.bind('focusin', function () {
                 setTimeout(function () {
                     if (!userFocus) {
-                        if (e.type === 'focusout') {
-                            triggerWidgetFocusout();
-                        }
-                        triggerEvent(EVENT_ALL, e.type);
-                    } else if (e.type === 'focusin') {
-                        userFocus = null;
+                        triggerEvent(EVENT_ALL, 'focusin');
+                    }
+                    userFocus = null;
+                });
+            });
+
+            $self.bind('focusout', function () {
+                setTimeout(function () {
+                    if (!windowFocusedOut && !userFocus) {
+                        triggerWidgetFocusout();
+                        triggerEvent(EVENT_ALL, 'focusout');
                     }
                 });
             });
@@ -1952,6 +1958,12 @@
     }
     $(document.body).bind('mscontrolselect', function (e) {
         e.preventDefault();
+    });
+
+    $(window).bind('focusin focusout', function (e) {
+        if (e.target === window) {
+            windowFocusedOut = e.type === 'focusout';
+        }
     });
 
     // polyfill for WeakMap
