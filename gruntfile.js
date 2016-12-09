@@ -4,8 +4,11 @@ module.exports = function (grunt) {
     grunt.initConfig({
         pkg: grunt.file.readJSON('package.json'),
         concat: {
+            options: {
+                process: true,
+            },
             build: {
-                src: ['src/license.js', 'src/core.js', 'src/{commands,toolbar}.js', 'src/extensions/*'],
+                src: ['src/license.js', 'src/{core,presets,ui}.js', 'src/{themes,extensions}/*'],
                 dest: 'dist/jquery.typer.js'
             }
         },

@@ -28,17 +28,32 @@
     outline: none;
 }
 
+.typer-ui .hidden {
+    display: none !important;
+}
+
+.typer-ui .disabled {
+    opacity: 0.5 !important;
+    pointer-events: none !important;
+    cursor: default !important;
+}
+
 
 /* Material Icons */
+
+.typer-ui-label {
+    display: inline-block;
+    vertical-align: top;
+}
 
 .typer-ui-label .material-icons {
     display: inline-block;
     position: relative;
-    top: -1px;
-    min-width: 1em;
+    width: 1em;
     font-size: 16px;
     line-height: 1;
     vertical-align: middle;
+    overflow: hidden;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
@@ -48,9 +63,12 @@
     margin-left: 0.5em;
 }
 
-.typer-ui-label .material-icons:empty,
 .typer-ui-label .material-icons + span:empty {
     display: none;
+}
+
+.active > .typer-ui-label .material-icons:empty:before {
+    content: 'done';
 }
 
 
@@ -81,33 +99,25 @@
     -ms-user-select: none;
 }
 
-.typer-ui label.hidden,
-.typer-ui button.hidden {
-    display: none !important;
+.typer-ui button > * {
+    position: relative;
 }
 
 .typer-ui label.disabled,
-.typer-ui button.disabled {
+.typer-ui button.disabled,
+.typer-ui .disabled > button {
     background-color: transparent;
-    opacity: 0.5;
-    pointer-events: none;
-    cursor: default;
 }
 
-.typer-ui label:hover,
-.typer-ui label:focus,
-.typer-ui label.active,
+.typer-ui-toolbar label:hover,
+.typer-ui-toolbar label:focus,
+.typer-ui-toolbar label.active,
 .typer-ui button:hover,
 .typer-ui button:focus,
-.typer-ui button.active {
+.typer-ui button.active,
+.typer-ui .active > button {
     background-color: rgba(211, 211, 211, 0.4);
     color: #212121;
-}
-
-.typer-ui button.warn:hover,
-.typer-ui button.warn:focus,
-.typer-ui button.warn.active {
-    background-color: rgba(255, 128, 128, 0.4);
 }
 
 .typer-ui input[type="color"] {
@@ -125,11 +135,13 @@
 
 .typer-ui input[type="checkbox"],
 .typer-ui input[type="radio"] {
+    display: inline-block;
     position: relative;
-    margin: 0 0.5em 0 0;
+    margin: 0;
     width: 1em;
     height: 1em;
     font-size: 16px;
+    vertical-align: middle;
     overflow: visible;
     -webkit-appearance: none;
     -moz-appearance: none;
@@ -190,10 +202,16 @@
     box-shadow: none;
 }
 
+.typer-ui input[type="checkbox"] + .typer-ui-label,
+.typer-ui input[type="radio"] + .typer-ui-label {
+    margin-left: 0.5em;
+}
+
 .typer-ui input[type="text"],
 .typer-ui input[type="date"],
 .typer-ui input[type="month"],
-.typer-ui input[type="password"] {
+.typer-ui input[type="password"],
+.typer-ui input[type="number"] {
     position: relative;
     display: inline-block;
     margin: 0.33em -0.2em 0;
@@ -248,14 +266,6 @@
     padding: 0.5em;
 }
 
-.typer-ui-controlpane input[type="text"],
-.typer-ui-controlpane input[type="date"],
-.typer-ui-controlpane input[type="month"],
-.typer-ui-controlpane input[type="password"],
-.typer-ui-controlpane input[type="number"] {
-    padding: 0 0.2em;
-}
-
 .typer-ui input::-webkit-inner-spin-button,
 .typer-ui input::-webkit-calendar-picker-indicator {
     max-height: 1em;
@@ -305,6 +315,7 @@
     position: absolute;
     padding-left: 10px;
     box-shadow: 0 0 10px;
+    z-index: 1000;
 }
 
 .typer-ui-toolbar-floating:before {
@@ -319,57 +330,79 @@
 }
 
 .typer-ui-group,
-.typer-ui-group > div {
+.typer-ui-group > * {
     display: inline-block;
     position: relative;
     vertical-align: top;
 }
 
-.typer-ui-menu .typer-ui-controlpane {
-    display: flex;
-    flex-direction: column;
+.typer-ui-menu {
+    position: relative;
 }
 
-.typer-ui-menu > .typer-ui-controlpane {
+.typer-ui-menu:hover {
+    z-index: 1;
+}
+
+.typer-ui-menupane {
     display: none;
     position: absolute;
     min-width: 100%;
     background-color: white;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
-    z-index: 10;
-    overflow: hidden;
 }
 
-.typer-ui-menu:hover > .typer-ui-controlpane,
-.typer-ui-menu.active > .typer-ui-controlpane {
+.typer-ui-menupane .typer-ui-menupane {
+    top: 0;
+    left: 100%;
+}
+
+.typer-ui-menu:hover > .typer-ui-menupane,
+.typer-ui-menu.open > .typer-ui-menupane {
     display: block;
+    display: -ms-flexbox;
     display: flex;
+    -ms-flex-direction: column;
     flex-direction: column;
 }
 
-.typer-ui-menu .typer-ui-controlpane button,
-.typer-ui-menu .typer-ui-controlpane label {
+.typer-ui-menupane > *,
+.typer-ui-menupane > .typer-ui-menu > label,
+.typer-ui-menupane > .typer-ui-menu > button {
     display: block;
-    width: 100%;
     box-sizing: border-box;
     align-items: stretch;
     flex-shrink: 0;
 }
 
-@supports (display: flex) {
-    .typer-ui-menu .typer-ui-controlpane button,
-    .typer-ui-menu .typer-ui-controlpane label {
-        width: auto;
-    }
+.typer-ui-menupane label,
+.typer-ui-menupane button {
+    display: -ms-inline-flexbox;
+    display: inline-flex;
+    -ms-flex-wrap: nowrap;
+    align-items: center;
+}
+
+.typer-ui-menupane button .typer-ui-label {
+    width: 100%;
+}
+
+.typer-ui-menupane button .typer-ui-menu-annotation {
+    padding-left: 4em;
+    color: #aeb8c2;
+    font-weight: normal;
+}
+
+.typer-ui-menupane button .typer-ui-menu-annotation:empty {
+    display: none;
 }
 
 .typer-ui-dropdown {
     position: relative;
     background-color: white;
-    line-height: 1;
 }
 
-.typer-ui-controlpane .typer-ui-dropdown {
+.typer-ui-toolbar .typer-ui-dropdown {
     background-color: transparent;
     border-style: none;
     box-shadow: none;
@@ -380,27 +413,6 @@
 .typer-ui-dropdown.disabled {
     color: #999;
     pointer-events: none;
-}
-
-.typer-ui-dropdown[data-selected-value]:before {
-    content: attr(data-selected-value);
-    display: inline-block;
-    padding: 0.5em 1.5em 0.5em 0.5em;
-    min-height: 1em;
-    line-height: 1;
-    vertical-align: top;
-}
-
-.typer-ui-dropdown.active:before {
-    box-shadow: 0 0 4px #103492;
-}
-
-.typer-ui-controlpane .typer-ui-dropdown:before {
-    padding-top: 0;
-    padding-bottom: 0;
-    min-height: 2.67em;
-    line-height: 2.67;
-    box-shadow: none;
 }
 
 .typer-ui-dropdown:after {
@@ -427,54 +439,145 @@
     padding-right: 2em !important;
 }
 
-.typer-ui-dropdown .typer-ui-controlpane button {
-    padding-left: 2.25em;
+.typer-ui-dropdown .typer-ui-menupane button {
+    padding-left: calc(1.25em + 16px);
 }
 
-.typer-ui-dropdown .typer-ui-controlpane button.active {
-    background-color: transparent;
+.typer-ui-dropdown .typer-ui-menupane button.active {
+    background-color: #eee;
 }
 
-.typer-ui-dropdown .typer-ui-controlpane button.active:before {
+.typer-ui-dropdown .typer-ui-menupane button.active:before {
     position: absolute;
     content: 'done';
     font-family: 'Material Icons';
     font-feature-settings: "liga" 1;
     top: 50%;
-    left: 0.25em;
+    left: 0.7em;
     line-height: 1;
     margin-top: -0.5em;
     text-transform: none;
-    font-size: 150%;
-    color: #999;
-}
-
-.typer-ui-textbox label:hover {
-    background-color: transparent;
+    font-size: 16px;
 }
 
 .typer-ui-textbox [contenteditable] {
     display: inline-block;
     position: relative;
-    top: 1px;
-    margin: 0.33em;
-    margin-right: 0;
-    padding: 0 0.25em;
-    border-bottom: 1px solid #aeb8c2;
+    margin: 0 0 0.42em 0.25em;
+    padding: 0.75em 0.25em 0.17em;
+    border-bottom: 1px solid transparent;
     vertical-align: top;
-    line-height: 2;
+    line-height: 1.33;
     cursor: text;
+    flex-grow: 1;
+    -ms-flex: 1;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
 }
 
-.typer-ui-textbox.empty [contenteditable]:before {
+.typer-ui-textbox [contenteditable]:hover,
+.typer-ui-textbox [contenteditable]:focus {
+    border-bottom-color: #aeb8c2;
+}
+
+.typer-ui-textbox.empty [contenteditable] {
+    min-width: 3em;
+}
+
+.typer-ui-textbox.empty [contenteditable]:after {
     content: 'Enter text';
     color: #aeb8c2;
+}
+
+.typer-ui-textbox.empty [contenteditable][data-placeholder]:after {
+    content: attr(data-placeholder);
 }
 
 .typer-ui-textbox.empty [contenteditable]:focus {
     border-bottom-color: #8696b8;
 }
 
-.typer-ui-textbox.empty [contenteditable]:focus:before {
-    content: none;
+.typer-ui-dialog {
+    position: fixed;
+    top: 0;
+    left: 20px;
+    right: 20px;
+    padding: 0.5em;
+    background-color: rgba(238, 238, 238, 0.95);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    -webkit-transform: translateY(-120%);
+    -moz-transform: translateY(-120%);
+    -ms-transform: translateY(-120%);
+    -o-transform: translateY(-120%);
+    transform: translateY(-120%);
+    -webkit-transition: -webkit-transform 0.2s ease-in-out;
+    -moz-transition: -moz-transform 0.2s ease-in-out;
+    -ms-transition: -ms-transform 0.2s ease-in-out;
+    -o-transition: -o-transform 0.2s ease-in-out;
+    transition: transform 0.2s ease-in-out;
+    z-index: 1001;
+}
+
+.typer-ui-dialog.open {
+    -webkit-transform: translateY(0);
+    -moz-transform: translateY(0);
+    -ms-transform: translateY(0);
+    -o-transform: translateY(0);
+    transform: translateY(0);
+}
+
+.typer-ui-dialog.busy:after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.5) url('data:image/gif;,');
+    cursor: progress;
+    z-index: 1000;
+}
+
+.typer-ui-dialog {
+    left: 50%;
+    right: 0;
+    margin-left: -250px;
+    max-width: 500px;
+    background-color: rgba(255, 255, 255, 0.95);
+}
+
+.typer-ui-dialog h1 {
+    margin: 2em 0.75em 0;
+    font-size: 100%;
+    font-weight: normal;
+    color: #555;
+}
+
+.typer-ui-dialog .typer-ui-textbox {
+    display: block !important;
+    height: auto;
+    white-space: normal;
+    word-break: break-all;
+}
+
+.typer-ui-dialog .typer-ui-textbox .typer-ui-label {
+    display: none;
+}
+
+.typer-ui-dialog .typer-ui-textbox [contenteditable] {
+    display: block;
+    background-color: transparent;
+    margin-left: -0.25em;
+    margin-right: -0.25em;
+    border-bottom: 1px solid #aeb8c2;
+}
+
+.typer-ui-dialog .typer-ui-group[role*="buttonset"] {
+    display: block;
+    margin-top: 0.5em;
+    text-align: right;
+    text-transform: uppercase;
+    font-weight: bold;
+    font-size: 80%;
 }

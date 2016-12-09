@@ -15,7 +15,9 @@ declare enum TyperNodeType {
     NODE_PARAGRAPH = 4,
     NODE_OUTER_PARAGRAPH = 8,
     NODE_INLINE = 16,
-    NODE_EDITABLE_INLINE = 32,
+    NODE_EDITABLE_PARAGRAPH = 32,
+    NODE_INLINE_WIDGET = 64,
+    NODE_INLINE_EDITABLE = 128,
     NODE_SHOW_EDITABLE = 4096,
 }
 
@@ -31,11 +33,11 @@ interface Callback<T> {
 }
 
 interface TyperEventHandler {
-    (event: TyperEvent, ...rest): any;
+    (event: TyperEvent, value?: any): any;
 }
 
 interface TyperCommand {
-    (tx: TyperTransaction, ...rest): any;
+    (tx: TyperTransaction, value?: any): any;
 }
 
 interface TyperEventReceiver extends Map<TyperEventHandler> {
@@ -59,10 +61,11 @@ interface TyperStatic {
     readonly COLLAPSE_END_OUTSIDE: CollapseModeIntValue;
     readonly NODE_WIDGET: TyperNodeType;
     readonly NODE_EDITABLE: TyperNodeType;
+    readonly NODE_EDITABLE_PARAGRAPH: TyperNodeType;
     readonly NODE_PARAGRAPH: TyperNodeType;
-    readonly NODE_OUTER_PARAGRAPH: TyperNodeType;
     readonly NODE_INLINE: TyperNodeType;
-    readonly NODE_EDITABLE_INLINE: TyperNodeType;
+    readonly NODE_INLINE_WIDGET: TyperNodeType;
+    readonly NODE_INLINE_EDITABLE: TyperNodeType;
     readonly NODE_SHOW_EDITABLE: TyperNodeType;
     readonly ZWSP: string;
     readonly ZWSP_ENTITY: string;
@@ -81,6 +84,9 @@ interface TyperStatic {
     rangeIntersects(a: Range | Node, b: Range | Node): boolean;
     rangeCovers(a: Range | Node, b: Range | Node): boolean;
     getRangeFromMouseEvent(e: MouseEvent): Range;
+    createElement(tagName: string): Element;
+    createTextNode(nodeValue: string): Text;
+    trim(str: string): string;
 
     createRange(selection: TyperSelection): Range;
     createRange(startNode: Node, collapse: CollapseMode): Range;
@@ -98,6 +104,8 @@ interface Typer {
     undo(): void;
     redo(): void;
     hasCommand(commandName: string): boolean;
+    widgetEnabled(widgetName: string): boolean;
+    getStaticWidgets(): TyperWidget[];
     getSelection(): TyperSelection;
     retainFocus(element: Element): void;
     moveCaret(node: Node, offset: number): void;
@@ -112,9 +120,8 @@ interface Typer {
 
 interface TyperOptions extends Map<any>, TyperEventReceiver {
     element: Element;
-    controlClasses?: string;
-    controlElements?: string;
-    attributes?: string;
+    inline?: boolean;
+    disallowedElement?: string;
     historyLevel?: number;
     widgets?: TyperWidgetDefinition[];
 }
@@ -123,6 +130,8 @@ interface TyperWidgetDefinition extends Map<any>, TyperEventReceiver {
     element?: string | Element;
     editable?: string;
     inline?: boolean;
+    allowedWidgets?: string;
+    disallowedWidgets?: string;
     commands?: Map<TyperCommand>;
 }
 
@@ -191,8 +200,7 @@ interface TyperDocument {
 }
 
 interface TyperNode {
-    readonly containingElement: Element;
-    readonly element: Element | Range;
+    readonly element: Element;
     readonly widget: TyperWidget;
     readonly childNodes: TyperNode[];
     readonly childDOMNodes: Node[];

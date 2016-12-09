@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.8.3
+ * jQuery Typer Plugin v<%= pkg.version %>
  *
  * The MIT License (MIT)
  *

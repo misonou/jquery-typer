@@ -1,3 +1,24 @@
+## 0.9.0-beta / 2016-12-08
+
+- Constructor change to `Typer(element, options)` with existing one compatible
+- Introduce UI controls, themes and dialogs
+- Introduce presets and `$.fn.typer(preset, options)`
+- Add `typer.widgetEnabled()` and `typer.getStaticWidgets()`
+- Add `disallowedElement` and `allowedWidgets` options
+- (Breaking) Removed `controlClasses`, `controlElements` and `attributes` options
+- (Breaking) `Typer.getRangeFromMouseEvent` replaced by `Typer.getRangeFromPoint`
+- (Breaking) Deprecated node type `NODE_OUTER_PARAGRAPH`
+- Improved response of change event
+- Many fixes to single paragraph mode
+- Fix: content inserted in incorrect location
+- Fix: incorrect caret position after inserting content
+- Fix: unintended non-breaking space (`&nbsp;`) between word boundaries when inserting contents
+- Fix: various exceptions from `TyperDOMNodeIterator`
+- Fix: `createRange` incorrectly returns collapsed range if `+startOffset` evaluates to a number
+- Fix: `computeSelection` and window focus detection on IE
+- Fix: `TyperSelection.widgets` does not return inline widgets
+- Fix: `destroy` event incorrectly fired on widgets
+
 ## 0.8.3 / 2016-11-22
 
 - Add support for single paragraph mode

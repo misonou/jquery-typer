@@ -18,6 +18,13 @@
     Typer.widgets.table = {
         element: 'table',
         editable: 'th,td',
+        insert: function (tx, options) {
+            options = $.extend({
+                rows: 2,
+                columns: 2
+            }, options);
+            tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns)), options.rows) + '</table>');
+        },
         beforeStateChange: function (e) {
             var selection = e.typer.getSelection();
             var selectedCells = selection.getEditableElements(e.widget);
@@ -111,4 +118,56 @@
         }
     };
 
-}(jQuery, window.Typer));
+    $.extend(Typer.ui.controls, {
+        'insert:table': Typer.ui.callout({
+            controls: 'table:*',
+            requireWidgetEnabled: 'table',
+            hiddenWhenDisabled: true,
+            execute: function (toolbar, self, tx) {
+                tx.insertWidget('table');
+            },
+            active: function (toolbar, self) {
+                return self.widget;
+            }
+        }),
+        'table:addColumnBefore': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'addColumnBefore'
+        }),
+        'table:addColumnAfter': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'addColumnAfter'
+        }),
+        'table:addRowAbove': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'addRowAbove'
+        }),
+        'table:addRowBelow': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'addRowBelow'
+        }),
+        'table:removeColumn': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'removeColumn'
+        }),
+        'table:removeRow': Typer.ui.button({
+            requireWidget: 'table',
+            execute: 'removeRow'
+        })
+    });
+
+    Typer.ui.addLabels('en', {
+        'insert:table': 'Table',
+        'table:addColumnBefore': 'Add Column Before',
+        'table:addColumnAfter': 'Add Column After',
+        'table:addRowAbove': 'Add Row Above',
+        'table:addRowBelow': 'Add Row Below',
+        'table:removeColumn': 'Remove Column',
+        'table:removeRow': 'Remove Row'
+    });
+
+    Typer.ui.addIcons('material', {
+        'insert:table': 'border_all'
+    });
+
+} (jQuery, window.Typer));
