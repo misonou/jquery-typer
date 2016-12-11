@@ -3,7 +3,7 @@
 
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
     var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
-    var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt';
+    var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
@@ -699,15 +699,9 @@
 
             var startPoint = getBoundary(range.startContainer, range.startOffset);
             var endPoint = range.collapsed ? startPoint : getBoundary(range.endContainer, range.endOffset, true);
-            var selectDirection;
-            if (currentSelection && currentSelection.isCaret && !range.collapsed) {
-                var currentRange = createRange(currentSelection);
-                selectDirection = range.compareBoundaryPoints(2, currentRange) > 0 ? 1 : range.compareBoundaryPoints(0, currentRange) < 0 ? -1 : 0;
-            }
             return $.extend(new TyperSelection(), {
                 isCaret: range.collapsed,
-                caretPosition: range.collapsed && compareRangePosition(range, startPoint.node.element) || 0,
-                selectDirection: selectDirection || (currentSelection || '').selectDirection || 0,
+                caretPosition: (range.collapsed && compareRangePosition(range, startPoint.node.element)) || 0,
                 focusNode: getFocusNode(range),
                 startNode: startPoint.node,
                 startElement: startPoint.element,
@@ -925,7 +919,7 @@
                 return v.nodeType === 3 || tagName(v) === 'br' ? $(v).wrap('<p>').parent()[0] : v;
             });
             extractContents(range, 'paste', function (state, startPoint, endPoint) {
-                var focusWidgetOptions = widgetOptions[state.focusNode.widget.id];
+                var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var startNode = state.startNode;
                 var endNode = state.endNode;
                 var document = createTyperDocument(content);
@@ -946,10 +940,9 @@
 
                 while (nodes[0]) {
                     var node = nodes.pop();
-                    if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                        if (node.widget.id === '__unknown__' || (focusWidgetOptions.allowedWidgets !== undefined && String(focusWidgetOptions.allowedWidgets).split(' ').indexOf(node.widget.id) < 0)) {
-                            node = new TyperNode(NODE_INLINE, wrapNode(createTextNode(extractText(node.element)), formattingNodes), node.parentNode.widget);
-                        }
+                    if (node.widget.id === '__unknown__' || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
+                        var textContent = node.widget.id === '__unknown__' ? node.element.textContent : extractText(node.element);
+                        node = new TyperNode(NODE_INLINE, wrapNode(createTextNode(textContent), formattingNodes), node.parentNode.widget);
                     }
                     var inlineNodes = is(node, NODE_ANY_INLINE) ? [node.element] : node.childDOMNodes.slice(0);
                     var needSplit = is(node, NODE_WIDGET) || !is(endNode, NODE_ANY_ALLOWTEXT) || (nodes[0] && !hasInsertedText && !is(endNode, NODE_EDITABLE_PARAGRAPH));
@@ -1008,17 +1001,25 @@
         }
 
         function extractText(content) {
+            if (containsOrEquals(topElement, content)) {
+                content = extractContents(content, 'copy');
+            }
+            var text = '';
             var document = createTyperDocument(content);
-            var iterator = new TyperTreeWalker(document.rootNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_SHOW_EDITABLE);
-            var text = iterateToArray(iterator, function (v) {
-                var iterator = new TyperDOMNodeIterator(v, 5, function (v) {
-                    return v.nodeValue || tagName(v) === 'br' ? 1 : 3;
-                });
-                return iterateToArray(iterator, function (v) {
-                    return v.nodeValue || '\n';
-                }).join('');
+            $.each(document.rootNode.childNodes, function (i, v) {
+                if (is(v, NODE_WIDGET | NODE_EDITABLE) && isFunction(widgetOptions[v.widget.id].text)) {
+                    text += (text && '\n\n') + widgetOptions[v.widget.id].text(v.widget);
+                    return;
+                }
+                iterate(new TyperTreeWalker(v, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE, function (v) {
+                    text += text && '\n\n';
+                    iterate(new TyperDOMNodeIterator(v, 5, function (v) {
+                        text += v.nodeValue || (tagName(v) === 'br' ? '\n' : '');
+                    }));
+                    return 2;
+                }));
             });
-            return text.join('\n\n');
+            return text;
         }
 
         function initUndoable() {
@@ -1120,6 +1121,7 @@
             var keyDefaultPrevented;
             var hasKeyEvent;
             var activeWidget;
+            var selectDirection;
 
             function triggerWidgetFocusout() {
                 var widget = activeWidget;
@@ -1190,16 +1192,21 @@
                     case 'downArrow':
                     case 'shiftUpArrow':
                     case 'shiftDownArrow':
+                        if (currentSelection.isCaret) {
+                            selectDirection = direction;
+                        }
                         var currentRange = createRange(currentSelection);
-                        var currentPoint = createRange(currentRange, (currentSelection.selectDirection || direction) < 0);
+                        var currentPoint = createRange(currentRange, selectDirection < 0);
                         var rect = currentPoint.getBoundingClientRect();
-                        for (var y = rect.top + (direction > 0 && rect.height); true; y += 5 * direction) {
+                        for (var y = rect.top ; true; y += rect.height * direction) {
                             var newPoint = getRangeFromPoint(rect.left, y);
                             if (!newPoint || !containsOrEquals(topElement, newPoint.startContainer)) {
                                 return false;
                             }
-                            if (compareRangePosition(newPoint, currentPoint) && !is(typerDocument.getNode(newPoint.startContainer), NODE_WIDGET)) {
-                                select(newPoint, eventName.charAt(0) !== 's' || createRange(currentRange, (currentSelection.selectDirection || direction) > 0));
+                            var newRect = newPoint.getBoundingClientRect();
+                            if (compareRangePosition(newPoint, currentPoint) && newRect.top !== rect.top && !is(getFocusNode(newPoint), NODE_WIDGET)) {
+                                newPoint = getRangeFromPoint(rect.left, newRect.top);
+                                select(newPoint, eventName.charAt(0) !== 's' || createRange(currentRange, selectDirection > 0));
                                 return true;
                             }
                         }
@@ -1207,15 +1214,17 @@
             }
 
             $self.mousedown(function (e) {
-                e.stopPropagation();
-                mousedown = true;
+                var anchorPoint = getRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
                             handlers.mouseup();
                             return;
                         }
+                        var range = createRange(anchorPoint, getRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY));
+                        select(computeSelection(range));
                         replaceTimeout(normalizeInputEvent, updateState);
+                        e.preventDefault();
                     },
                     mouseup: function () {
                         mousedown = false;
@@ -1228,6 +1237,8 @@
                     }
                 };
                 $(document.body).bind(handlers);
+                mousedown = true;
+                e.stopPropagation();
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
@@ -1508,6 +1519,16 @@
             insertWidget: function (name, options) {
                 if (widgetOptions[name] && isFunction(widgetOptions[name].insert)) {
                     widgetOptions[name].insert(this, options);
+                }
+            },
+            removeWidget: function (widget) {
+                if (isFunction(widgetOptions[widget.id].remove)) {
+                    widgetOptions[widget.id].remove(this, widget);
+                } else if (widgetOptions[widget.id].remove === 'keepText') {
+                    var textContent = extractText(widget.element);
+                    $(widget.element).replaceWith(createTextNode(textContent));
+                } else {
+                    removeNode(widget.element);
                 }
             },
             execCommand: function (commandName, value) {
@@ -1910,8 +1931,7 @@
         remove: function () {
             var self = this;
             self.typer.invoke(function (tx) {
-                tx.select(self.element);
-                tx.insertText();
+                tx.removeWidget(self);
             });
         }
     });

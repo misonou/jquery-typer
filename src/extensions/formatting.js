@@ -200,6 +200,7 @@
         element: 'ul,ol',
         editable: 'ul,ol',
         insert: insertListCommand,
+        remove: 'keepText',
         beforeStateChange: function (e) {
             var tagName = e.widget.element.tagName.toLowerCase();
             $.extend(e.widget, {

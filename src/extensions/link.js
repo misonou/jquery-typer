@@ -13,6 +13,7 @@
                 tx.execCommand('createLink', value);
             }
         },
+        remove: 'keepText',
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = value;
