@@ -968,12 +968,12 @@
                 var newPoint;
 
                 var formattingNodes;
-                if (is(startNode, NODE_EDITABLE_PARAGRAPH)) {
+                if (is(state.startNode, NODE_EDITABLE_PARAGRAPH)) {
                     formattingNodes = [];
-                } else if (is(startNode, NODE_PARAGRAPH)) {
-                    formattingNodes = [startNode.element];
-                } else if (is(startNode, NODE_ANY_INLINE)) {
-                    formattingNodes = $(state.startElement).parentsUntil(startNode.element).andSelf().get().reverse();
+                } else if (is(state.startNode, NODE_PARAGRAPH)) {
+                    formattingNodes = [state.startNode.element];
+                } else if (is(state.startNode, NODE_ANY_INLINE)) {
+                    formattingNodes = $(state.startElement).parentsUntil(state.startNode.element).andSelf().get().reverse();
                 } else {
                     formattingNodes = [createElement('p')];
                 }
