@@ -7,6 +7,7 @@
             inlineStyle: false,
             lineBreak: false,
             toolbar: false,
+            visualizer: false,
             disallowedElement: '*',
             init: function (e) {
                 e.typer.moveCaret(e.typer.element, -0);

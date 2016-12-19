@@ -117,6 +117,7 @@
         },
         widgetFocusin: function (e, widget) {
             if (widget.toolbar.all['toolbar:widget'].controls[0]) {
+                widget.toolbar.update();
                 showToolbar(widget.toolbar);
             }
         },
@@ -126,6 +127,7 @@
         widgetDestroy: function (e, widget) {
             if (widget.toolbar) {
                 widget.toolbar.destroy();
+                showToolbar(e.widget.toolbar);
             }
         },
         stateChange: function () {
@@ -139,7 +141,7 @@
     $(window).scroll(function () {
         if (activeToolbar) {
             showToolbar(activeToolbar);
-        } 
+        }
     });
 
     /* ********************************

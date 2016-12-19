@@ -19,8 +19,7 @@
                 tx.widget.element.href = value;
             },
             unlink: function (tx) {
-                tx.select(tx.widget.element);
-                tx.execCommand('unlink');
+                tx.removeWidget(tx.widget);
             }
         }
     };

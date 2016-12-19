@@ -340,6 +340,16 @@
     }
 
     function getRangeFromPoint(x, y) {
+        function distanceFromRect(rect) {
+            var distX = rect.left > x ? rect.left - x : Math.min(0, rect.left + rect.width - x);
+            var distY = rect.top > y ? rect.top - y : Math.min(0, rect.top + rect.height - y);
+            return !distX || !distY ? distX || distY : distY > 0 ? Infinity : -Infinity;
+        }
+
+        function distanceFromCharacter(node, index) {
+            return distanceFromRect(createRange(node, index, true).getClientRects()[0] || {});
+        }
+
         if (document.caretRangeFromPoint) {
             return document.caretRangeFromPoint(x, y);
         }
@@ -348,16 +358,30 @@
             return createRange(pos.offsetNode, pos.offset, true);
         }
         if (document.body.createTextRange) {
-            var currentRange = selection.rangeCount && selection.getRangeAt(0);
-            var textRange = document.body.createTextRange();
-            textRange.moveToPoint(x, y);
-            textRange.select();
-            var range = selection.getRangeAt(0);
-            if (currentRange) {
-                selection.removeAllRanges();
-                selection.addRange(currentRange);
+            var element = document.elementFromPoint(x, y);
+            for (var dist, nextElement; dist !== Infinity; dist = Infinity, element = nextElement || element) {
+                for (var i = 0, length = element.childNodes.length; i < length; i++) {
+                    var node = element.childNodes[i];
+                    if (node.nodeType === 1 && tagName(node) !== 'br') {
+                        var thisDist = Math.abs(distanceFromRect(node.getBoundingClientRect()));
+                        if (thisDist > dist) {
+                            break;
+                        }
+                        dist = thisDist;
+                        nextElement = node;
+                    } else if (node.nodeType === 3 && distanceFromCharacter(node, node.length - 1) > 0) {
+                        var b0 = 0, b1 = node.length;
+                        while (b1 - b0 > 1) {
+                            var mid = (b1 + b0) >> 1;
+                            var p = distanceFromCharacter(node, mid) < 0;
+                            b0 = p ? mid : b0;
+                            b1 = p ? b1 : mid;
+                        }
+                        return createRange(node, Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1, true);
+                    }
+                }
             }
-            return range;
+            return createRange(element, COLLAPSE_END_INSIDE);
         }
     }
 
@@ -492,38 +516,39 @@
                 }
             }
 
-            function visitElement(element, childOnly) {
-                var stack = [nodeMap.get(element)];
-
-                function getWidget(node) {
-                    if (!node.widget || !is(node.element, widgetOptions[node.widget.id].element)) {
-                        if (node.widget && node.widget.element === node.element && fireEvent) {
-                            node.widget.destroyed = true;
-                            triggerEvent(node.widget, 'destroy');
-                        }
-                        delete node.widget;
-                        $.each(widgetOptions, function (i, v) {
-                            if (is(node.element, v.element)) {
-                                node.widget = new TyperWidget(typer, i, node.element, v.options);
-                                if (fireEvent) {
-                                    triggerEvent(node.widget, 'init');
-                                }
-                                return false;
-                            }
-                        });
-                    }
-                    return node.widget;
-                }
-
-                function updateNodeFromElement(node) {
-                    $.each(node.childNodes.slice(0), function (i, v) {
-                        if (!containsOrEquals(rootElement, v.element)) {
-                            removeFromParent(v);
-                            nodeMap.delete(v.element);
+            function updateNode(node, context) {
+                context = context || node.parentNode || nodeMap.get(rootElement);
+                if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
+                    delete node.widget;
+                    $.each(widgetOptions, function (i, v) {
+                        if (is(node.element, v.element)) {
+                            node.widget = new TyperWidget(typer, i, node.element, v.options);
+                            return false;
                         }
                     });
                 }
+                node.widget = node.widget || context.widget;
+                var widgetOption = widgetOptions[node.widget.id];
+                if (node.widget === context.widget && !is(context, NODE_WIDGET)) {
+                    node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
+                } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
+                    node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
+                } else {
+                    node.nodeType = widgetOption.inline && !is(context, NODE_INLINE_WIDGET) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                }
+            }
 
+            function updateNodeFromElement(node) {
+                $.each(node.childNodes.slice(0), function (i, v) {
+                    if (!containsOrEquals(rootElement, v.element)) {
+                        removeFromParent(v);
+                        nodeMap.delete(v.element);
+                    }
+                });
+            }
+
+            function visitElement(element, childOnly) {
+                var stack = [nodeMap.get(element)];
                 updateNodeFromElement(stack[0]);
 
                 // jQuery prior to 1.12.0 cannot directly apply selector to DocumentFragment
@@ -539,21 +564,19 @@
                         }
                         return;
                     }
-
                     var unvisited = !nodeMap.has(v);
                     var node = nodeMap.get(v) || new TyperNode(0, v);
-                    node.widget = !is(stack[0], NODE_WIDGET) && getWidget(node) || stack[0].widget;
-
-                    var widgetOption = widgetOptions[node.widget.id];
-                    if (node.widget === stack[0].widget && !is(stack[0], NODE_WIDGET)) {
-                        node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
-                    } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
-                        node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
-                    } else {
-                        node.nodeType = widgetOption.inline && !is(stack[0], NODE_INLINE_WIDGET) ? NODE_INLINE_WIDGET : NODE_WIDGET;
-                    }
-                    updateNodeFromElement(node);
+                    var originalWidget = node.widget;
                     addChild(stack[0], node);
+                    updateNodeFromElement(node);
+                    updateNode(node);
+                    if (node.widget !== originalWidget && fireEvent) {
+                        if (originalWidget) {
+                            originalWidget.destroyed = true;
+                            triggerEvent(originalWidget, 'destroy');
+                        }
+                        triggerEvent(node.widget, 'init');
+                    }
                     nodeMap.set(v, node);
                     if (childOnly && unvisited) {
                         visitElement(v);
@@ -760,6 +783,7 @@
 
         function normalize(range) {
             range = is(range, Range) || createRange(range || topElement, true);
+            updateState(false);
             codeUpdate(function () {
                 var selection = computeSelection(range);
                 if (is(selection.focusNode, NODE_EDITABLE) && !selection.focusNode.childNodes[0]) {
@@ -860,23 +884,16 @@
         }
 
         function extractContents(range, mode, callback) {
+            range = is(range, Range) || createRange(range);
+
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var startPoint, endPoint;
+            var state = computeSelection(range);
+            var isSingleEditable = state.isSingleEditable;
 
-            function getInsertionPoint(node) {
-                return createRange(node, (compareRangePosition(range, node) < 0 ? COLLAPSE_START_OUTSIDE : COLLAPSE_END_OUTSIDE) | (node !== typerDocument.getNode(node).widget.element && node.nodeType === 1));
-            }
-
-            range = createRange(range);
             if (!range.collapsed) {
-                var state = computeSelection(range);
-                if (isFunction(callback)) {
-                    startPoint = getInsertionPoint(state.startTextNode || state.startElement);
-                    endPoint = state.isSingleEditable ? getInsertionPoint(state.endTextNode || state.endElement) : startPoint;
-                }
                 var stack = [[topElement, fragment]];
                 iterate(state.createTreeWalker(-1, function (node) {
                     while (is(node.element, Node) && !containsOrEquals(stack[0][0], node.element)) {
@@ -914,8 +931,8 @@
                 }));
             }
             if (isFunction(callback)) {
-                startPoint = startPoint || createRange(range, true);
-                endPoint = endPoint || createRange(range, false);
+                var startPoint = createRange(range, true);
+                var endPoint = !isSingleEditable ? startPoint : createRange(range, false);
                 var newState = computeSelection(createRange(startPoint, endPoint));
 
                 // check if current insertion point is an empty editable element
@@ -940,18 +957,15 @@
             if (!is(content, Node)) {
                 content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.+/, '<p>$&</p>').replace(/<p>(<|$)/g, '<p>' + ZWSP_ENTITIY + '$1') || EMPTY_LINE;
             }
-            content = $.map(createDocumentFragment(content).childNodes, function (v) {
-                // make sure no dangling text exists in the inserting document
-                return v.nodeType === 3 || tagName(v) === 'br' ? $(v).wrap('<p>').parent()[0] : v;
-            });
+            content = slice(createDocumentFragment(content).childNodes);
+
             extractContents(range, 'paste', function (state, startPoint, endPoint) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
-                var startNode = state.startNode;
-                var endNode = state.endNode;
-                var document = createTyperDocument(content);
-                var nodes = document.rootNode.childNodes.slice(0);
-                var needGlue = !nodes[1] && (!nodes[0] || is(nodes[0], NODE_ANY_ALLOWTEXT)) && startNode !== endNode;
-                var hasInsertedText, newPoint;
+                var caretPoint = startPoint.cloneRange();
+                var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
+                var paragraphAsInline = true;
+                var hasInsertedBlock;
+                var newPoint;
 
                 var formattingNodes;
                 if (is(startNode, NODE_EDITABLE_PARAGRAPH)) {
@@ -964,65 +978,52 @@
                     formattingNodes = [createElement('p')];
                 }
 
-                while (nodes[0]) {
-                    var node = nodes.pop();
-                    if (node.widget.id === '__unknown__' || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
-                        var textContent = node.widget.id === '__unknown__' ? node.element.textContent : extractText(node.element);
-                        node = new TyperNode(NODE_INLINE, wrapNode(createTextNode(textContent), formattingNodes), node.parentNode.widget);
+                while (content[0]) {
+                    var nodeToInsert = content.shift();
+                    var node = new TyperNode(NODE_INLINE, nodeToInsert);
+                    if (nodeToInsert.nodeType === 1 && tagName(nodeToInsert) !== 'br') {
+                        startPoint.insertNode(nodeToInsert);
+                        node = typerDocument.getNode(nodeToInsert);
+                        removeNode(nodeToInsert);
+                        if (node.widget.id === '__unknown__' || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
+                            nodeToInsert = createTextNode(node.widget.id === '__unknown__' ? nodeToInsert.textContent : extractText(nodeToInsert));
+                            node = new TyperNode(NODE_INLINE, nodeToInsert);
+                        }
                     }
-                    var inlineNodes = is(node, NODE_ANY_INLINE) ? [node.element] : node.childDOMNodes.slice(0);
-                    var needSplit = is(node, NODE_WIDGET) || !is(endNode, NODE_ANY_ALLOWTEXT) || (nodes[0] && !hasInsertedText && !is(endNode, NODE_EDITABLE_PARAGRAPH));
-
-                    if (needSplit) {
-                        var splitEnd = createRange(endNode.element, COLLAPSE_END_OUTSIDE);
+                    if (!is(node, NODE_ANY_ALLOWTEXT) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
+                        var splitEnd = createRange(getFocusNode(caretPoint).element, COLLAPSE_END_OUTSIDE);
                         var splitContent = createRange(endPoint, splitEnd).extractContents();
                         var splitFirstNode = splitContent.childNodes[0];
-
-                        if (splitContent.textContent || (splitFirstNode && (!is(node, NODE_ANY_ALLOWTEXT) || inlineNodes[0]))) {
-                            splitEnd.insertNode(splitContent);
-                            endNode = getFocusNode(splitEnd);
-                            endPoint = splitEnd;
-                            if (splitContent.textContent) {
-                                newPoint = newPoint || createRange(endNode.element, COLLAPSE_START_INSIDE);
-                            }
-                        }
-                        // insert the last paragraph of text being inserted to the newly created paragraph if any
-                        if (is(node, NODE_ANY_ALLOWTEXT)) {
-                            if (inlineNodes[0]) {
-                                if (is(endNode, NODE_ANY_ALLOWTEXT)) {
-                                    (createRange(splitFirstNode, COLLAPSE_START_INSIDE) || endPoint).insertNode(wrapNode(inlineNodes, formattingNodes.slice(0, -1)));
-                                } else {
-                                    splitEnd.insertNode(wrapNode(inlineNodes, formattingNodes));
-                                }
-                                newPoint = newPoint || createRange(inlineNodes.slice(-1)[0], COLLAPSE_END_INSIDE);
-                                hasInsertedText = true;
-                            }
-                            continue;
-                        }
+                        splitEnd.insertNode(splitContent);
+                        caretPoint = createRange(splitFirstNode || splitEnd, COLLAPSE_START_INSIDE);
+                        newPoint = newPoint || caretPoint.cloneRange();
+                        endPoint = createRange(splitEnd, false);
+                        paragraphAsInline = true;
+                        hasInsertedBlock = true;
                     }
-                    if (is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) {
-                        endPoint.insertNode(node.element);
-                        newPoint = newPoint || createRange(node.element, COLLAPSE_END_OUTSIDE);
+                    insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT);
+                    if (is(node, NODE_ANY_INLINE)) {
+                        nodeToInsert = wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes);
+                    } else if (insertAsInline && paragraphAsInline) {
+                        nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
+                    }
+                    if (insertAsInline) {
+                        caretPoint.insertNode(nodeToInsert);
+                        caretPoint.collapse(false);
+                        paragraphAsInline = false;
                     } else {
-                        if (nodes[0]) {
-                            endPoint.insertNode(wrapNode(inlineNodes, hasInsertedText ? formattingNodes : formattingNodes.slice(0, -1)));
-                        } else if (inlineNodes[0]) {
-                            startPoint.insertNode(startNode ? createDocumentFragment(inlineNodes) : wrapNode(inlineNodes, formattingNodes));
-                        } else {
-                            continue;
-                        }
-                        newPoint = newPoint || createRange(inlineNodes.slice(-1)[0], COLLAPSE_END_INSIDE);
-                        hasInsertedText = true;
+                        createRange(getFocusNode(caretPoint).element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
+                        caretPoint = createRange(nodeToInsert, COLLAPSE_END_INSIDE);
+                        insertAsInline = is(node, NODE_ANY_ALLOWTEXT);
+                        hasInsertedBlock = true;
                     }
                 }
-                if (needGlue) {
-                    var gluePoint = createRange(formattingNodes[0] || startNode.element, COLLAPSE_END_INSIDE);
-                    newPoint = newPoint || startPoint.cloneRange();
-                    gluePoint.insertNode(createRange(endNode.element, true).extractContents());
-                    removeNode(endNode.element);
+                if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
+                    createRange(state.startNode.element, COLLAPSE_END_INSIDE).insertNode(createRange(state.endNode.element, true).extractContents());
+                    removeNode(state.endNode.element);
                 }
-                normalize(createRange(startPoint, newPoint || endPoint));
-                select(newPoint || endPoint);
+                normalize(createRange(startPoint, endPoint));
+                select(newPoint || caretPoint, true);
             });
         }
 
@@ -1079,7 +1080,7 @@
             function getRangeFromMarker(start) {
                 var attr = MARKER_ATTR[+start];
                 var element = $self.find('[' + attr + ']')[0] || $self.filter('[' + attr + ']')[0];
-                var offset = +$(element).attr(attr);
+                var offset = parseInt($(element).attr(attr));
                 if (element) {
                     $(element).removeAttr(attr);
                     return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, start ? COLLAPSE_START_OUTSIDE : COLLAPSE_END_OUTSIDE);
@@ -1224,14 +1225,14 @@
                         var currentRange = createRange(currentSelection);
                         var currentPoint = createRange(currentRange, selectDirection < 0);
                         var rect = currentPoint.getBoundingClientRect();
-                        for (var y = rect.top ; true; y += rect.height * direction) {
+                        for (var y = rect.top + (direction > 0 && rect.height); true; y += 5 * direction) {
                             var newPoint = getRangeFromPoint(rect.left, y);
                             if (!newPoint || !containsOrEquals(topElement, newPoint.startContainer)) {
                                 return false;
                             }
                             var newRect = newPoint.getBoundingClientRect();
                             if (compareRangePosition(newPoint, currentPoint) && newRect.top !== rect.top && !is(getFocusNode(newPoint), NODE_WIDGET)) {
-                                newPoint = getRangeFromPoint(rect.left, newRect.top);
+                                newPoint = getRangeFromPoint(rect.left, newRect.top + (newRect.height / 2));
                                 select(newPoint, eventName.charAt(0) !== 's' || createRange(currentRange, selectDirection > 0));
                                 return true;
                             }
@@ -1240,14 +1241,14 @@
             }
 
             $self.mousedown(function (e) {
-                var anchorPoint = getRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
+                var anchorPoint = getRangeFromPoint(e.clientX, e.clientY);
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
                             handlers.mouseup();
                             return;
                         }
-                        var range = createRange(anchorPoint, getRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY));
+                        var range = createRange(anchorPoint, getRangeFromPoint(e.clientX, e.clientY));
                         select(computeSelection(range));
                         replaceTimeout(normalizeInputEvent, updateState);
                         e.preventDefault();
@@ -1274,7 +1275,6 @@
 
             $self.bind('keydown keypress keyup', function (e) {
                 e.stopPropagation();
-                triggerWidgetFocusout();
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1301,6 +1301,9 @@
                     replaceTimeout(normalizeInputEvent, function () {
                         updateState();
                         normalize(currentSelection.focusNode.element);
+                        if (currentSelection.focusNode.widget !== activeWidget) {
+                            triggerWidgetFocusout();
+                        }
                     });
                 } else if (e.type === 'keypress') {
                     if (modifierCount || !e.charCode) {
@@ -1387,7 +1390,7 @@
                 }
             });
 
-            $self.bind('mouseup mscontrolselect', function (e) {
+            $self.bind('mousedown mouseup mscontrolselect', function (e) {
                 // disable resize handle on image element on IE and Firefox
                 // also select the whole widget when clicking on uneditable elements
                 var node = typerDocument.getNode(e.target);
@@ -1395,7 +1398,7 @@
                     triggerWidgetFocusout();
                 }
                 var range = getActiveRange();
-                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET) && (!range || range.collapsed || !rangeIntersects(range, node.element) || getFocusNode(range) === node)) {
+                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     if (IS_IE) {
                         setTimeout(function () {
                             select(node.widget.element);
@@ -1502,6 +1505,9 @@
             getSelection: function () {
                 return new TyperSelection(currentSelection);
             },
+            nodeFromPoint: function (x, y) {
+                return typerDocument.getNode(document.elementFromPoint(x, y));
+            },
             select: function (startNode, startOffset, endNode, endOffset) {
                 select(startNode, startOffset, endNode, endOffset);
                 undoable.snapshot();
@@ -1525,17 +1531,21 @@
                         command.call(typer, tx, value);
                     }
                 });
-                updateState();
                 undoable.snapshot();
             }
         });
 
         definePrototype(TyperTransaction, {
+            typer: typer,
             widget: null,
             remove: removeNode,
             normalize: normalize,
             invoke: typer.invoke,
             hasCommand: typer.hasCommand,
+            select: select,
+            moveCaret: function (node, offset) {
+                select(getRangeFromTextOffset(node, offset));
+            },
             insertText: function (text) {
                 insertContents(currentSelection, text);
             },
@@ -1558,6 +1568,7 @@
                 }
             },
             execCommand: function (commandName, value) {
+                select(currentSelection);
                 document.execCommand(commandName, false, value || '');
                 updateState(false);
             },
@@ -1568,22 +1579,13 @@
             getSelectedTextNodes: function () {
                 splitTextBoundary(currentSelection);
                 return $.map(currentSelection.selectedElements, function (v) {
-                    return $(v).contents().filter(function (i, v) {
+                    return $.grep(v.childNodes, function (v) {
                         return v.nodeType === 3 && comparePosition(currentSelection.startTextNode, v) <= 0 && comparePosition(currentSelection.endTextNode, v) >= 0;
                     });
                 });
             },
-            select: function (startNode, startOffset, endNode, endOffset) {
-                select(startNode, startOffset, endNode, endOffset);
-                updateState(false);
-            },
-            moveCaret: function (node, offset) {
-                select(getRangeFromTextOffset(node, offset));
-                updateState(false);
-            },
             restoreSelection: function () {
                 select(this.originalSelection);
-                updateState(false);
             }
         });
 
@@ -1721,10 +1723,10 @@
 
     definePrototype(TyperTreeWalker, {
         previousSibling: function () {
-            return treeWalkerTraverseSibling(this, 'firstChild', 'nextSibling');
+            return treeWalkerTraverseSibling(this, 'lastChild', 'previousSibling');
         },
         nextSibling: function () {
-            return treeWalkerTraverseSibling(this, 'lastChild', 'previousSibling');
+            return treeWalkerTraverseSibling(this, 'firstChild', 'nextSibling');
         },
         firstChild: function () {
             return treeWalkerTraverseChildren(this, 'firstChild', 'nextSibling');
@@ -1805,10 +1807,17 @@
         return iterator;
     }
 
+    function nodeIteratorTraverseTyperNode(inst, dir, into) {
+        if (dir === 'previousNode') {
+            return (into && inst.typerNodeIterator.lastChild()) || inst.typerNodeIterator.previousSibling();
+        }
+        return inst.typerNodeIterator.nextNode();
+    }
+
     function nodeIteratorTraverse(inst, dir) {
         var before = inst.currentNode;
         if (inst.iterator[dir]()) {
-            if (inst.currentNode.parentNode !== before.parentNode && inst.typerNodeIterator[dir]()) {
+            if (inst.currentNode.parentNode !== before.parentNode && nodeIteratorTraverseTyperNode(inst, dir, true)) {
                 inst.iteratorStack.unshift({
                     dir: dir,
                     iterator: inst.iterator
@@ -1827,7 +1836,7 @@
                 return inst.currentNode;
             }
         }
-        while (inst.typerNodeIterator[dir]()) {
+        while (nodeIteratorTraverseTyperNode(inst, dir)) {
             inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
             if (acceptNode(inst.iterator) === 1 || inst.iterator[dir]()) {
                 return inst.currentNode;
@@ -2013,6 +2022,7 @@
             inlineStyle: false,
             lineBreak: false,
             toolbar: false,
+            visualizer: false,
             disallowedElement: '*',
             init: function (e) {
                 e.typer.moveCaret(e.typer.element, -0);
@@ -2919,8 +2929,7 @@
                 tx.widget.element.href = value;
             },
             unlink: function (tx) {
-                tx.select(tx.widget.element);
-                tx.execCommand('unlink');
+                tx.removeWidget(tx.widget);
             }
         }
     };
@@ -3369,6 +3378,7 @@
         },
         widgetFocusin: function (e, widget) {
             if (widget.toolbar.all['toolbar:widget'].controls[0]) {
+                widget.toolbar.update();
                 showToolbar(widget.toolbar);
             }
         },
@@ -3378,6 +3388,7 @@
         widgetDestroy: function (e, widget) {
             if (widget.toolbar) {
                 widget.toolbar.destroy();
+                showToolbar(e.widget.toolbar);
             }
         },
         stateChange: function () {
@@ -3391,7 +3402,7 @@
     $(window).scroll(function () {
         if (activeToolbar) {
             showToolbar(activeToolbar);
-        } 
+        }
     });
 
     /* ********************************
@@ -3452,6 +3463,299 @@
     });
 
 } (jQuery, window.Typer));
+
+(function ($, Typer) {
+
+    var INVALID = {
+        left: 10000,
+        right: -10000
+    };
+    var NODE_ANY_ALLOWTEXT = Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE | Typer.NODE_INLINE_WIDGET | Typer.NODE_INLINE_EDITABLE;
+
+    var supported = !window.ActiveXObject;
+    var selectionLayers = [];
+    var hoverLayers = [];
+    var freeDiv = [];
+    var windowWidth = $(window).width();
+    var windowHeight = $(window).height();
+    var container;
+    var activeTyper;
+    var activeWidget;
+    var previousRect;
+
+    function init() {
+        var style = '\
+            .has-typer-visualizer:focus { outline:none; }\
+            .has-typer-visualizer::selection,.has-typer-visualizer ::selection { background-color:transparent; }\
+            .has-typer-visualizer::-moz-selection,.has-typer-visualizer ::-moz-selection { background-color:transparent; }\
+            .typer-visualizer { position:fixed;pointer-events:none; }\
+            .typer-visualizer > div { position:fixed;box-sizing:border-box; }\
+            .typer-visualizer .fill { background-color:rgba(0,31,81,0.2); }\
+            .typer-visualizer .fill-margin { border:solid rgba(255,158,98,0.2); }\
+            @supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)) { .typer-visualizer .bl-r:before,.typer-visualizer .tl-r:before,.typer-visualizer .br-r:after,.typer-visualizer .tr-r:after { content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%); } }\
+            .typer-visualizer .line-n,.typer-visualizer .line-s { border-top:1px solid rgba(0,31,81,0.2);left:0;right:0;height:1px; }\
+            .typer-visualizer .line-w,.typer-visualizer .line-e { border-left:1px solid rgba(0,31,81,0.2);top:0;bottom:0;width:1px; }\
+            .typer-visualizer .line-s { margin-top:-1px; }\
+            .typer-visualizer .line-e { margin-left:-1px; }\
+            .typer-visualizer .bl { border-bottom-left-radius:4px; }\
+            .typer-visualizer .tl { border-top-left-radius:4px; }\
+            .typer-visualizer .br { border-bottom-right-radius:4px; }\
+            .typer-visualizer .tr { border-top-right-radius:4px; }\
+            .typer-visualizer .bl-r:before { right:100%;bottom:0; }\
+            .typer-visualizer .tl-r:before { right:100%;top:0;-webkit-transform:flipY();transform:flipY(); }\
+            .typer-visualizer .br-r:after { left:100%;bottom:0;-webkit-transform:flipX();transform:flipX(); }\
+            .typer-visualizer .tr-r:after { left:100%;top:0;-webkit-transform:rotate(180deg);transform:rotate(180deg); }\
+        ';
+        $(document.body).append('<style>' + style + '</style>');
+        container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
+
+        $(window).bind('scroll resize orientationchange focus', function () {
+            windowWidth = $(window).width();
+            windowHeight = $(window).height();
+            redrawSelection();
+        });
+        $(document.body).bind('mousewheel', redrawSelection);
+        $(document.body).bind('mousemove', function (e) {
+            updateHover(e.clientX, e.clientY);
+        });
+    }
+
+    function setZIndex(element, over) {
+        element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
+            return /absolute|fixed|relative/.test($(v).css('position'));
+        }).slice(-1).css('z-index') || 0) + 1;
+    }
+
+    function rectEquals(x, y) {
+        return x.left === y.left && x.top === y.top && x.width === y.width && x.height === y.height;
+    }
+
+    function rectContains(container, contained) {
+        return contained.left >= container.left && contained.right <= container.right && contained.top >= container.top && contained.bottom <= container.bottom;
+    }
+
+    function toRightBottom(v) {
+        return {
+            top: v.top | 0,
+            left: v.left | 0,
+            right: (v.right || v.left + v.width) | 0,
+            bottom: (v.bottom || v.top + v.height) | 0
+        };
+    }
+
+    function toScreenRightBottom(v) {
+        return {
+            top: v.top,
+            left: v.left,
+            right: windowWidth - (v.right || v.left + v.width),
+            bottom: windowHeight - (v.bottom || v.top + v.height)
+        };
+    }
+
+    function computeTextRects(element) {
+        var bRect = element.getBoundingClientRect();
+        var range = window.getSelection().rangeCount && window.getSelection().getRangeAt(0);
+        var rects = !range ? [] : $.map(Typer.createRange(range, Typer.createRange(element)).getClientRects(), toRightBottom);
+        var result = [];
+        rects.sort(function (a, b) {
+            return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
+        });
+        $.each(rects, function (i, v) {
+            var prev = result[0];
+            if (prev) {
+                if (v.left >= prev.right && v.top < prev.bottom) {
+                    result.shift();
+                    v.top = Math.min(v.top, prev.top);
+                    v.left = prev.left;
+                    v.bottom = Math.max(v.bottom, prev.bottom);
+                    prev = result[0];
+                } else if (v.top >= prev.bottom) {
+                    prev.right = bRect.left + bRect.width;
+                }
+            }
+            if (prev) {
+                if (rectContains(prev, v)) {
+                    return;
+                }
+                if (v.top > prev.top && v.top - prev.bottom < v.bottom - v.top) {
+                    prev.bottom = v.top;
+                }
+                if (result[1] && prev.left === result[1].left && prev.right === result[1].right) {
+                    prev.top = result.splice(1, 1)[0].top;
+                }
+            }
+            result.unshift(v);
+        });
+        return result;
+    }
+
+    function addLayer(layers, element, type) {
+        var found;
+        $.each(layers, function (i, v) {
+            if (v.element === null) {
+                found = v;
+            }
+            if (v.element === element) {
+                v.type = type;
+                found = true;
+                return false;
+            }
+        });
+        if (typeof found === 'object') {
+            found.element = element;
+            found.type = type;
+        } else if (!found) {
+            layers[layers.length] = {
+                element: element,
+                type: type
+            };
+        }
+    }
+
+    function resetLayers(layers) {
+        $.each(layers, function (i, v) {
+            v.type = 'none';
+            if (!$.contains(document, v.element)) {
+                v.element = null;
+            }
+        });
+    }
+
+    function draw(layers) {
+        $.each(layers, function (i, v) {
+            var dom = v.dom = v.dom || [];
+            var domCount = 0;
+
+            function drawLayer(className, css, value) {
+                dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
+                dom[domCount].className = className;
+                dom[domCount].setAttribute('style', '');
+                $(dom[domCount]).css(css || '', value);
+                return dom[domCount++];
+            }
+
+            if (v.type === 'text') {
+                var rects = computeTextRects(v.element);
+                $.each(rects, function (i, v) {
+                    var prev = rects[i - 1] || INVALID;
+                    var next = rects[i + 1] || INVALID;
+                    var dom = drawLayer('fill', toScreenRightBottom(v));
+                    dom.className += [
+                        v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
+                        v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
+                        v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
+                        v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
+                });
+            } else if (v.type === 'layout' || v.type === 'layout-fill' || v.type === 'layout-margin') {
+                var bRect = v.element.getBoundingClientRect();
+                drawLayer('line-n', 'top', bRect.top);
+                drawLayer('line-s', 'top', bRect.top + bRect.height);
+                drawLayer('line-w', 'left', bRect.left);
+                drawLayer('line-e', 'left', bRect.left + bRect.width);
+                if (v.type === 'layout-margin' || v.type === 'layout-fill') {
+                    var style = window.getComputedStyle(v.element);
+                    var s = toScreenRightBottom(bRect);
+                    s.margin = [-parseFloat(style.marginTop), -parseFloat(style.marginRight), -parseFloat(style.marginBottom), -parseFloat(style.marginLeft), ''].join('px ');
+                    s.borderWidth = [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft].join(' ');
+                    drawLayer('fill-margin', s);
+                }
+                if (v.type === 'layout-fill') {
+                    drawLayer('fill', bRect);
+                }
+            }
+            if (dom.length > domCount) {
+                freeDiv.push.apply(freeDiv, dom.splice(domCount));
+            }
+            $(dom).appendTo(container);
+        });
+        $(freeDiv).detach();
+        if (activeTyper) {
+            setZIndex(container, activeTyper.element);
+        }
+    }
+
+    function redrawSelection() {
+        if (activeTyper) {
+            var currentRect = activeTyper.element.getBoundingClientRect();
+            if (!previousRect || !rectEquals(previousRect, currentRect)) {
+                previousRect = currentRect;
+                draw(selectionLayers);
+            }
+        }
+    }
+
+    function updateHover(x, y) {
+        resetLayers(hoverLayers);
+        if (activeTyper) {
+            var node = activeTyper.nodeFromPoint(x, y);
+            if (node) {
+                if (node.nodeType & (Typer.NODE_WIDGET)) {
+                    addLayer(hoverLayers, node.widget.element, 'layout');
+                } else {
+                    if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
+                        for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
+                    }
+                    addLayer(hoverLayers, node.element, 'layout');
+                }
+            }
+        }
+        draw(hoverLayers);
+    }
+
+    function updateSelection(options) {
+        var selection = activeTyper.getSelection();
+        resetLayers(selectionLayers);
+        if (!selection.isCaret) {
+            Typer.iterate(selection.createTreeWalker(-1, function (v) {
+                if ((v.nodeType & NODE_ANY_ALLOWTEXT) || (options.layout && activeWidget && v.element === activeWidget.element)) {
+                    addLayer(selectionLayers, v.element, v.nodeType & NODE_ANY_ALLOWTEXT ? 'text' : 'layout-fill');
+                    return 2;
+                }
+            }));
+        } else if (options.layout && selection.startNode.nodeType & NODE_ANY_ALLOWTEXT) {
+            addLayer(selectionLayers, selection.startNode.element, 'layout-margin');
+        }
+        draw(selectionLayers);
+    }
+
+    Typer.widgets.visualizer = {
+        inline: true,
+        options: {
+            layout: true
+        },
+        init: function (e) {
+            $(e.typer.element).addClass('has-typer-visualizer');
+            if (supported && !init.init) {
+                init();
+                init.init = true;
+            }
+        },
+        focusin: function (e) {
+            activeTyper = e.typer;
+        },
+        focusout: function (e) {
+            activeTyper = null;
+            $(container).children().detach();
+        },
+        widgetFocusin: function (e, widget) {
+            activeWidget = widget;
+            if (supported) {
+                updateSelection(e.widget.options);
+            }
+        },
+        widgetFocusout: function (e) {
+            activeWidget = null;
+        },
+        stateChange: function (e) {
+            if (supported && e.typer === activeTyper) {
+                updateSelection(e.widget.options);
+            }
+        }
+    };
+
+    Typer.defaultOptions.visualizer = supported;
+
+})(jQuery, window.Typer);
 
 (function ($, Typer) {
     'use strict';
