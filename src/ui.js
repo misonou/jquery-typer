@@ -100,6 +100,8 @@
                 v.name = v.name || i;
                 control.controls.push(v);
             });
+        } else if ($.isArray(control.controls)) {
+            control.controls = $.map(control.controls, Object.create);
         }
         $.each(control.controls || [], function (i, v) {
             v.name = v.name || 'noname:' + (Math.random().toString(36).substr(2, 8));
@@ -265,7 +267,7 @@
             if (self.widget) {
                 obj[self.widget.id] = self.widget;
             } else if (self.typer) {
-                $.each(self.typer.getSelection().widgets.concat(self.typer.getStaticWidgets()), function (i, v) {
+                $.each(self.typer.getSelection().getWidgets().concat(self.typer.getStaticWidgets()), function (i, v) {
                     obj[v.id] = v;
                 });
             }
@@ -357,6 +359,11 @@
         },
         addLabels: function (language, values) {
             $.extend(definedLabels, values);
+        },
+        setZIndex: function (element, over) {
+            element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
+                return /absolute|fixed|relative/.test($(v).css('position'));
+            }).slice(-1).css('z-index') || 0) + 1;
         }
     });
 
@@ -414,7 +421,7 @@
                 setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
                 ui.update();
                 ui.trigger(self, 'open');
-                deferred.always(function () { 
+                deferred.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                 });

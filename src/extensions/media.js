@@ -1,7 +1,7 @@
 (function ($, Typer) {
     'use strict';
 
-    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))$/gi;
+    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/gi;
 
     Typer.widgets.media = {
         element: 'img,audio,video,a:has(>img)',

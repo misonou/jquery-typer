@@ -54,18 +54,12 @@
         });
     }
 
-    function setZIndex(element, over) {
-        element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
-            return /absolute|fixed|relative/.test($(v).css('position'));
-        }).slice(-1).css('z-index') || 0) + 1;
+    function rectEquals(a, b) {
+        return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
     }
 
-    function rectEquals(x, y) {
-        return x.left === y.left && x.top === y.top && x.width === y.width && x.height === y.height;
-    }
-
-    function rectContains(container, contained) {
-        return contained.left >= container.left && contained.right <= container.right && contained.top >= container.top && contained.bottom <= container.bottom;
+    function rectCovers(a, b) {
+        return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
     function toRightBottom(v) {
@@ -108,7 +102,7 @@
                 }
             }
             if (prev) {
-                if (rectContains(prev, v)) {
+                if (rectCovers(prev, v)) {
                     return;
                 }
                 if (v.top > prev.top && v.top - prev.bottom < v.bottom - v.top) {
@@ -121,6 +115,13 @@
             result.unshift(v);
         });
         return result;
+    }
+
+    function getParagraphNode(node) {
+        if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
+            for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
+        }
+        return node;
     }
 
     function addLayer(layers, element, type) {
@@ -203,9 +204,6 @@
             $(dom).appendTo(container);
         });
         $(freeDiv).detach();
-        if (activeTyper) {
-            setZIndex(container, activeTyper.element);
-        }
     }
 
     function redrawSelection() {
@@ -226,9 +224,7 @@
                 if (node.nodeType & (Typer.NODE_WIDGET)) {
                     addLayer(hoverLayers, node.widget.element, 'layout');
                 } else {
-                    if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
-                        for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
-                    }
+                    node = getParagraphNode(node);
                     addLayer(hoverLayers, node.element, 'layout');
                 }
             }
@@ -246,8 +242,8 @@
                     return 2;
                 }
             }));
-        } else if (options.layout && selection.startNode.nodeType & NODE_ANY_ALLOWTEXT) {
-            addLayer(selectionLayers, selection.startNode.element, 'layout-margin');
+        } else if (options.layout && selection.startNode && (selection.startNode.nodeType & NODE_ANY_ALLOWTEXT)) {
+            addLayer(selectionLayers, (getParagraphNode(selection.startNode) || selection.startNode).element, 'layout-margin');
         }
         draw(selectionLayers);
     }
@@ -266,13 +262,14 @@
         },
         focusin: function (e) {
             activeTyper = e.typer;
+            Typer.ui.setZIndex(container, activeTyper.element);
         },
         focusout: function (e) {
             activeTyper = null;
             $(container).children().detach();
         },
-        widgetFocusin: function (e, widget) {
-            activeWidget = widget;
+        widgetFocusin: function (e) {
+            activeWidget = e.data;
             if (supported) {
                 updateSelection(e.widget.options);
             }

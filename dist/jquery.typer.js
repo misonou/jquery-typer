@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.0-beta
+ * jQuery Typer Plugin v0.9.0
  *
  * The MIT License (MIT)
  *
@@ -60,13 +60,12 @@
     var suppressIETextInput;
     var windowFocusedOut;
 
-    function TyperSelection(selection) {
-        if (is(selection, TyperSelection)) {
-            Object.getOwnPropertyNames(selection).filter(function (v) {
-                return !TyperSelection.prototype.hasOwnProperty(v);
-            }).forEach(function (v) {
-                this[v] = selection[v];
-            }, this);
+    function TyperSelection(typer, range) {
+        this.typer = typer;
+        this.baseCaret = new TyperCaret(typer, this);
+        this.extendCaret = new TyperCaret(typer, this);
+        if (range) {
+            this.select(range);
         }
     }
 
@@ -77,10 +76,11 @@
         this.options = options || {};
     }
 
-    function TyperEvent(eventName, typer, widget) {
+    function TyperEvent(eventName, typer, widget, data) {
         this.eventName = eventName;
         this.typer = typer;
         this.widget = widget || null;
+        this.data = data !== undefined ? data : null;
     }
 
     function TyperNode(nodeType, element, widget) {
@@ -103,35 +103,28 @@
         this.typerNodeIterator = is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT);
     }
 
+    function TyperCaret(typer, selection) {
+        this.typer = typer;
+        this.selection = selection;
+    }
+
     function replaceTimeout(source, fn, milliseconds) {
         clearTimeout(replaceTimeout[source.name]);
         replaceTimeout[source.name] = fn && setTimeout(fn, milliseconds);
     }
 
-    function definePrototype(fn, prototype) {
-        fn.prototype = prototype;
-        Object.defineProperty(prototype, 'constructor', {
+    function defineProperty(obj, name, value, enumerable) {
+        Object.defineProperty(obj, name, {
+            enumerable: enumerable !== false,
             configurable: true,
             writable: true,
-            value: fn
+            value: value
         });
     }
 
-    function defineLazyProperties(obj, props) {
-        $.each(props, function (i, v) {
-            Object.defineProperty(obj, i, {
-                enumerable: true,
-                configurable: true,
-                get: function () {
-                    Object.defineProperty(this, i, {
-                        enumerable: true,
-                        writable: true,
-                        value: v.apply(this)
-                    });
-                    return this[i];
-                }
-            });
-        });
+    function definePrototype(fn, prototype) {
+        fn.prototype = prototype;
+        defineProperty(prototype, 'constructor', fn, false);
     }
 
     function slice(arr, start, end) {
@@ -169,7 +162,7 @@
             if (value === 1 && callback) {
                 callback(iterator.currentNode);
             }
-            for (; iterator.nextNode(); callback && callback(iterator.currentNode));
+            for (var cur; (cur = iterator.nextNode()); callback && callback(cur));
         }
     }
 
@@ -246,8 +239,17 @@
         return NaN;
     }
 
+    function connected(a, b) {
+        return a && b && !((a.commonAncestorContainer || a).compareDocumentPosition(b.commonAncestorContainer || b) & 1);
+    }
+
     function containsOrEquals(container, contained) {
         return container === contained || $.contains(container, contained);
+    }
+
+    function getCommonAncestor(a, b) {
+        for (b = b || a; a && a !== b && a.compareDocumentPosition(b) !== 20; a = a.parentNode);
+        return a;
     }
 
     function getOffset(node, offset) {
@@ -255,13 +257,15 @@
         return (offset === len || (offset === 0 && 1 / offset === -Infinity)) ? len : (len + offset) % len || 0;
     }
 
+    function getWholeTextOffset(node, textNode) {
+        var iterator = new TyperDOMNodeIterator(node, 4);
+        for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length);
+        return offset;
+    }
+
     function createRange(startNode, startOffset, endNode, endOffset) {
-        if (is(startNode, TyperSelection)) {
-            var state = startNode;
-            startNode = state.startTextNode || state.startElement;
-            endNode = state.endTextNode || state.endElement;
-            startOffset = startNode.nodeType === 1 ? state.isCaret ? state.caretPosition <= 0 : true : state.startOffset;
-            endOffset = endNode.nodeType === 1 ? state.isCaret ? state.caretPosition <= 0 : false : state.endOffset;
+        if (startNode && isFunction(startNode.getRange)) {
+            return startNode.getRange();
         }
         var startOffsetNum = +startOffset === startOffset;
         var range;
@@ -273,7 +277,7 @@
                 } else {
                     range[startOffset ? 'setStartBefore' : 'setStartAfter'](startNode);
                 }
-                if (is(endNode, Node)) {
+                if (is(endNode, Node) && connected(startNode, endNode)) {
                     if (+endOffset === endOffset) {
                         range.setEnd(endNode, getOffset(endNode, endOffset));
                     } else {
@@ -281,7 +285,7 @@
                     }
                 }
             } else {
-                range[(startOffset === true || (startOffsetNum && (startOffset & 1))) ? 'selectNodeContents' : 'selectNode'](startNode);
+                range[(startOffset === true || (startOffsetNum && (startOffset & 1)) || !startNode.parentNode) ? 'selectNodeContents' : 'selectNode'](startNode);
                 if (startOffsetNum && (startOffset & 2)) {
                     range.collapse(!!(startOffset & 4));
                 }
@@ -296,7 +300,7 @@
                 }
             }
         }
-        if (is(startOffset, Range)) {
+        if (is(startOffset, Range) && connected(range, startOffset)) {
             var inverse = range.collapsed && startOffset.collapsed ? -1 : 1;
             if (range.compareBoundaryPoints(0, startOffset) * inverse < 0) {
                 range.setStart(startOffset.startContainer, startOffset.startOffset);
@@ -309,22 +313,32 @@
     }
 
     function rangeIntersects(a, b) {
-        a = is(a, Range) || createRange(a, true);
-        b = is(b, Range) || createRange(b, true);
-        return a && b && !(a.startContainer.compareDocumentPosition(b.startContainer) & 1) && a.compareBoundaryPoints(3, b) <= 0 && a.compareBoundaryPoints(1, b) >= 0;
+        a = is(a, Range) || createRange(a);
+        b = is(b, Range) || createRange(b);
+        return connected(a, b) && a.compareBoundaryPoints(3, b) <= 0 && a.compareBoundaryPoints(1, b) >= 0;
     }
 
     function rangeCovers(a, b) {
-        a = is(a, Range) || createRange(a, true);
-        b = is(b, Range) || createRange(b, true);
-        return a && b && !(a.startContainer.compareDocumentPosition(b.startContainer) & 1) && a.compareBoundaryPoints(0, b) <= 0 && a.compareBoundaryPoints(2, b) >= 0;
+        a = is(a, Range) || createRange(a);
+        b = is(b, Range) || createRange(b);
+        return connected(a, b) && a.compareBoundaryPoints(0, b) <= 0 && a.compareBoundaryPoints(2, b) >= 0;
+    }
+
+    function rangeEquals(a, b) {
+        a = is(a, Range) || createRange(a);
+        b = is(b, Range) || createRange(b);
+        return connected(a, b) && a.compareBoundaryPoints(0, b) === 0 && a.compareBoundaryPoints(2, b) === 0;
     }
 
     function compareRangePosition(a, b, strict) {
-        a = is(a, Range) || createRange(a, true);
-        b = is(b, Range) || createRange(b, true);
-        var value = a && b && (a.startContainer.compareDocumentPosition(b.startContainer) & 1) ? NaN : a.compareBoundaryPoints(0, b) + a.compareBoundaryPoints(2, b);
-        return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && (!rangeCovers(a, b) || !rangeCovers(b, a))))) ? NaN : value && value / Math.abs(value);
+        a = is(a, Range) || createRange(a);
+        b = is(b, Range) || createRange(b);
+        var value = !connected(a, b) ? NaN : a.compareBoundaryPoints(0, b) + a.compareBoundaryPoints(2, b);
+        return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
+    }
+
+    function rectEquals(a, b) {
+        return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
     }
 
     function codeUpdate(callback) {
@@ -339,7 +353,14 @@
         callback();
     }
 
-    function getRangeFromPoint(x, y) {
+    function getActiveRange(container) {
+        if (selection.rangeCount) {
+            var range = selection.getRangeAt(0);
+            return containsOrEquals(container, range.commonAncestorContainer) && range;
+        }
+    }
+
+    function caretRangeFromPoint(x, y) {
         function distanceFromRect(rect) {
             var distX = rect.left > x ? rect.left - x : Math.min(0, rect.left + rect.width - x);
             var distY = rect.top > y ? rect.top - y : Math.min(0, rect.top + rect.height - y);
@@ -414,6 +435,10 @@
         return document.createElement(name);
     }
 
+    function removeNode(node) {
+        $(node).remove();
+    }
+
     function wrapNode(content, parentNodes) {
         $.each(parentNodes, function (i, v) {
             content = $(v.cloneNode(false)).append(content)[0];
@@ -421,12 +446,26 @@
         return is(content, Node) || createDocumentFragment(content);
     }
 
+    function applyRange(range) {
+        try {
+            selection.removeAllRanges();
+        } catch (e) {
+            // IE fails to clear ranges by removeAllRanges() in occasions mentioned in
+            // http://stackoverflow.com/questions/22914075
+            var r = document.body.createTextRange();
+            r.collapse();
+            r.select();
+            selection.removeAllRanges();
+        }
+        selection.addRange(range);
+    }
+
     function Typer(topElement, options) {
         if (!is(topElement, Node)) {
             options = topElement;
             topElement = topElement.element;
         }
-        options = $.extend(true, {}, Typer.defaultOptions, options);
+        options = $.extend(true, {}, (!options || options.defaultOptions !== false) && Typer.defaultOptions, options);
 
         var typer = this;
         var typerDocument;
@@ -434,25 +473,33 @@
         var widgets = [];
         var widgetOptions = {};
         var currentSelection;
+        var suppressSnapshot;
         var undoable = {};
         var userFocus;
         var $self = $(topElement);
 
-        function TyperTransaction() {
-            this.originalSelection = new TyperSelection(currentSelection);
-        }
+        function TyperTransaction() { }
 
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
                 case EVENT_ALL:
-                    return widgets.concat(currentSelection.widgets);
+                    return widgets.concat(currentSelection.getWidgets());
                 case EVENT_STATIC:
                     return widgets;
                 case EVENT_HANDLER:
-                    return currentSelection.widgets.slice(0).reverse().concat(widgets);
+                    return currentSelection.getWidgets().reverse().concat(widgets);
                 case EVENT_CURRENT:
-                    return currentSelection.widgets.slice(-1);
+                    return currentSelection.getWidgets().slice(-1);
             }
+        }
+
+        function findWidgetWithCommand(name) {
+            var widget;
+            $.each(getTargetedWidgets(EVENT_HANDLER), function (i, v) {
+                widget = isFunction((widgetOptions[v.id].commands || {})[name]) && v;
+                return !widget;
+            });
+            return widget;
         }
 
         function triggerEvent(eventMode, eventName, value) {
@@ -462,7 +509,7 @@
                 var options = widgetOptions[v.id];
                 if (isFunction(options[eventName])) {
                     handlerCalled = true;
-                    return options[eventName].call(options, new TyperEvent(eventName, typer, v), value) !== false || eventMode !== EVENT_HANDLER;
+                    return options[eventName].call(options, new TyperEvent(eventName, typer, v, value)) !== false || eventMode !== EVENT_HANDLER;
                 }
             });
             if (is(eventMode, TyperWidget)) {
@@ -471,13 +518,6 @@
                 });
             }
             return handlerCalled;
-        }
-
-        function getActiveRange() {
-            if (selection.rangeCount) {
-                var range = selection.getRangeAt(0);
-                return containsOrEquals(topElement, range.commonAncestorContainer) && range;
-            }
         }
 
         function createTyperDocument(rootElement, fireEvent) {
@@ -615,6 +655,16 @@
                 }
             }
 
+            function getNode(element) {
+                ensureState();
+                if (containsOrEquals(rootElement, element)) {
+                    if (element.nodeType === 3 || tagName(element) === 'br') {
+                        element = element.parentNode;
+                    }
+                    return nodeMap.get(element) || ensureNode(element);
+                }
+            }
+
             if (!rootElement.parentNode) {
                 rootElement = is(rootElement, DocumentFragment) || createDocumentFragment(rootElement);
             }
@@ -629,144 +679,24 @@
             dirtyElements.push(null);
 
             return {
-                get rootNode() {
-                    return this.getNode(rootElement);
-                },
-                getNode: function (element) {
-                    if (containsOrEquals(rootElement, element)) {
-                        if (element.nodeType === 3 || tagName(element) === 'br') {
-                            element = element.parentNode;
-                        }
-                        ensureState();
-                        return nodeMap.get(element) || ensureNode(element);
-                    }
+                getNode: getNode,
+                getEditableNode: function (element) {
+                    var focusNode = getNode(element) || nodeMap.get(rootElement);
+                    return is(focusNode, NODE_WIDGET) ? getNode(focusNode.widget.element) : focusNode;
                 }
             };
         }
 
-        function findWidgetWithCommand(name) {
-            var widget;
-            $.each(getTargetedWidgets(EVENT_HANDLER), function (i, v) {
-                widget = isFunction((widgetOptions[v.id].commands || {})[name]) && v;
-                return !widget;
-            });
-            return widget;
-        }
-
-        function select(startNode, startOffset, endNode, endOffset) {
-            var range = createRange(startNode, startOffset, endNode, endOffset);
-            if (range) {
-                currentSelection = computeSelection(range);
-            }
-            if (containsOrEquals(document, topElement)) {
-                selection.removeAllRanges();
-                if (range) {
-                    selection.addRange(createRange(currentSelection));
-                }
-            }
-        }
-
         function getRangeFromTextOffset(node, offset) {
-            if (node && node.nodeType !== 3) {
-                var iterator = new TyperDOMNodeIterator(typerDocument.getNode(node), 4);
-                if (offset) {
-                    for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
-                } else if (1 / offset < 0) {
-                    while (iterator.nextNode());
-                    offset = iterator.currentNode.length;
-                }
-                node = iterator.currentNode;
-            }
-            return createRange(node, +offset === offset ? offset : 0, true);
-        }
-
-        function getFocusNode(range) {
-            var focusElement = range.commonAncestorContainer;
-            if (range.startContainer === range.endContainer && range.endOffset - range.startOffset <= 1) {
-                focusElement = is(focusElement.childNodes[range.startOffset], Element) || focusElement;
-            }
-            if (!containsOrEquals(topElement, focusElement)) {
-                return typerDocument.rootNode;
-            }
-            var focusNode = typerDocument.getNode(focusElement);
-            return is(focusNode, NODE_WIDGET) ? typerDocument.getNode(focusNode.widget.element) : focusNode;
-        }
-
-        function computeSelection(range) {
-            if (!containsOrEquals(topElement, range.commonAncestorContainer)) {
-                range = createRange(topElement, true);
-            }
-
-            function getBoundary(element, offset, end) {
-                var textNode, textOffset;
-                if (tagName(element) === 'br') {
-                    textNode = element.nextSibling;
-                    offset = 0;
-                } else if (element.nodeType === 1 && element.childNodes[0]) {
-                    if (end || offset === element.childNodes.length) {
-                        element = element.childNodes[(offset || 1) - 1];
-                        if (element.nodeType === 3) {
-                            textNode = element;
-                            element = textNode.parentNode;
-                            offset = textNode.length;
-                        }
-                        end = true;
-                    } else {
-                        element = element.childNodes[offset];
-                        if (!end && offset && element.nodeType === 1 && element.previousSibling.nodeType === 1) {
-                            element = element.previousSibling;
-                            end = true;
-                        }
-                        offset = 0;
-                    }
-                }
-                if (element.nodeType === 3) {
-                    textNode = element;
-                    element = element.parentNode;
-                }
-                var node = typerDocument.getNode(element);
-                while (node.parentNode && is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
-                    node = node.parentNode;
-                }
-                if (is(node, NODE_WIDGET | NODE_EDITABLE)) {
-                    element = node.widget.element;
-                    textNode = null;
-                } else if (!textNode && element.nodeType === 1) {
-                    var iterator2 = new TyperDOMNodeIterator(node, 4);
-                    iterator2.currentNode = element;
-                    while (iterator2.nextNode() && end);
-                    textNode = iterator2.currentNode;
-                    offset = end ? textNode && textNode.length : 0;
-                }
-                return {
-                    node: node,
-                    element: element,
-                    textNode: textNode,
-                    offset: offset
-                };
-            }
-
-            var startPoint = getBoundary(range.startContainer, range.startOffset);
-            var endPoint = range.collapsed ? startPoint : getBoundary(range.endContainer, range.endOffset, true);
-            return $.extend(new TyperSelection(), {
-                isCaret: range.collapsed,
-                caretPosition: (range.collapsed && compareRangePosition(range, startPoint.node.element)) || 0,
-                focusNode: getFocusNode(range),
-                startNode: startPoint.node,
-                startElement: startPoint.element,
-                startTextNode: startPoint.textNode || null,
-                startOffset: startPoint.offset || 0,
-                endNode: endPoint.node,
-                endElement: endPoint.element,
-                endTextNode: endPoint.textNode || null,
-                endOffset: endPoint.offset || 0,
-            });
+            var caret = new TyperCaret(typer);
+            caret.moveToText(node, offset);
+            return caret.getRange();
         }
 
         function updateState(fireEvent) {
-            var activeRange = getActiveRange();
-            if (activeRange || fireEvent === true) {
-                currentSelection = computeSelection(activeRange || createRange(currentSelection));
+            var activeRange = getActiveRange(topElement);
+            if (activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+                currentSelection.select(activeRange);
             }
             if (fireEvent !== false) {
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
@@ -774,27 +704,20 @@
             }
         }
 
-        function removeNode(element) {
-            if (is(element, 'li:only-child')) {
-                element = element.parentNode;
-            }
-            $(element).remove();
-        }
-
         function normalize(range) {
             range = is(range, Range) || createRange(range || topElement, true);
-            updateState(false);
             codeUpdate(function () {
-                var selection = computeSelection(range);
+                var selection = new TyperSelection(typer, range);
                 if (is(selection.focusNode, NODE_EDITABLE) && !selection.focusNode.childNodes[0]) {
                     $(EMPTY_LINE).appendTo(selection.focusNode.element);
                     return;
                 }
-                if (is(selection.focusNode, NODE_EDITABLE_PARAGRAPH) && !selection.focusNode.childDOMNodes[0]) {
-                    $(createTextNode(ZWSP)).appendTo(selection.focusNode.element);
+                if (is(selection.focusNode, NODE_EDITABLE_PARAGRAPH) && !selection.focusNode.element.childNodes[0]) {
+                    $(createTextNode()).appendTo(selection.focusNode.element);
                     return;
                 }
-                iterate(selection.createTreeWalker(-1), function (node) {
+                var selectedRange = createRange(currentSelection);
+                iterate(selection.createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
                     if (is(node, NODE_ANY_ALLOWTEXT)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
@@ -807,59 +730,42 @@
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
-                        var hasTextNodes;
-                        $(node.childDOMNodes).each(function (i, v) {
-                            if (v.nodeType === 3) {
-                                if (!v.nodeValue) {
-                                    if ((!v.previousSibling && !v.nextSibling) || tagName(v.previousSibling) === 'br') {
-                                        v.nodeValue = ZWSP;
-                                    } else if (!currentSelection || compareRangePosition(v, currentSelection, true)) {
-                                        removeNode(v);
-                                    }
-                                } else if (v.length > 1 && (v.previousSibling || v.nextSibling)) {
-                                    if (v.nodeValue.charAt(0) === ZWSP) {
-                                        v = v.splitText(1);
-                                        removeNode(v.previousSibling);
-                                    } else if (v.nodeValue.slice(-1) === ZWSP) {
-                                        v.splitText(v.length - 1);
-                                        removeNode(v.nextSibling);
-                                    } else if (/\b\u00a0$/.test(v.nodeValue) && v.nextSibling && v.nextSibling.nodeType === 3 && !/^[^\S\u00a0]/.test(v.nextSibling.nodeValue)) {
-                                        // prevent unintended non-breaking space (&nbsp;) between word boundaries when inserting contents
-                                        v.nodeValue = v.nodeValue.slice(0, -1) + ' ';
-                                    }
-                                }
-                                hasTextNodes = true;
+                        $(node.element).contents().each(function (i, v) {
+                            if (/\b\u00a0$/.test(v.nodeValue) && v.nextSibling && v.nextSibling.nodeType === 3 && !/^[^\S\u00a0]/.test(v.nextSibling.nodeValue)) {
+                                // prevent unintended non-breaking space (&nbsp;) between word boundaries when inserting contents
+                                v.nodeValue = v.nodeValue.slice(0, -1) + ' ';
                             }
                         });
-                        if (!hasTextNodes) {
+                        if (!/\S/.test(node.element.textContent)) {
                             $(createTextNode()).appendTo(node.element);
                         }
                     }
-                    if (is(node.element, Node)) {
-                        if (!is(node, NODE_WIDGET) && (!currentSelection || !rangeIntersects(currentSelection, node.element))) {
-                            node.element.normalize();
-                            if (is(node, NODE_INLINE)) {
-                                if (tagName(node.element.previousSibling) === tagName(node.element) && compareAttrs(node.element, node.element.previousSibling)) {
-                                    $(node.element).contents().appendTo(node.element.previousSibling);
-                                    removeNode(node.element);
-                                } else if (VOID_TAGS.indexOf(tagName(node.element)) < 0 && node.element.childElementCount === 0 && !trim(node.element.textContent)) {
-                                    removeNode(node.element);
-                                }
-                            } else if (is(node, NODE_EDITABLE)) {
-                                $(node.element).contents().each(function (i, v) {
-                                    if (v.nodeType === 3) {
-                                        if (trim(v.nodeValue)) {
-                                            $(v).wrap('<p>');
-                                        } else {
-                                            removeNode(v);
-                                        }
+                    if (!rangeIntersects(selectedRange, node.element)) {
+                        node.element.normalize();
+                        $(node.element).contents().each(function (i, v) {
+                            if (v.nodeType === 3) {
+                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)|^[^\S\u00a0]+|[^\S\u00a0]+$/g, '').replace(/\b\u00a0\b/g, ' ');
+                            }
+                        });
+                        if (is(node, NODE_INLINE)) {
+                            if (tagName(node.element.previousSibling) === tagName(node.element) && compareAttrs(node.element, node.element.previousSibling)) {
+                                $(node.element).contents().appendTo(node.element.previousSibling);
+                                removeNode(node.element);
+                            } else if (VOID_TAGS.indexOf(tagName(node.element)) < 0 && node.element.childElementCount === 0 && !trim(node.element.textContent)) {
+                                removeNode(node.element);
+                            }
+                        } else if (is(node, NODE_EDITABLE)) {
+                            $(node.element).contents().each(function (i, v) {
+                                if (v.nodeType === 3) {
+                                    if (trim(v.nodeValue)) {
+                                        $(v).wrap('<p>');
+                                    } else {
+                                        removeNode(v);
                                     }
-                                });
-                                if (!node.element.childNodes[0]) {
-                                    $(EMPTY_LINE).appendTo(node.element);
                                 }
-                            } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
-                                $(createTextNode(ZWSP)).appendTo(node.element);
+                            });
+                            if (!node.element.childNodes[0]) {
+                                $(EMPTY_LINE).appendTo(node.element);
                             }
                         }
                     }
@@ -890,7 +796,7 @@
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var state = computeSelection(range);
+            var state = new TyperSelection(typer, range);
             var isSingleEditable = state.isSingleEditable;
 
             if (!range.collapsed) {
@@ -901,7 +807,7 @@
                     }
                     if (rangeCovers(range, node.element)) {
                         if (cloneNode) {
-                            $(stack[0][1]).append(node.cloneDOMNodes(true));
+                            $(stack[0][1]).append(node.element.cloneNode(true));
                         }
                         if (clearNode) {
                             if (is(node, NODE_EDITABLE)) {
@@ -917,7 +823,7 @@
                     var content = is(node, NODE_ANY_ALLOWTEXT) && createRange(node.element, range)[method]();
                     if (cloneNode) {
                         if (node.element !== topElement && (!is(node, NODE_PARAGRAPH | NODE_INLINE) || (content && tagName(content.firstChild) !== tagName(node.element)))) {
-                            var clonedNode = node.cloneDOMNodes(false);
+                            var clonedNode = node.element.cloneNode(false);
                             stack[0][1].appendChild(clonedNode);
                             if (!is(clonedNode, DocumentFragment)) {
                                 stack.unshift([node.element, clonedNode]);
@@ -933,13 +839,13 @@
             if (isFunction(callback)) {
                 var startPoint = createRange(range, true);
                 var endPoint = !isSingleEditable ? startPoint : createRange(range, false);
-                var newState = computeSelection(createRange(startPoint, endPoint));
+                var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
 
                 // check if current insertion point is an empty editable element
                 // normalize before inserting content
                 if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode) {
                     normalize(range);
-                    newState = computeSelection(createRange(newState.startNode.element, true));
+                    newState = new TyperSelection(typer, createRange(newState.startNode.element, true));
                 }
                 // ensure start point lies within valid selection
                 if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
@@ -948,14 +854,14 @@
                 callback(newState, startPoint, endPoint);
             } else {
                 normalize(range);
+                undoable.snapshot();
             }
-            updateState(false);
             return fragment;
         }
 
         function insertContents(range, content) {
             if (!is(content, Node)) {
-                content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.+/, '<p>$&</p>').replace(/<p>(<|$)/g, '<p>' + ZWSP_ENTITIY + '$1') || EMPTY_LINE;
+                content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>');
             }
             content = slice(createDocumentFragment(content).childNodes);
 
@@ -991,10 +897,29 @@
                         }
                     }
                     if (!is(node, NODE_ANY_ALLOWTEXT) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
-                        var splitEnd = createRange(getFocusNode(caretPoint).element, COLLAPSE_END_OUTSIDE);
-                        var splitContent = createRange(endPoint, splitEnd).extractContents();
+                        var splitLastNode = typerDocument.getEditableNode(caretPoint.startContainer);
+                        while (!is(splitLastNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
+                            splitLastNode = splitLastNode.parentNode;
+                        }
+                        var splitEnd = createRange(splitLastNode.element, COLLAPSE_END_OUTSIDE);
+                        var splitContent = createRange(caretPoint, splitEnd).extractContents();
                         var splitFirstNode = splitContent.childNodes[0];
                         splitEnd.insertNode(splitContent);
+
+                        if (!/\S/.test(splitLastNode.element.textContent)) {
+                            caretPoint.insertNode(createTextNode());
+                        }
+                        if (!/\S/.test(splitFirstNode.textContent)) {
+                            splitFirstNode.appendChild(createTextNode());
+                        }
+                        if (splitLastNode.element.textContent.slice(-1) === ' ') {
+                            var n1 = iterateToArray(document.createNodeIterator(splitLastNode.element, 4, null, false)).filter(mapFn('nodeValue')).slice(-1)[0];
+                            n1.nodeValue = n1.nodeValue.slice(0, -1) + '\u00a0';
+                        }
+                        if (splitFirstNode.textContent.charAt(0) === ' ') {
+                            var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
+                            n2.nodeValue = '\u00a0' + n2.nodeValue.slice(1);
+                        }
                         caretPoint = createRange(splitFirstNode || splitEnd, COLLAPSE_START_INSIDE);
                         newPoint = newPoint || caretPoint.cloneRange();
                         endPoint = createRange(splitEnd, false);
@@ -1012,7 +937,12 @@
                         caretPoint.collapse(false);
                         paragraphAsInline = false;
                     } else {
-                        createRange(getFocusNode(caretPoint).element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
+                        var caretNode = typerDocument.getEditableNode(caretPoint.startContainer);
+                        if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                            caretPoint.insertNode(nodeToInsert);
+                        } else {
+                            createRange(caretNode.element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
+                        }
                         caretPoint = createRange(nodeToInsert, COLLAPSE_END_INSIDE);
                         insertAsInline = is(node, NODE_ANY_ALLOWTEXT);
                         hasInsertedBlock = true;
@@ -1022,8 +952,8 @@
                     createRange(state.startNode.element, COLLAPSE_END_INSIDE).insertNode(createRange(state.endNode.element, true).extractContents());
                     removeNode(state.endNode.element);
                 }
-                normalize(createRange(startPoint, endPoint));
-                select(newPoint || caretPoint, true);
+                normalize(createRange(startPoint, caretPoint));
+                currentSelection.select(newPoint || caretPoint, true);
             });
         }
 
@@ -1032,8 +962,8 @@
                 content = extractContents(content, 'copy');
             }
             var text = '';
-            var document = createTyperDocument(content);
-            $.each(document.rootNode.childNodes, function (i, v) {
+            var rootNode = createTyperDocument(content).getNode(content);
+            $.each(rootNode.childNodes, function (i, v) {
                 if (is(v, NODE_WIDGET | NODE_EDITABLE) && isFunction(widgetOptions[v.widget.id].text)) {
                     text += (text && '\n\n') + widgetOptions[v.widget.id].text(v.widget);
                     return;
@@ -1066,12 +996,7 @@
 
             function setMarker(node, offset, start) {
                 if (node && node.nodeType === 3) {
-                    var wholeTextOffset = 0;
-                    $.each(iterateToArray(new TyperDOMNodeIterator(typerDocument.getNode(node), 4)), function (i, v) {
-                        wholeTextOffset += v === node ? offset : v.length;
-                        return v !== node;
-                    });
-                    $(node.parentNode).attr(MARKER_ATTR[+start], wholeTextOffset);
+                    $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typerDocument.getNode(node), node) + offset);
                 } else if (node) {
                     $(node).attr(MARKER_ATTR[+start], '');
                 }
@@ -1088,7 +1013,7 @@
             }
 
             function takeSnapshot() {
-                updateState(true);
+                updateState();
                 setMarker(currentSelection.startTextNode || currentSelection.startElement, currentSelection.startOffset, true);
                 if (!currentSelection.isCaret) {
                     setMarker(currentSelection.endTextNode || currentSelection.endElement, currentSelection.endOffset, false);
@@ -1106,8 +1031,8 @@
             function applySnapshot(value) {
                 var content = $.parseHTML(value)[0];
                 $self.empty().append(content.childNodes).attr(attrs(content));
-                select(getRangeFromMarker(true), getRangeFromMarker(false));
-                updateState(true);
+                currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
+                updateState();
                 checkActualChange();
             }
 
@@ -1132,8 +1057,10 @@
                     replaceTimeout('snapshot');
                     if (delay) {
                         replaceTimeout('snapshot', takeSnapshot, delay);
-                    } else if (delay !== false) {
+                    } else if (delay !== false && !suppressSnapshot) {
                         takeSnapshot();
+                    } else {
+                        updateState(false);
                     }
                 }
             });
@@ -1148,7 +1075,6 @@
             var keyDefaultPrevented;
             var hasKeyEvent;
             var activeWidget;
-            var selectDirection;
 
             function triggerWidgetFocusout() {
                 var widget = activeWidget;
@@ -1165,91 +1091,38 @@
                 });
             }
 
-            function handleKeyStroke(eventName) {
-                if (!/(backspace|(?:left|shiftLeft|up|shiftUp)Arrow)|(delete|(?:right|shiftRight|down|shiftDown)Arrow)/g.test(eventName)) {
-                    return false;
+            function deleteNextContent(e) {
+                if (!currentSelection.isCaret) {
+                    insertContents(currentSelection, '');
+                } else {
+                    var selection = currentSelection.clone();
+                    if (selection.moveByCharacter('extend', e.eventName === 'backspace' ? -1 : 1) && selection.isSingleEditable) {
+                        insertContents(selection, '');
+                    }
                 }
-                var direction = RegExp.$1 ? -1 : 1;
-                var textEnd = direction < 0 ? currentSelection.textStart : currentSelection.textEnd;
+            }
 
-                switch (eventName) {
-                    case 'backspace':
-                    case 'delete':
-                        var nextTextNode = direction < 0 ? currentSelection.previousTextNode : currentSelection.nextTextNode;
-                        if (currentSelection.isCaret && currentSelection.startTextNode && !textEnd) {
-                            return false;
-                        }
-                        if (!currentSelection.isCaret) {
-                            insertContents(currentSelection, '');
-                        } else if (!currentSelection.startTextNode) {
-                            if (currentSelection.caretPosition === direction) {
-                                select(nextTextNode, direction < 0 ? COLLAPSE_END_INSIDE : COLLAPSE_START_INSIDE);
-                                return false;
-                            }
-                            select(currentSelection.startElement);
-                        } else if (!nextTextNode) {
-                            if (currentSelection.textStart && currentSelection.textEnd) {
-                                removeNode(currentSelection.startElement);
-                            }
-                            select(direction < 0 ? currentSelection.previousNode.element : currentSelection.nextNode.element);
-                        } else if (direction < 0) {
-                            insertContents(createRange(nextTextNode, -0, currentSelection.startTextNode, 0), '');
-                        } else {
-                            insertContents(createRange(currentSelection.startTextNode, -0, nextTextNode, 0), '');
-                        }
-                        return true;
-                    case 'leftArrow':
-                    case 'rightArrow':
-                    case 'shiftLeftArrow':
-                    case 'shiftRightArrow':
-                        var nextTextNode2 = direction < 0 ? currentSelection.previousTraversableTextNode : currentSelection.nextTraversableTextNode;
-                        if (textEnd && nextTextNode2) {
-                            if (eventName.charAt(0) !== 's') {
-                                select(getRangeFromTextOffset(nextTextNode2, 0 * direction));
-                                return true;
-                            }
-                            var nextWidget = typerDocument.getNode(nextTextNode2).widget;
-                            if (nextWidget !== currentSelection.focusNode.widget) {
-                                select(createRange(nextWidget.element, COLLAPSE_START_OUTSIDE), createRange(currentSelection));
-                                return true;
-                            }
-                        }
-                        break;
-                    case 'upArrow':
-                    case 'downArrow':
-                    case 'shiftUpArrow':
-                    case 'shiftDownArrow':
-                        if (currentSelection.isCaret) {
-                            selectDirection = direction;
-                        }
-                        var currentRange = createRange(currentSelection);
-                        var currentPoint = createRange(currentRange, selectDirection < 0);
-                        var rect = currentPoint.getBoundingClientRect();
-                        for (var y = rect.top + (direction > 0 && rect.height); true; y += 5 * direction) {
-                            var newPoint = getRangeFromPoint(rect.left, y);
-                            if (!newPoint || !containsOrEquals(topElement, newPoint.startContainer)) {
-                                return false;
-                            }
-                            var newRect = newPoint.getBoundingClientRect();
-                            if (compareRangePosition(newPoint, currentPoint) && newRect.top !== rect.top && !is(getFocusNode(newPoint), NODE_WIDGET)) {
-                                newPoint = getRangeFromPoint(rect.left, newRect.top + (newRect.height / 2));
-                                select(newPoint, eventName.charAt(0) !== 's' || createRange(currentRange, selectDirection > 0));
-                                return true;
-                            }
-                        }
+            function handleTextInput(inputText, compositionend) {
+                if (inputText && triggerEvent(EVENT_CURRENT, 'textInput', inputText)) {
+                    return true;
+                }
+                if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
+                    insertContents(currentSelection, inputText);
+                    return true;
                 }
             }
 
             $self.mousedown(function (e) {
-                var anchorPoint = getRangeFromPoint(e.clientX, e.clientY);
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
                             handlers.mouseup();
                             return;
                         }
-                        var range = createRange(anchorPoint, getRangeFromPoint(e.clientX, e.clientY));
-                        select(computeSelection(range));
+                        currentSelection.moveToPoint('extend', e.clientX, e.clientY);
+                        setTimeout(function () {
+                            currentSelection.focus();
+                        });
                         replaceTimeout(normalizeInputEvent, updateState);
                         e.preventDefault();
                     },
@@ -1257,12 +1130,12 @@
                         mousedown = false;
                         $(document.body).unbind(handlers);
                         replaceTimeout(normalizeInputEvent, function () {
-                            updateState();
                             normalize(currentSelection.focusNode.element);
                             undoable.snapshot();
                         });
                     }
                 };
+                currentSelection.moveToPoint(e.clientX, e.clientY);
                 $(document.body).bind(handlers);
                 mousedown = true;
                 e.stopPropagation();
@@ -1270,7 +1143,15 @@
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
                 e.stopPropagation();
-                composition = e.type.substr(-3) !== 'end';
+                composition = e.type.slice(-1) !== 'd';
+                if (!composition) {
+                    var range = getActiveRange(topElement);
+                    createRange(range.startContainer, range.startOffset - e.originalEvent.data.length, range.startContainer, range.startOffset).deleteContents();
+                    updateState(false);
+                    handleTextInput(e.originalEvent.data, true);
+                } else {
+                    handleTextInput('');
+                }
             });
 
             $self.bind('keydown keypress keyup', function (e) {
@@ -1291,7 +1172,7 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode)));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName) || (handleKeyStroke(keyEventName) && (undoable.snapshot(), 1)) || /ctrl(?![axcvr]$)|alt|enter/i.test(keyEventName)) {
+                        if (triggerEvent(EVENT_HANDLER, keyEventName) || /ctrl(?![axcvr]$)|alt|enter/i.test(keyEventName)) {
                             keyDefaultPrevented = true;
                             e.preventDefault();
                             return;
@@ -1299,10 +1180,12 @@
                     }
                     keyDefaultPrevented = false;
                     replaceTimeout(normalizeInputEvent, function () {
-                        updateState();
-                        normalize(currentSelection.focusNode.element);
-                        if (currentSelection.focusNode.widget !== activeWidget) {
-                            triggerWidgetFocusout();
+                        if (!composition) {
+                            updateState();
+                            normalize(currentSelection.focusNode.element);
+                            if (currentSelection.focusNode.widget !== activeWidget) {
+                                triggerWidgetFocusout();
+                            }
                         }
                     });
                 } else if (e.type === 'keypress') {
@@ -1313,37 +1196,29 @@
                     if ((e.keyCode === modifiedKeyCode || isModifierKey) && modifierCount--) {
                         e.stopImmediatePropagation();
                     }
-                    if (!keyDefaultPrevented && !isModifierKey) {
+                    if (!keyDefaultPrevented && !isModifierKey && !composition) {
                         updateState();
                         sparseSnapshot(e);
                     }
                 }
             });
 
-            $self.bind('compositionstart keypress textInput textinput', function (e) {
-                undoable.snapshot(false);
-                if (!currentSelection.startTextNode || currentSelection.paragraphElements[1]) {
-                    if (e.type !== 'compositionstart') {
+            $self.bind('keypress textInput textinput', function (e) {
+                if (!suppressIETextInput) {
+                    if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
-                    var inputText = e.originalEvent.data || String.fromCharCode(e.charCode) || '';
-                    if (currentSelection.startTextNode || !triggerEvent(EVENT_CURRENT, 'textInput', inputText)) {
-                        insertContents(currentSelection, inputText);
-                        undoable.snapshot();
-                        return;
-                    }
+                    sparseSnapshot(e);
                 }
-                sparseSnapshot(e);
             });
 
             $self.bind('dragstart', function (e) {
-                var dragSelection = createRange(currentSelection);
+                var selectedRange = createRange(currentSelection);
                 var handlers = {
                     drop: function (e) {
-                        var range = getRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
-                        var content = extractContents(dragSelection, e.ctrlKey ? 'copy' : 'cut');
+                        var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
+                        var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut');
                         insertContents(range, content);
-                        undoable.snapshot();
                         e.preventDefault();
                         $self.unbind(handlers);
                     }
@@ -1378,14 +1253,13 @@
                 } else if (window.clipboardData) {
                     insertContents(currentSelection, clipboardData.getData('Text'));
                 }
-                undoable.snapshot();
                 e.stopPropagation();
                 e.preventDefault();
                 if (IS_IE) {
                     // IE put the caret in the wrong position after user code
                     // need to reposition the caret
                     setTimeout(function () {
-                        select(currentSelection);
+                        currentSelection.focus();
                     });
                 }
             });
@@ -1397,14 +1271,11 @@
                 if (activeWidget !== node.widget) {
                     triggerWidgetFocusout();
                 }
-                var range = getActiveRange();
                 if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                    if (IS_IE) {
-                        setTimeout(function () {
-                            select(node.widget.element);
-                        });
-                    }
-                    select(node.widget.element);
+                    setTimeout(function () {
+                        currentSelection.focus();
+                    });
+                    currentSelection.select(node.widget.element);
                     if (activeWidget !== node.widget) {
                         activeWidget = node.widget;
                         triggerEvent(node.widget, 'focusin');
@@ -1412,12 +1283,19 @@
                 }
             });
 
+            $self.bind('dblclick', function (e) {
+                if (currentSelection.moveToPoint(e.clientX, e.clientY)) {
+                    currentSelection.expand('word');
+                }
+                e.preventDefault();
+            });
+
             $self.bind('focusin', function () {
                 setTimeout(function () {
                     if (!userFocus) {
                         triggerEvent(EVENT_ALL, 'focusin');
                         if (!mousedown) {
-                            select(currentSelection);
+                            currentSelection.focus();
                         }
                     }
                     windowFocusedOut = false;
@@ -1433,10 +1311,44 @@
                     }
                 });
             });
+
+            $.each({
+                moveByLine: 'upArrow downArrow shiftUpArrow shiftDownArrow',
+                moveByWord: 'ctrlLeftArrow ctrlRightArrow ctrlShiftLeftArrow ctrlShiftRightArrow',
+                moveToLineEnd: 'home end shiftHome shiftEnd',
+                moveByCharacter: 'leftArrow rightArrow shiftLeftArrow shiftRightArrow'
+            }, function (i, v) {
+                $.each(v.split(' '), function (j, v) {
+                    var direction = (j & 1) ? 1 : -1, extend = !!(j & 2);
+                    widgetOptions.__core__[v] = function () {
+                        if (!extend && !currentSelection.isCaret) {
+                            currentSelection.collapse(direction < 0 ? 'start' : 'end');
+                        } else {
+                            currentSelection[i]('extend', direction);
+                            if (!extend) {
+                                currentSelection.collapse('extend');
+                            }
+                        }
+                    };
+                });
+            });
+            $.extend(widgetOptions.__core__, {
+                ctrlZ: undoable.undo,
+                ctrlY: undoable.redo,
+                ctrlShiftZ: undoable.redo,
+                backspace: deleteNextContent,
+                delete: deleteNextContent,
+                escape: function () {
+                    topElement.blur();
+                    if (getActiveRange(topElement)) {
+                        selection.removeAllRanges();
+                    }
+                }
+            });
         }
 
         function activateWidget(name, settings) {
-            if ((options[name] || options.widgets[name]) && (settings.inline || topNodeType === NODE_EDITABLE)) {
+            if ((options[name] || (options.widgets || '')[name]) && (settings.inline || topNodeType === NODE_EDITABLE)) {
                 widgetOptions[name] = Object.create(settings);
                 widgetOptions[name].options = $.extend(Object.create(settings.options || null), options[name]);
                 if (!settings.element) {
@@ -1448,29 +1360,17 @@
         function initWidgets() {
             widgets[0] = new TyperWidget(typer, '__core__');
             widgets[1] = new TyperWidget(typer, '__root__');
-            $.each(options.widgets, activateWidget);
+            $.each(options.widgets || {}, activateWidget);
             $.each(Typer.widgets, activateWidget);
 
             widgetOptions.__root__ = options;
-            widgetOptions.__core__ = {
-                ctrlZ: undoable.undo,
-                ctrlY: undoable.redo,
-                ctrlShiftZ: undoable.redo,
-                escape: function () {
-                    topElement.blur();
-                    select();
-                }
-            };
+            widgetOptions.__core__ = {};
             widgetOptions.__unknown__ = {
                 // make all other tags that are not considered paragraphs and inlines to be widgets
                 // to avoid unknown behavior while editing
                 element: options.disallowedElement || ':not(' + INNER_PTAG + ',br,b,em,i,u,strike,small,strong,sub,sup,ins,del,mark,span)'
             };
         }
-
-        initUndoable();
-        initWidgets();
-        normalizeInputEvent();
 
         var retainFocusHandlers = {
             focusin: function (e) {
@@ -1479,7 +1379,7 @@
             focusout: function (e) {
                 var focusoutTarget = e.currentTarget;
                 setTimeout(function () {
-                    if (userFocus === focusoutTarget && !getActiveRange()) {
+                    if (userFocus === focusoutTarget && !getActiveRange(topElement)) {
                         userFocus = null;
                         $self.trigger('focusout');
                     }
@@ -1487,12 +1387,14 @@
             }
         };
 
-        $.extend(typer, {
+        initUndoable();
+        initWidgets();
+        normalizeInputEvent();
+        $self.attr('contenteditable', 'true');
+        typerDocument = createTyperDocument(topElement, true);
+
+        $.extend(typer, undoable, typerDocument, {
             element: topElement,
-            canUndo: undoable.canUndo,
-            canRedo: undoable.canRedo,
-            undo: undoable.undo,
-            redo: undoable.redo,
             hasCommand: function (command) {
                 return !!findWidgetWithCommand(command);
             },
@@ -1503,48 +1405,46 @@
                 return widgets.slice(0);
             },
             getSelection: function () {
-                return new TyperSelection(currentSelection);
+                return currentSelection;
             },
             nodeFromPoint: function (x, y) {
                 return typerDocument.getNode(document.elementFromPoint(x, y));
-            },
-            select: function (startNode, startOffset, endNode, endOffset) {
-                select(startNode, startOffset, endNode, endOffset);
-                undoable.snapshot();
-            },
-            moveCaret: function (node, offset) {
-                select(getRangeFromTextOffset(node, offset));
-                undoable.snapshot();
             },
             retainFocus: function (element) {
                 $(element).bind(retainFocusHandlers);
             },
             invoke: function (command, value) {
-                codeUpdate(function () {
-                    var tx = new TyperTransaction();
-                    if (typeof command === 'string') {
-                        tx.commandName = command;
-                        tx.widget = findWidgetWithCommand(command);
-                        command = tx.widget && widgetOptions[tx.widget.id].commands[command];
+                var originalValue = suppressSnapshot;
+                var originalSelection = currentSelection.clone();
+                var timestamp = currentSelection.timestamp;
+                try {
+                    suppressSnapshot = true;
+                    codeUpdate(function () {
+                        var tx = new TyperTransaction();
+                        if (typeof command === 'string') {
+                            tx.commandName = command;
+                            tx.widget = findWidgetWithCommand(command);
+                            command = tx.widget && widgetOptions[tx.widget.id].commands[command];
+                        }
+                        if (isFunction(command)) {
+                            command.call(typer, tx, value);
+                        }
+                    });
+                } finally {
+                    if (timestamp === currentSelection.timestamp) {
+                        currentSelection.select(originalSelection);
                     }
-                    if (isFunction(command)) {
-                        command.call(typer, tx, value);
-                    }
-                });
-                undoable.snapshot();
+                    suppressSnapshot = originalValue;
+                    undoable.snapshot();
+                }
             }
         });
 
         definePrototype(TyperTransaction, {
             typer: typer,
             widget: null,
-            remove: removeNode,
-            normalize: normalize,
-            invoke: typer.invoke,
-            hasCommand: typer.hasCommand,
-            select: select,
-            moveCaret: function (node, offset) {
-                select(getRangeFromTextOffset(node, offset));
+            get selection() {
+                return currentSelection;
             },
             insertText: function (text) {
                 insertContents(currentSelection, text);
@@ -1568,9 +1468,11 @@
                 }
             },
             execCommand: function (commandName, value) {
-                select(currentSelection);
-                document.execCommand(commandName, false, value || '');
-                updateState(false);
+                $.each(currentSelection.getEditableRanges(), function (i, v) {
+                    applyRange(v);
+                    document.execCommand(commandName, false, value || '');
+                });
+                currentSelection.focus();
             },
             getSelectedText: function () {
                 var content = extractContents(currentSelection, 'copy');
@@ -1578,26 +1480,11 @@
             },
             getSelectedTextNodes: function () {
                 splitTextBoundary(currentSelection);
-                return $.map(currentSelection.selectedElements, function (v) {
-                    return $.grep(v.childNodes, function (v) {
-                        return v.nodeType === 3 && comparePosition(currentSelection.startTextNode, v) <= 0 && comparePosition(currentSelection.endTextNode, v) >= 0;
-                    });
-                });
-            },
-            restoreSelection: function () {
-                select(this.originalSelection);
+                return iterateToArray(currentSelection.createDOMNodeIterator(4));
             }
         });
 
-        defineLazyProperties(TyperTransaction.prototype, {
-            selection: function () {
-                return new TyperSelection(currentSelection);
-            }
-        });
-
-        $self.attr('contenteditable', 'true');
-        typerDocument = this.document = createTyperDocument(topElement, true);
-        currentSelection = computeSelection(createRange(topElement, COLLAPSE_START_INSIDE));
+        currentSelection = new TyperSelection(typer, createRange(topElement, COLLAPSE_START_INSIDE));
         normalize();
         triggerEvent(EVENT_STATIC, 'init');
     }
@@ -1632,7 +1519,9 @@
         createRange: createRange,
         rangeIntersects: rangeIntersects,
         rangeCovers: rangeCovers,
-        getRangeFromPoint: getRangeFromPoint,
+        rangeEquals: rangeEquals,
+        rectEquals: rectEquals,
+        caretRangeFromPoint: caretRangeFromPoint,
         defaultOptions: {
             historyLevel: 100,
             disallowedWidgets: 'keepText',
@@ -1642,23 +1531,11 @@
     });
 
     definePrototype(TyperNode, {
-        get childDOMNodes() {
-            return slice(this.element.childNodes);
-        },
         get firstChild() {
             return this.childNodes[0] || null;
         },
         get lastChild() {
             return this.childNodes.slice(-1)[0] || null;
-        },
-        createRange: function (collapse) {
-            return createRange(this.element, +collapse === collapse ? collapse : !!collapse);
-        },
-        createDOMNodeIterator: function (whatToShow, filter) {
-            return new TyperDOMNodeIterator(this, whatToShow, filter);
-        },
-        cloneDOMNodes: function (deep) {
-            return this.element.cloneNode(deep);
         }
     });
 
@@ -1809,15 +1686,15 @@
 
     function nodeIteratorTraverseTyperNode(inst, dir, into) {
         if (dir === 'previousNode') {
-            return (into && inst.typerNodeIterator.lastChild()) || inst.typerNodeIterator.previousSibling();
+            return (into && inst.typerNodeIterator.lastChild()) || inst.typerNodeIterator.previousSibling() || inst.typerNodeIterator.parentNode();
         }
-        return inst.typerNodeIterator.nextNode();
+        return (!into && inst.typerNodeIterator.nextSibling()) || inst.typerNodeIterator.nextNode();
     }
 
     function nodeIteratorTraverse(inst, dir) {
         var before = inst.currentNode;
         if (inst.iterator[dir]()) {
-            if (inst.currentNode.parentNode !== before.parentNode && nodeIteratorTraverseTyperNode(inst, dir, true)) {
+            if (inst.currentNode.parentNode !== before.parentNode && acceptNode(inst.iterator, before) === 1 && nodeIteratorTraverseTyperNode(inst, dir, true)) {
                 inst.iteratorStack.unshift({
                     dir: dir,
                     iterator: inst.iterator
@@ -1838,7 +1715,7 @@
         }
         while (nodeIteratorTraverseTyperNode(inst, dir)) {
             inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
-            if (acceptNode(inst.iterator) === 1 || inst.iterator[dir]()) {
+            if ((inst.currentNode !== before && acceptNode(inst.iterator) === 1) || inst.iterator[dir]()) {
                 return inst.currentNode;
             }
         }
@@ -1851,6 +1728,17 @@
         set currentNode(node) {
             this.iterator.currentNode = node;
         },
+        get typerNodeIterator() {
+            return null;
+        },
+        set typerNodeIterator(iterator) {
+            if (!is(iterator.currentNode, NODE_ANY_ALLOWTEXT)) {
+                iterator.nextNode();
+            }
+            defineProperty(this, 'typerNodeIterator', iterator, false);
+            defineProperty(this, 'iteratorStack', [], false);
+            defineProperty(this, 'iterator', nodeIteratorCreateNodeIterator(this), false);
+        },
         previousNode: function () {
             return nodeIteratorTraverse(this, 'previousNode');
         },
@@ -1859,33 +1747,11 @@
         }
     });
 
-    defineLazyProperties(TyperDOMNodeIterator.prototype, {
-        iterator: function () {
-            var t = this.typerNodeIterator;
-            if (!is(t.currentNode, NODE_ANY_ALLOWTEXT)) {
-                t.nextNode();
-            }
-            this.iteratorStack = [];
-            return nodeIteratorCreateNodeIterator(this);
-        }
-    });
-
     function typerSelectionDeepIterator(inst, whatToShow, filter) {
         var range = createRange(inst);
         return new TyperTreeWalker(inst.focusNode, whatToShow | NODE_SHOW_EDITABLE, function (v) {
             return !rangeIntersects(v.element, range) ? 2 : !filter ? 1 : filter(v);
         });
-    }
-
-    function typerSelectionSiblingIterator(node, whatToShow, startDOMNode) {
-        for (var root = node; root.parentNode; root = root.parentNode);
-        var iterator = new TyperTreeWalker(root, whatToShow);
-        iterator.currentNode = node;
-        if (startDOMNode) {
-            iterator = new TyperDOMNodeIterator(iterator, 4);
-            iterator.currentNode = startDOMNode;
-        }
-        return iterator;
     }
 
     function typerSelectionGetWidgets(inst) {
@@ -1899,67 +1765,293 @@
     }
 
     definePrototype(TyperSelection, {
-        getSelectedElements: function (selector) {
-            return $(this.selectedElements).filter(selector || '*').get();
+        get isSingleEditable() {
+            return !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
         },
-        getEditableElements: function (widget, selector) {
-            return $(widget.element).find(this.editableElements).filter(selector || '*').get();
+        getCaret: function (point) {
+            switch (point) {
+                case 'extend':
+                    return this.extendCaret;
+                case 'start':
+                    return this.direction < 0 ? this.extendCaret : this.baseCaret;
+                case 'end':
+                    return this.direction > 0 ? this.extendCaret : this.baseCaret;
+                default:
+                    return this.baseCaret;
+            }
+        },
+        getRange: function (collapse) {
+            if (collapse !== undefined || this.isCaret) {
+                return (collapse !== false ? this.baseCaret : this.extendCaret).getRange();
+            }
+            return createRange(this.baseCaret.getRange(), this.extendCaret.getRange());
+        },
+        getEditableRanges: function () {
+            var range = createRange(this);
+            return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
+                return createRange(range, createRange(v.element));
+            });
+        },
+        getWidgets: function () {
+            return $.map(typerSelectionGetWidgets(this), mapFn('widget'));
+        },
+        getEditableElements: function () {
+            return $.map(typerSelectionGetWidgets(this).concat(iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE))), mapFn('element'));
+        },
+        getParagraphElements: function () {
+            var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
+            var nodes = iterateToArray(iterator, null, this.startNode);
+            nodes.splice(nodes.indexOf(this.endNode) + 1);
+            return $.map(nodes, mapFn('element'));
+        },
+        getSelectedElements: function () {
+            return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT), mapFn('element'));
         },
         createTreeWalker: function (whatToShow, filter) {
             return typerSelectionDeepIterator(this, whatToShow, filter);
         },
         createDOMNodeIterator: function (whatToShow, filter) {
             return new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_WIDGET | NODE_ANY_ALLOWTEXT), whatToShow, filter);
+        },
+        collapse: function (point) {
+            point = this.getCaret(point);
+            return (point === this.baseCaret ? this.extendCaret : this.baseCaret).moveTo(point);
+        },
+        select: function (point, a, b, c) {
+            if (typeof point === 'string') {
+                return this.getCaret(point).moveTo(a);
+            }
+            var range = is(point, Range) || createRange(point, a, b, c);
+            return (this.baseCaret.moveTo(range, COLLAPSE_START_OUTSIDE) + (range.collapsed ? this.extendCaret.moveTo(this.baseCaret) : this.extendCaret.moveTo(range, COLLAPSE_END_OUTSIDE))) > 0;
+        },
+        expand: function (mode) {
+            var direction = this.direction || 1;
+            return (this.baseCaret['moveBy' + capfirst(mode)](-1 * direction) + this.extendCaret['moveBy' + capfirst(mode)](1 * direction)) > 0;
+        },
+        shrink: function (mode) {
+            var direction = this.direction;
+            var value = !!(direction && (this.baseCaret['moveBy' + capfirst(mode)](1 * direction) + this.extendCaret['moveBy' + capfirst(mode)](-1 * direction)));
+            if (this.direction !== direction) {
+                this.collapse();
+            }
+            return value;
+        },
+        focus: function () {
+            if (containsOrEquals(document, this.typer.element)) {
+                applyRange(createRange(this));
+            }
+        },
+        clone: function () {
+            var inst = new TyperSelection(this.typer);
+            inst.baseCaret.moveTo(this.baseCaret);
+            inst.extendCaret.moveTo(this.extendCaret);
+            return inst;
         }
     });
 
-    defineLazyProperties(TyperSelection.prototype, {
-        widgets: function () {
-            return $.map(typerSelectionGetWidgets(this), mapFn('widget'));
-        },
-        editableElements: function () {
-            return $.map(typerSelectionGetWidgets(this).concat(iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE))), mapFn('element'));
-        },
-        paragraphElements: function () {
-            var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
-            var nodes = iterateToArray(iterator, null, this.startNode);
-            nodes.splice(nodes.indexOf(this.endNode) + 1);
-            return $.map(nodes, mapFn('element'));
-        },
-        selectedElements: function () {
-            return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT), mapFn('element'));
-        },
-        previousNode: function () {
-            return typerSelectionSiblingIterator(this.startNode, NODE_PARAGRAPH | NODE_WIDGET).previousNode() || null;
-        },
-        nextNode: function () {
-            return typerSelectionSiblingIterator(this.endNode, NODE_PARAGRAPH | NODE_WIDGET).nextNode() || null;
-        },
-        previousTextNode: function () {
-            return typerSelectionSiblingIterator(this.startNode, NODE_ANY_ALLOWTEXT, this.startTextNode || this.startElement).previousNode() || null;
-        },
-        nextTextNode: function () {
-            return typerSelectionSiblingIterator(this.endNode, NODE_ANY_ALLOWTEXT, this.endTextNode || this.endElement).nextNode() || null;
-        },
-        previousTraversableTextNode: function () {
-            return typerSelectionSiblingIterator(this.startNode, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE, this.startTextNode || this.startElement).previousNode() || null;
-        },
-        nextTraversableTextNode: function () {
-            return typerSelectionSiblingIterator(this.endNode, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE, this.endTextNode || this.endElement).nextNode() || null;
-        },
-        textStart: function () {
-            if (this.startTextNode && (!this.startOffset || this.startTextNode.nodeValue.slice(0, this.startOffset) === ZWSP)) {
-                return !this.previousTextNode || (!rangeCovers(this.startNode.element, this.previousTextNode) || (tagName(this.previousTextNode.nextSibling) === 'br' && this.startTextNode.previousSibling === this.previousTextNode.nextSibling));
+    $.each('moveToPoint moveToText moveByLine moveToLineEnd moveByWord moveByCharacter'.split(' '), function (i, v) {
+        TyperSelection.prototype[v] = function (point) {
+            var collapse = typeof point !== 'string';
+            var value = !!TyperCaret.prototype[v].apply(this.getCaret(point), slice(arguments, +!collapse));
+            if (collapse) {
+                this.collapse();
             }
-        },
-        textEnd: function () {
-            if (this.endTextNode && (this.endOffset === this.endTextNode.length || this.endTextNode.nodeValue.slice(this.endOffset) === ZWSP)) {
-                return !this.nextTextNode || (!rangeCovers(this.endNode.element, this.nextTextNode) || (tagName(this.nextTextNode.previousSibling) === 'br' && this.endTextNode.nextSibling === this.nextTextNode.previousSibling));
-            }
-        },
-        isSingleEditable: function () {
-            return !iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE))[1];
+            return value;
+        };
+    });
+
+    function caretTextNodeIterator(inst, whatToShow) {
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(inst.typer.getNode(inst.typer.element), whatToShow), 4);
+        iterator.typerNodeIterator.currentNode = inst.typer.getNode(inst.element);
+        iterator.currentNode = inst.textNode || inst.element;
+        return iterator;
+    }
+
+    function caretUpdateSelection(inst) {
+        inst.timestamp = +new Date();
+        inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
+        inst.isCaret = !inst.direction;
+        inst.focusNode = inst.typer.getEditableNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
+            inst[caretUpdateSelection.NAMES[i + 4]] = p1[caretUpdateSelection.NAMES[i]];
+            inst[caretUpdateSelection.NAMES[i + 8]] = p2[caretUpdateSelection.NAMES[i]];
         }
+        if (inst === inst.typer.getSelection()) {
+            inst.focus();
+            inst.typer.snapshot();
+        }
+    }
+    caretUpdateSelection.NAMES = 'node element textNode offset startNode startElement startTextNode startOffset endNode endElement endTextNode endOffset'.split(' ');
+
+    function caretSetPositionRaw(inst, node, element, textNode, offset) {
+        inst.node = node;
+        inst.element = element;
+        inst.textNode = textNode || null;
+        inst.offset = offset || 0;
+        inst.wholeTextOffset = inst.offset + (textNode && getWholeTextOffset(node, textNode));
+        if (inst.selection) {
+            caretUpdateSelection(inst.selection);
+        }
+        return inst;
+    }
+
+    function caretSetPosition(inst, element, offset, end) {
+        var node, textNode, textOffset;
+        if (tagName(element) === 'br') {
+            textNode = element.nextSibling;
+            offset = 0;
+        } else if (element.nodeType === 1 && element.childNodes[0]) {
+            if (end || offset === element.childNodes.length) {
+                element = element.childNodes[(offset || 1) - 1];
+                offset = element.length;
+                end = true;
+            } else {
+                element = element.childNodes[offset];
+                offset = 0;
+            }
+        }
+        if (element.nodeType === 3) {
+            textNode = element;
+            element = textNode.parentNode;
+        }
+        node = inst.typer.getEditableNode(textNode || element);
+        if (textNode) {
+            if (node.element !== textNode.parentNode) {
+                element = node.element;
+                textNode = null;
+            } else if (!is(node, NODE_ANY_ALLOWTEXT)) {
+                node = any(node.childNodes, function (v) {
+                    return comparePosition(textNode, v.element) < 0;
+                }) || node.lastChild;
+                element = node.element;
+                textNode = null;
+                end = true;
+            }
+        }
+        if (!textNode && is(node, NODE_ANY_ALLOWTEXT)) {
+            var iterator2 = new TyperDOMNodeIterator(node, 4);
+            iterator2.currentNode = element;
+            while (iterator2.nextNode() && end);
+            textNode = iterator2.currentNode;
+            offset = end ? textNode && textNode.length : 0;
+        }
+        if (is(node, NODE_ANY_ALLOWTEXT)) {
+            for (; !is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH); node = node.parentNode);
+        }
+        return caretSetPositionRaw(inst, node, element, textNode, textNode ? offset : end ? COLLAPSE_END_OUTSIDE : COLLAPSE_START_OUTSIDE);
+    }
+
+    definePrototype(TyperCaret, {
+        getRange: function () {
+            if (this.textNode && !this.textNode.parentNode) {
+                // use calculated text offset from paragraph node in case anchored text node is detached from DOM
+                // assuming that there is no unmanaged edit after the previous selection
+                this.moveToText(this.node.element, this.wholeTextOffset);
+            }
+            return createRange(this.textNode || this.element, this.offset, !!this.textNode);
+        },
+        clone: function () {
+            return Object.create(TyperCaret.prototype).moveTo(this);
+        },
+        moveTo: function (startNode, startOffset, endNode, endOffset) {
+            if (is(startNode, TyperCaret)) {
+                return caretSetPositionRaw(this, startNode.node, startNode.element, startNode.textNode, startNode.offset);
+            }
+            var range = createRange(startNode, startOffset, endNode, endOffset);
+            var startPoint = this.selection && this.selection.getCaret('start').getRange();
+            return range && caretSetPosition(this, range.startContainer, range.startOffset, startPoint && compareRangePosition(startPoint, range) < 0);
+        },
+        moveToPoint: function (x, y) {
+            return this.moveTo(caretRangeFromPoint(x, y));
+        },
+        moveToText: function (node, offset) {
+            if (node.nodeType !== 3) {
+                var iterator = new TyperDOMNodeIterator(this.typer.getNode(node), 4);
+                if (offset) {
+                    for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
+                } else if (1 / offset < 0) {
+                    while (iterator.nextNode());
+                    offset = iterator.currentNode.length;
+                }
+                node = iterator.currentNode;
+            }
+            return caretSetPosition(this, node, getOffset(node, offset));
+        },
+        moveToLineEnd: function (direction) {
+            var rect = this.getRange().getBoundingClientRect();
+            var minx = rect.left;
+            iterate(new TyperDOMNodeIterator(this.node, 4), function (v) {
+                $.each(createRange(v).getClientRects(), function (i, v) {
+                    if (v.top <= rect.top + rect.height && v.top + v.height >= rect.top) {
+                        minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.left + v.width);
+                    }
+                });
+            });
+            return this.moveToPoint(minx, rect.top + rect.height / 2);
+        },
+        moveByLine: function (direction) {
+            var iterator = caretTextNodeIterator(this, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE);
+            var rect = this.getRange().getBoundingClientRect();
+            while (true) {
+                var rects = slice(createRange(iterator.currentNode).getClientRects());
+                var newRect = any(direction < 0 ? rects.reverse() : rects, function (v) {
+                    return direction < 0 ? v.top + v.height <= rect.top : v.top >= rect.top + rect.height;
+                });
+                if (newRect) {
+                    return this.moveToPoint(rect.left, newRect.top + (newRect.height / 2));
+                }
+                if (!iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
+                    return this.moveToLineEnd(direction);
+                }
+            }
+        },
+        moveByWord: function (direction) {
+            var re = direction < 0 ? /\b(\S*\s+|\S+)$/g : /^(\s+\S*|\S+)\b/g;
+            if (this.textNode) {
+                var str = direction < 0 ? this.textNode.nodeValue.substr(0, this.offset) : this.textNode.nodeValue.slice(this.offset);
+                if (!re.test(str)) {
+                    return this.moveByCharacter(direction);
+                }
+                if (RegExp.$1.length !== getOffset(str, 0 * -direction)) {
+                    return this.moveToText(this.textNode, this.offset + direction * RegExp.$1.length);
+                }
+            }
+            var iterator = new TyperDOMNodeIterator(this.node, 4);
+            iterator.currentNode = this.textNode || this.element;
+            while (iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
+                if (re.test(iterator.currentNode.nodeValue) && RegExp.$1.length !== getOffset(iterator.currentNode, 0 * -direction)) {
+                    return this.moveToText(iterator.currentNode, RegExp.$1.length);
+                }
+            }
+            return iterator.currentNode && this.moveToText(iterator.currentNode, 0 * -direction);
+        },
+        moveByCharacter: function (direction) {
+            var iterator = caretTextNodeIterator(this, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE);
+            var rect = this.getRange().getBoundingClientRect();
+            var offset = this.offset;
+            while (true) {
+                while (iterator.currentNode.nodeType === 1 || offset === getOffset(iterator.currentNode, 0 * -direction)) {
+                    if (!iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
+                        return false;
+                    }
+                    offset = direction < 0 ? iterator.currentNode.length + 1 : -1;
+                }
+                offset += direction;
+                var newRect = createRange(iterator.currentNode, offset, true).getBoundingClientRect();
+                if (rect.height && !rectEquals(rect, newRect)) {
+                    return this.moveToText(iterator.currentNode, offset);
+                }
+                rect = newRect;
+            }
+        }
+    });
+
+    $.each('moveByLine moveByWord moveByCharacter'.split(' '), function (i, v) {
+        var fn = TyperCaret.prototype[v];
+        TyperCaret.prototype[v] = function (direction) {
+            for (var step = direction; step && fn.call(this, direction / Math.abs(direction)); step += step > 0 ? -1 : 1);
+            return !direction || step !== direction ? this : null;
+        };
     });
 
     definePrototype(TyperWidget, {
@@ -1971,7 +2063,7 @@
         }
     });
 
-    // disable Mozilla and IE object resizing and inline table editing controls
+    // disable Mozilla object resizing and inline table editing controls
     if (!IS_IE) {
         try {
             document.designMode = 'on';
@@ -1982,7 +2074,7 @@
     }
 
     $(window).bind('focusin focusout', function (e) {
-        if (e.target === window || e.target === document.body) {
+        if (e.target === window || e.target === document.body || !e.relatedTarget) {
             windowFocusedOut = e.type === 'focusout';
         }
     });
@@ -2011,7 +2103,7 @@
         });
     }
 
-} (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, []));
+} (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
 
 (function ($, Typer) {
     'use strict';
@@ -2019,13 +2111,10 @@
     Typer.presets = {
         textbox: {
             inline: true,
-            inlineStyle: false,
-            lineBreak: false,
-            toolbar: false,
-            visualizer: false,
+            defaultOptions: false,
             disallowedElement: '*',
             init: function (e) {
-                e.typer.moveCaret(e.typer.element, -0);
+                e.typer.getSelection().moveToText(e.typer.element, -0);
                 Object.defineProperty(e.typer.element, 'value', {
                     enumerable: true,
                     configurable: true,
@@ -2035,7 +2124,7 @@
                     set: function (value) {
                         if (value !== this.value) {
                             this.textContent = value;
-                            e.typer.moveCaret(this, -0);
+                            e.typer.getSelection().moveToText(this, -0);
                         }
                     }
                 });
@@ -2157,6 +2246,8 @@
                 v.name = v.name || i;
                 control.controls.push(v);
             });
+        } else if ($.isArray(control.controls)) {
+            control.controls = $.map(control.controls, Object.create);
         }
         $.each(control.controls || [], function (i, v) {
             v.name = v.name || 'noname:' + (Math.random().toString(36).substr(2, 8));
@@ -2322,7 +2413,7 @@
             if (self.widget) {
                 obj[self.widget.id] = self.widget;
             } else if (self.typer) {
-                $.each(self.typer.getSelection().widgets.concat(self.typer.getStaticWidgets()), function (i, v) {
+                $.each(self.typer.getSelection().getWidgets().concat(self.typer.getStaticWidgets()), function (i, v) {
                     obj[v.id] = v;
                 });
             }
@@ -2414,6 +2505,11 @@
         },
         addLabels: function (language, values) {
             $.extend(definedLabels, values);
+        },
+        setZIndex: function (element, over) {
+            element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
+                return /absolute|fixed|relative/.test($(v).css('position'));
+            }).slice(-1).css('z-index') || 0) + 1;
         }
     });
 
@@ -2471,7 +2567,7 @@
                 setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
                 ui.update();
                 ui.trigger(self, 'open');
-                deferred.always(function () { 
+                deferred.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                 });
@@ -2546,7 +2642,7 @@
 
     function computePropertyValue(state, property) {
         var value;
-        $(state.selectedElements).each(function (i, v) {
+        $(state.getSelectedElements()).each(function (i, v) {
             var my;
             if (property === 'textAlign') {
                 my = getTextAlign(v);
@@ -2568,12 +2664,45 @@
         return element;
     }
 
+    function removeParagraph(element) {
+        if ($(element).is('li:only-child')) {
+            element = element.parentNode;
+        }
+        $(element).remove();
+    }
+
+    function indentParagraph(element) {
+        var list = $(element.parentNode).filter('ul,ol')[0];
+        var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
+        var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        $('<li>').append(element.childNodes).appendTo(newList);
+        removeParagraph(element);
+        if ($(newList).parent('li')[0] && !newList.previousSibling) {
+            $(Typer.createTextNode()).insertBefore(newList);
+        }
+    }
+
+    function outdentParagraph(element) {
+        var list = $(element).parent('ul,ol')[0];
+        var parentList = $(list).parent('li')[0];
+        if ($(element).next('li')[0]) {
+            if (parentList) {
+                $(list.cloneNode(false)).append($(element).nextAll()).appendTo(element);
+            } else {
+                $(list.cloneNode(false)).append($(element).nextAll()).insertAfter(list);
+                $(element).children('ul,ol').insertAfter(list);
+            }
+        }
+        $(createElementWithClassName(parentList ? 'li' : 'p')).append(element.childNodes).insertAfter(parentList || list);
+        removeParagraph(element);
+    }
+
     /* ********************************
      * Commands
      * ********************************/
 
     function justifyCommand(tx) {
-        $(tx.selection.paragraphElements).attr('align', ALIGN_VALUE[tx.commandName]);
+        $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
     }
 
     function inlineStyleCommand(tx) {
@@ -2591,21 +2720,22 @@
         }
     }
 
-    function insertListCommand(tx, type) {
+    function listCommand(tx, type) {
         var tagName = tx.commandName === 'insertOrderedList' || type ? 'ol' : 'ul';
         var html = '<' + tagName + (type || '').replace(/^.+/, ' type="$&"') + '>';
         var filter = function (i, v) {
             return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
         };
-        $.each(tx.selection.paragraphElements, function (i, v) {
-            if (v.tagName.toLowerCase() !== 'li') {
+        $.each(tx.selection.getParagraphElements(), function (i, v) {
+            if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 $(v.parentNode).wrap(html).contents().unwrap();
+            } else if (tx.selection.focusNode.widget.id === 'list') {
+                outdentParagraph(v);
             }
         });
-        tx.restoreSelection();
     }
 
     function addCommandHotKeys(name, hotkeys) {
@@ -2625,8 +2755,8 @@
                 italic: computePropertyValue(selection, 'fontStyle') === 'italic',
                 underline: computePropertyValue(selection, 'textDecoration') === 'underline',
                 strikeThrough: computePropertyValue(selection, 'textDecoration') === 'line-through',
-                superscript: !!selection.getSelectedElements('sup')[0],
-                subscript: !!selection.getSelectedElements('sub')[0],
+                superscript: !!$(selection.getSelectedElements()).filter('sup')[0],
+                subscript: !!$(selection.getSelectedElements()).filter('sub')[0],
                 inlineClass: computePropertyValue(selection, 'inlineClass')
             });
         },
@@ -2638,7 +2768,7 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var paragraphs = tx.selection.paragraphElements;
+                var paragraphs = tx.selection.getParagraphElements();
                 $(tx.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
                 $('span:has(span)', paragraphs).each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
@@ -2646,7 +2776,6 @@
                     }).wrap(createElementWithClassName('span', v.className));
                 });
                 $('span[class=""]', paragraphs).contents().unwrap();
-                tx.restoreSelection();
             }
         }
     };
@@ -2655,7 +2784,7 @@
     Typer.widgets.formatting = {
         beforeStateChange: function (e) {
             var selection = e.typer.getSelection();
-            var element = selection.paragraphElements.slice(-1)[0];
+            var element = selection.getParagraphElements().slice(-1)[0];
             if ($(element).is('li')) {
                 element = $(element).closest('ol, ul')[0] || element;
             }
@@ -2681,17 +2810,11 @@
                 if (m[1] === 'ol' || m[1] === 'ul') {
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
-                    $(tx.selection.paragraphElements).not('li').wrap(createElementWithClassName(m[1] || 'p', m[2])).contents().unwrap();
+                    $(tx.selection.getParagraphElements()).not('li').wrap(createElementWithClassName(m[1] || 'p', m[2])).contents().unwrap();
                 }
-                tx.restoreSelection();
             },
             insertLine: function (tx) {
-                var selection = tx.selection;
-                var nextElm = selection.isCaret && (selection.textEnd && $(selection.startTextNode).next('br')[0]) || (selection.textStart && $(selection.startTextNode).prev('br')[0]);
                 tx.insertText('\n\n');
-                if (nextElm) {
-                    tx.remove(nextElm);
-                }
             }
         }
     };
@@ -2701,7 +2824,7 @@
         inline: true,
         commands: {
             insertLineBreak: function (tx) {
-                tx.insertHtml('<br>' + (tx.selection.textEnd ? Typer.ZWSP_ENTITIY : ''));
+                tx.insertHtml('<br>');
             }
         }
     };
@@ -2710,46 +2833,14 @@
     Typer.widgets.list = {
         element: 'ul,ol',
         editable: 'ul,ol',
-        insert: insertListCommand,
+        insert: listCommand,
         remove: 'keepText',
-        beforeStateChange: function (e) {
-            var tagName = e.widget.element.tagName.toLowerCase();
-            $.extend(e.widget, {
-                insertUnorderedList: tagName === 'ul',
-                insertOrderedList: tagName === 'ol',
-                listType: $(e.widget.element).attr('type') || ''
-            });
-        },
         commands: {
             indent: function (tx) {
-                $.each(tx.selection.paragraphElements, function (i, v) {
-                    var list = $(v.parentNode).filter('ul,ol')[0];
-                    var prevItem = $(v).prev('li')[0] || $('<li>').insertBefore(v)[0];
-                    var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
-                    $('<li>').append(v.childNodes).appendTo(newList);
-                    tx.remove(v);
-                    if ($(newList).parent('li')[0] && !newList.previousSibling) {
-                        $(Typer.createTextNode()).insertBefore(newList);
-                    }
-                });
-                tx.restoreSelection();
+                $.map(tx.selection.getParagraphElements(), indentParagraph);
             },
             outdent: function (tx) {
-                $.each(tx.selection.paragraphElements, function (i, v) {
-                    var list = $(v.parentNode).filter('ul,ol')[0];
-                    var parentList = $(list).parent('li')[0];
-                    if ($(v).next('li')[0]) {
-                        if (parentList) {
-                            $(list.cloneNode(false)).append($(v).nextAll()).appendTo(v);
-                        } else {
-                            $(list.cloneNode(false)).append($(v).nextAll()).insertAfter(list);
-                            $(v).children('ul,ol').insertAfter(list);
-                        }
-                    }
-                    $(createElementWithClassName(parentList ? 'li' : 'p')).append(v.childNodes).insertAfter(parentList || list);
-                    tx.remove(v);
-                });
-                tx.restoreSelection();
+                $.map(tx.selection.getParagraphElements(), outdentParagraph);
             }
         }
     };
@@ -2769,9 +2860,6 @@
             execute: command,
             active: function (toolbar, self) {
                 return self.widget && self.widget[command];
-            },
-            enabled: function (toolbar, self) {
-                return (command !== 'indent' && command !== 'outdent') || (self.widget);
             }
         });
     });
@@ -2794,7 +2882,7 @@
         'toolbar:formatting': Typer.ui.group('formatting:*', {
             rqeuireTyper: true,
             enabled: function (toolbar) {
-                return !!toolbar.typer.getSelection().paragraphElements[0];
+                return !!toolbar.typer.getSelection().getParagraphElements()[0];
             }
         }),
         'formatting:paragraph': Typer.ui.dropdown({
@@ -3005,7 +3093,7 @@
 (function ($, Typer) {
     'use strict';
 
-    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))$/gi;
+    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/gi;
 
     Typer.widgets.media = {
         element: 'img,audio,video,a:has(>img)',
@@ -3280,6 +3368,7 @@
                 hideToolbar(true);
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
+                Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
             if (position) {
                 toolbar.position = 'fixed';
@@ -3367,7 +3456,8 @@
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.state = e.widget.toolbar.state = {};
         },
-        widgetInit: function (e, widget) {
+        widgetInit: function (e) {
+            var widget = e.data;
             widget.toolbar = createToolbar(e.typer, e.widget.options, widget);
         },
         focusin: function (e) {
@@ -3376,16 +3466,18 @@
         focusout: function (e) {
             setTimeout(hideToolbar);
         },
-        widgetFocusin: function (e, widget) {
+        widgetFocusin: function (e) {
+            var widget = e.data;
             if (widget.toolbar.all['toolbar:widget'].controls[0]) {
                 widget.toolbar.update();
                 showToolbar(widget.toolbar);
             }
         },
-        widgetFocusout: function (e, widget) {
+        widgetFocusout: function (e) {
             showToolbar(e.widget.toolbar);
         },
-        widgetDestroy: function (e, widget) {
+        widgetDestroy: function (e) {
+            var widget = e.data;
             if (widget.toolbar) {
                 widget.toolbar.destroy();
                 showToolbar(e.widget.toolbar);
@@ -3415,7 +3507,7 @@
         'toolbar:insert': Typer.ui.callout({
             controls: 'insert:*',
             enabled: function (toolbar) {
-                return toolbar.typer.document.rootNode.nodeType !== Typer.NODE_EDITABLE_INLINE;
+                return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
             }
         }),
         'toolbar:widget': Typer.ui.group('', {
@@ -3520,18 +3612,12 @@
         });
     }
 
-    function setZIndex(element, over) {
-        element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
-            return /absolute|fixed|relative/.test($(v).css('position'));
-        }).slice(-1).css('z-index') || 0) + 1;
+    function rectEquals(a, b) {
+        return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
     }
 
-    function rectEquals(x, y) {
-        return x.left === y.left && x.top === y.top && x.width === y.width && x.height === y.height;
-    }
-
-    function rectContains(container, contained) {
-        return contained.left >= container.left && contained.right <= container.right && contained.top >= container.top && contained.bottom <= container.bottom;
+    function rectCovers(a, b) {
+        return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
     function toRightBottom(v) {
@@ -3574,7 +3660,7 @@
                 }
             }
             if (prev) {
-                if (rectContains(prev, v)) {
+                if (rectCovers(prev, v)) {
                     return;
                 }
                 if (v.top > prev.top && v.top - prev.bottom < v.bottom - v.top) {
@@ -3587,6 +3673,13 @@
             result.unshift(v);
         });
         return result;
+    }
+
+    function getParagraphNode(node) {
+        if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
+            for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
+        }
+        return node;
     }
 
     function addLayer(layers, element, type) {
@@ -3669,9 +3762,6 @@
             $(dom).appendTo(container);
         });
         $(freeDiv).detach();
-        if (activeTyper) {
-            setZIndex(container, activeTyper.element);
-        }
     }
 
     function redrawSelection() {
@@ -3692,9 +3782,7 @@
                 if (node.nodeType & (Typer.NODE_WIDGET)) {
                     addLayer(hoverLayers, node.widget.element, 'layout');
                 } else {
-                    if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
-                        for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
-                    }
+                    node = getParagraphNode(node);
                     addLayer(hoverLayers, node.element, 'layout');
                 }
             }
@@ -3712,8 +3800,8 @@
                     return 2;
                 }
             }));
-        } else if (options.layout && selection.startNode.nodeType & NODE_ANY_ALLOWTEXT) {
-            addLayer(selectionLayers, selection.startNode.element, 'layout-margin');
+        } else if (options.layout && selection.startNode && (selection.startNode.nodeType & NODE_ANY_ALLOWTEXT)) {
+            addLayer(selectionLayers, (getParagraphNode(selection.startNode) || selection.startNode).element, 'layout-margin');
         }
         draw(selectionLayers);
     }
@@ -3732,13 +3820,14 @@
         },
         focusin: function (e) {
             activeTyper = e.typer;
+            Typer.ui.setZIndex(container, activeTyper.element);
         },
         focusout: function (e) {
             activeTyper = null;
             $(container).children().detach();
         },
-        widgetFocusin: function (e, widget) {
-            activeWidget = widget;
+        widgetFocusin: function (e) {
+            activeWidget = e.data;
             if (supported) {
                 updateSelection(e.widget.options);
             }

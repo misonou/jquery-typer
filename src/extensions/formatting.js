@@ -35,7 +35,7 @@
 
     function computePropertyValue(state, property) {
         var value;
-        $(state.selectedElements).each(function (i, v) {
+        $(state.getSelectedElements()).each(function (i, v) {
             var my;
             if (property === 'textAlign') {
                 my = getTextAlign(v);
@@ -57,12 +57,45 @@
         return element;
     }
 
+    function removeParagraph(element) {
+        if ($(element).is('li:only-child')) {
+            element = element.parentNode;
+        }
+        $(element).remove();
+    }
+
+    function indentParagraph(element) {
+        var list = $(element.parentNode).filter('ul,ol')[0];
+        var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
+        var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        $('<li>').append(element.childNodes).appendTo(newList);
+        removeParagraph(element);
+        if ($(newList).parent('li')[0] && !newList.previousSibling) {
+            $(Typer.createTextNode()).insertBefore(newList);
+        }
+    }
+
+    function outdentParagraph(element) {
+        var list = $(element).parent('ul,ol')[0];
+        var parentList = $(list).parent('li')[0];
+        if ($(element).next('li')[0]) {
+            if (parentList) {
+                $(list.cloneNode(false)).append($(element).nextAll()).appendTo(element);
+            } else {
+                $(list.cloneNode(false)).append($(element).nextAll()).insertAfter(list);
+                $(element).children('ul,ol').insertAfter(list);
+            }
+        }
+        $(createElementWithClassName(parentList ? 'li' : 'p')).append(element.childNodes).insertAfter(parentList || list);
+        removeParagraph(element);
+    }
+
     /* ********************************
      * Commands
      * ********************************/
 
     function justifyCommand(tx) {
-        $(tx.selection.paragraphElements).attr('align', ALIGN_VALUE[tx.commandName]);
+        $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
     }
 
     function inlineStyleCommand(tx) {
@@ -80,21 +113,22 @@
         }
     }
 
-    function insertListCommand(tx, type) {
+    function listCommand(tx, type) {
         var tagName = tx.commandName === 'insertOrderedList' || type ? 'ol' : 'ul';
         var html = '<' + tagName + (type || '').replace(/^.+/, ' type="$&"') + '>';
         var filter = function (i, v) {
             return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
         };
-        $.each(tx.selection.paragraphElements, function (i, v) {
-            if (v.tagName.toLowerCase() !== 'li') {
+        $.each(tx.selection.getParagraphElements(), function (i, v) {
+            if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 $(v.parentNode).wrap(html).contents().unwrap();
+            } else if (tx.selection.focusNode.widget.id === 'list') {
+                outdentParagraph(v);
             }
         });
-        tx.restoreSelection();
     }
 
     function addCommandHotKeys(name, hotkeys) {
@@ -114,8 +148,8 @@
                 italic: computePropertyValue(selection, 'fontStyle') === 'italic',
                 underline: computePropertyValue(selection, 'textDecoration') === 'underline',
                 strikeThrough: computePropertyValue(selection, 'textDecoration') === 'line-through',
-                superscript: !!selection.getSelectedElements('sup')[0],
-                subscript: !!selection.getSelectedElements('sub')[0],
+                superscript: !!$(selection.getSelectedElements()).filter('sup')[0],
+                subscript: !!$(selection.getSelectedElements()).filter('sub')[0],
                 inlineClass: computePropertyValue(selection, 'inlineClass')
             });
         },
@@ -127,7 +161,7 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var paragraphs = tx.selection.paragraphElements;
+                var paragraphs = tx.selection.getParagraphElements();
                 $(tx.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
                 $('span:has(span)', paragraphs).each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
@@ -135,7 +169,6 @@
                     }).wrap(createElementWithClassName('span', v.className));
                 });
                 $('span[class=""]', paragraphs).contents().unwrap();
-                tx.restoreSelection();
             }
         }
     };
@@ -144,7 +177,7 @@
     Typer.widgets.formatting = {
         beforeStateChange: function (e) {
             var selection = e.typer.getSelection();
-            var element = selection.paragraphElements.slice(-1)[0];
+            var element = selection.getParagraphElements().slice(-1)[0];
             if ($(element).is('li')) {
                 element = $(element).closest('ol, ul')[0] || element;
             }
@@ -170,17 +203,11 @@
                 if (m[1] === 'ol' || m[1] === 'ul') {
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
-                    $(tx.selection.paragraphElements).not('li').wrap(createElementWithClassName(m[1] || 'p', m[2])).contents().unwrap();
+                    $(tx.selection.getParagraphElements()).not('li').wrap(createElementWithClassName(m[1] || 'p', m[2])).contents().unwrap();
                 }
-                tx.restoreSelection();
             },
             insertLine: function (tx) {
-                var selection = tx.selection;
-                var nextElm = selection.isCaret && (selection.textEnd && $(selection.startTextNode).next('br')[0]) || (selection.textStart && $(selection.startTextNode).prev('br')[0]);
                 tx.insertText('\n\n');
-                if (nextElm) {
-                    tx.remove(nextElm);
-                }
             }
         }
     };
@@ -190,7 +217,7 @@
         inline: true,
         commands: {
             insertLineBreak: function (tx) {
-                tx.insertHtml('<br>' + (tx.selection.textEnd ? Typer.ZWSP_ENTITIY : ''));
+                tx.insertHtml('<br>');
             }
         }
     };
@@ -199,46 +226,14 @@
     Typer.widgets.list = {
         element: 'ul,ol',
         editable: 'ul,ol',
-        insert: insertListCommand,
+        insert: listCommand,
         remove: 'keepText',
-        beforeStateChange: function (e) {
-            var tagName = e.widget.element.tagName.toLowerCase();
-            $.extend(e.widget, {
-                insertUnorderedList: tagName === 'ul',
-                insertOrderedList: tagName === 'ol',
-                listType: $(e.widget.element).attr('type') || ''
-            });
-        },
         commands: {
             indent: function (tx) {
-                $.each(tx.selection.paragraphElements, function (i, v) {
-                    var list = $(v.parentNode).filter('ul,ol')[0];
-                    var prevItem = $(v).prev('li')[0] || $('<li>').insertBefore(v)[0];
-                    var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
-                    $('<li>').append(v.childNodes).appendTo(newList);
-                    tx.remove(v);
-                    if ($(newList).parent('li')[0] && !newList.previousSibling) {
-                        $(Typer.createTextNode()).insertBefore(newList);
-                    }
-                });
-                tx.restoreSelection();
+                $.map(tx.selection.getParagraphElements(), indentParagraph);
             },
             outdent: function (tx) {
-                $.each(tx.selection.paragraphElements, function (i, v) {
-                    var list = $(v.parentNode).filter('ul,ol')[0];
-                    var parentList = $(list).parent('li')[0];
-                    if ($(v).next('li')[0]) {
-                        if (parentList) {
-                            $(list.cloneNode(false)).append($(v).nextAll()).appendTo(v);
-                        } else {
-                            $(list.cloneNode(false)).append($(v).nextAll()).insertAfter(list);
-                            $(v).children('ul,ol').insertAfter(list);
-                        }
-                    }
-                    $(createElementWithClassName(parentList ? 'li' : 'p')).append(v.childNodes).insertAfter(parentList || list);
-                    tx.remove(v);
-                });
-                tx.restoreSelection();
+                $.map(tx.selection.getParagraphElements(), outdentParagraph);
             }
         }
     };
@@ -258,9 +253,6 @@
             execute: command,
             active: function (toolbar, self) {
                 return self.widget && self.widget[command];
-            },
-            enabled: function (toolbar, self) {
-                return (command !== 'indent' && command !== 'outdent') || (self.widget);
             }
         });
     });
@@ -283,7 +275,7 @@
         'toolbar:formatting': Typer.ui.group('formatting:*', {
             rqeuireTyper: true,
             enabled: function (toolbar) {
-                return !!toolbar.typer.getSelection().paragraphElements[0];
+                return !!toolbar.typer.getSelection().getParagraphElements()[0];
             }
         }),
         'formatting:paragraph': Typer.ui.dropdown({

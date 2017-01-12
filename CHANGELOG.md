@@ -1,3 +1,18 @@
+## 0.9.0 / 2017-01-12
+
+- (Breaking) Rewrite `TyperSelection` and introduce `TyperCaret`
+- (Breaking) Removed `Typer.select` and `Typer.moveCaret`, control selection by `Typer.getSelection()` instead
+- (Breaking) Removed `TyperNode.childDOMNodes` ,`TyperNode.cloneDOMNodes`, `TyperNode.createTreeWalk` and `TyperNode.createDOMNodeIterator`
+- (Breaking) Removed `TyperTransaction.restoreSelection`, selection wlill automatically restored
+- (Breaking) Event data is provided in `TyperEvent.data` instead of as the second argument
+- (Breaking) `Typer.getRangeFromMouseEvent` replaced by `Typer.caretRangeFromPoint`
+- Add `defaultOptions` options, set to `false` to mute default options
+- Add API to control caret over characters, words and lines
+- Improved behavior when typing in IME mode
+- Fix: better white-space handling in inserting content
+- Fix: exceptions when disconnected nodes are encountered in `createRange`
+- Fix: IE issue in clearing selection
+
 ## 0.9.0-beta / 2016-12-08
 
 - Constructor change to `Typer(element, options)` with existing one compatible

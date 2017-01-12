@@ -19,6 +19,7 @@
                 hideToolbar(true);
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
+                Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
             if (position) {
                 toolbar.position = 'fixed';
@@ -106,7 +107,8 @@
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.state = e.widget.toolbar.state = {};
         },
-        widgetInit: function (e, widget) {
+        widgetInit: function (e) {
+            var widget = e.data;
             widget.toolbar = createToolbar(e.typer, e.widget.options, widget);
         },
         focusin: function (e) {
@@ -115,16 +117,18 @@
         focusout: function (e) {
             setTimeout(hideToolbar);
         },
-        widgetFocusin: function (e, widget) {
+        widgetFocusin: function (e) {
+            var widget = e.data;
             if (widget.toolbar.all['toolbar:widget'].controls[0]) {
                 widget.toolbar.update();
                 showToolbar(widget.toolbar);
             }
         },
-        widgetFocusout: function (e, widget) {
+        widgetFocusout: function (e) {
             showToolbar(e.widget.toolbar);
         },
-        widgetDestroy: function (e, widget) {
+        widgetDestroy: function (e) {
+            var widget = e.data;
             if (widget.toolbar) {
                 widget.toolbar.destroy();
                 showToolbar(e.widget.toolbar);
@@ -154,7 +158,7 @@
         'toolbar:insert': Typer.ui.callout({
             controls: 'insert:*',
             enabled: function (toolbar) {
-                return toolbar.typer.document.rootNode.nodeType !== Typer.NODE_EDITABLE_INLINE;
+                return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
             }
         }),
         'toolbar:widget': Typer.ui.group('', {

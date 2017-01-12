@@ -4,13 +4,10 @@
     Typer.presets = {
         textbox: {
             inline: true,
-            inlineStyle: false,
-            lineBreak: false,
-            toolbar: false,
-            visualizer: false,
+            defaultOptions: false,
             disallowedElement: '*',
             init: function (e) {
-                e.typer.moveCaret(e.typer.element, -0);
+                e.typer.getSelection().moveToText(e.typer.element, -0);
                 Object.defineProperty(e.typer.element, 'value', {
                     enumerable: true,
                     configurable: true,
@@ -20,7 +17,7 @@
                     set: function (value) {
                         if (value !== this.value) {
                             this.textContent = value;
-                            e.typer.moveCaret(this, -0);
+                            e.typer.getSelection().moveToText(this, -0);
                         }
                     }
                 });
