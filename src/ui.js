@@ -8,6 +8,7 @@
     var definedIcons = {};
     var definedLabels = {};
     var definedThemes = {};
+    var definedShortcuts = {};
 
     function define(name, base, ctor) {
         /* jshint -W054 */
@@ -164,7 +165,6 @@
         }
 
         function executeFromEvent(e) {
-            e.stopPropagation();
             if ($(e.target).is(':checkbox')) {
                 setTimeout(function () {
                     ui.setValue(control, !!e.target.checked);
@@ -360,6 +360,51 @@
         addLabels: function (language, values) {
             $.extend(definedLabels, values);
         },
+        addHook: function (keystroke, hook) {
+            if (typeof keystroke === 'object') {
+                $.each(keystroke, Typer.ui.addHook);
+                return;
+            }
+            (keystroke || '').replace(/\S+/g, function (v) {
+                definedShortcuts[v] = definedShortcuts[v] || [];
+                definedShortcuts[v].push({
+                    hook: hook
+                });
+            });
+        },
+        setShortcut: function (command, keystroke) {
+            if (typeof command === 'object') {
+                $.each(command, Typer.ui.setShortcut);
+                return;
+            }
+            command = parseCompactSyntax(command);
+            definedShortcuts._map = definedShortcuts._map || {};
+
+            var current = definedShortcuts._map[command.name] = definedShortcuts._map[command.name] || [];
+            var before = current.slice(0);
+            (keystroke || '').replace(/\S+/g, function (v) {
+                var index = before.indexOf(v);
+                if (index >= 0) {
+                    before.splice(index, 1);
+                } else {
+                    current[current.length] = v;
+                    definedShortcuts[v] = definedShortcuts[v] || [];
+                    definedShortcuts[v].push({
+                        command: command.name,
+                        value: (command.params || '').value
+                    });
+                }
+            });
+            $.each(before, function (i, v) {
+                current.splice(current.indexOf(v), 1);
+                $.each(definedShortcuts[v], function (i, w) {
+                    if (w.command === command.name && w.value === (command.params || '').value) {
+                        definedShortcuts[v].splice(i, 1);
+                        return false;
+                    }
+                });
+            });
+        },
         setZIndex: function (element, over) {
             element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
                 return /absolute|fixed|relative/.test($(v).css('position'));
@@ -456,5 +501,23 @@
         'ui:button-ok': 'done',
         'ui:button-cancel': 'close'
     });
+
+    Typer.defaultOptions.shortcut = true;
+
+    Typer.widgets.shortcut = {
+        keystroke: function (e) {
+            $.each(definedShortcuts[e.data] || [], function (i, v) {
+                if (v.hook && v.hook(e.typer)) {
+                    e.preventDefault();
+                    return false;
+                }
+                if (e.typer.hasCommand(v.command)) {
+                    e.typer.invoke(v.command, v.value);
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        }
+    };
 
 } (jQuery, window.Typer));

@@ -5,7 +5,7 @@
         element: 'a[href]',
         inline: true,
         insert: function (tx, value) {
-            value = value || (/^[a-z]+:\/\//g.test(tx.getSelectedText()) && RegExp.input) || '#';
+            value = value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input) || '#';
             if (tx.selection.isCaret) {
                 var element = $('<a>').text(value).attr('href', value)[0];
                 tx.insertHtml(element);
@@ -32,14 +32,21 @@
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
-                if (typeof toolbar.options.selectLink === 'function') {
-                    return toolbar.options.selectLink();
+                if (self.widget) {
+                    return null;
                 }
-                return toolbar.prompt('dialog:selectLink', self.widget ? $(self.widget.element).attr('href') : '');
+                var currentValue = self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(toolbar.typer.getSelection().getSelectedText()) ? RegExp.input : '';
+                if (typeof toolbar.options.selectLink === 'function') {
+                    return toolbar.options.selectLink(currentValue);
+                }
+                return toolbar.prompt('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
+                if (!value) {
+                    return null;
+                }
                 if (self.widget) {
-                    tx.invoke('setURL', value);
+                    tx.typer.invoke('setURL', value);
                 } else {
                     tx.insertWidget('link', value);
                 }
@@ -88,6 +95,20 @@
     Typer.ui.addIcons('material', {
         'toolbar:link': 'insert_link',
         'link:url': 'insert_link'
+    });
+
+    Typer.ui.addHook('space', function (typer) {
+        if (typer.widgetEnabled('link')) {
+            var selection = typer.getSelection().clone();
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^[a-z]+:\/\//g.test(selection.getSelectedText())) {
+                typer.snapshot(true);
+                typer.getSelection().select(selection);
+                typer.invoke(function (tx) {
+                    tx.insertWidget('link');
+                });
+                typer.getSelection().collapse('end');
+            }
+        }
     });
 
 } (jQuery, window.Typer));

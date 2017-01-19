@@ -13,6 +13,7 @@
     }
 
     function showToolbar(toolbar, position) {
+        toolbar.update();
         if (toolbar.widget || !toolbar.options.container) {
             clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
@@ -21,22 +22,26 @@
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
+
+            var height = $(toolbar.element).height();
             if (position) {
                 toolbar.position = 'fixed';
-                $(toolbar.element).css(position);
             } else if (toolbar.position !== 'fixed') {
                 var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
-                var height = $(toolbar.element).height();
-
-                if (rect.top + rect.height > document.body.offsetHeight) {
-                    toolbar.position = '';
-                } else if (rect.top < height) {
-                    toolbar.position = 'bottom';
-                }
-                $(toolbar.element).css({
+                position = {
                     left: rect.left + $(window).scrollLeft(),
-                    top: (toolbar.position === 'bottom' ? Math.min((rect.top + rect.height) + 10, $(window).height() - height - 10) : Math.max(0, rect.top - height - 10)) + $(window).scrollTop()
-                });
+                    top: Math.max(0, rect.top - height - 10) + $(window).scrollTop()
+                };
+            }
+            if (position) {
+                var range = toolbar.typer.getSelection().getRange();
+                if (range) {
+                    var r = range.getClientRects()[0] || range.getBoundingClientRect();
+                    if (r.top >= position.top && r.top <= position.top + height) {
+                        position.top = r.top + r.height + 10;
+                    }
+                }
+                $(toolbar.element).css(position);
             }
         }
     }
@@ -108,35 +113,30 @@
             e.widget.state = e.widget.toolbar.state = {};
         },
         widgetInit: function (e) {
-            var widget = e.data;
-            widget.toolbar = createToolbar(e.typer, e.widget.options, widget);
+            e.targetWidget.toolbar = createToolbar(e.typer, e.widget.options, e.targetWidget);
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            setTimeout(hideToolbar);
+            timeout = setTimeout(hideToolbar);
         },
         widgetFocusin: function (e) {
-            var widget = e.data;
-            if (widget.toolbar.all['toolbar:widget'].controls[0]) {
-                widget.toolbar.update();
-                showToolbar(widget.toolbar);
+            if (e.targetWidget.toolbar.all['toolbar:widget'].controls[0]) {
+                showToolbar(e.targetWidget.toolbar);
             }
         },
         widgetFocusout: function (e) {
             showToolbar(e.widget.toolbar);
         },
         widgetDestroy: function (e) {
-            var widget = e.data;
-            if (widget.toolbar) {
-                widget.toolbar.destroy();
+            if (e.targetWidget.toolbar) {
+                e.targetWidget.toolbar.destroy();
                 showToolbar(e.widget.toolbar);
             }
         },
         stateChange: function () {
             if (activeToolbar) {
-                activeToolbar.update();
                 showToolbar(activeToolbar);
             }
         }

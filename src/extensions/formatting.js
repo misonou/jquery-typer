@@ -15,6 +15,13 @@
         superscript: 'sup',
         subscript: 'sub'
     };
+    var LIST_STYLE_TYPE = {
+        '1': 'decimal',
+        'A': 'upper-alpha',
+        'a': 'lower-alpha',
+        'I': 'upper-roman',
+        'i': 'lower-roman'
+    };
 
     function getTextAlign(element) {
         var textAlign = $(element).css('text-align');
@@ -65,9 +72,12 @@
     }
 
     function indentParagraph(element) {
-        var list = $(element.parentNode).filter('ul,ol')[0];
-        var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
-        var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        var list = $(element).parent('ul,ol')[0] || $(element).prev('ul,ol')[0] || $('<ul>').insertBefore(element)[0];
+        var newList = list;
+        if (newList === element.parentNode) {
+            var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
+            newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        }
         $('<li>').append(element.childNodes).appendTo(newList);
         removeParagraph(element);
         if ($(newList).parent('li')[0] && !newList.previousSibling) {
@@ -119,23 +129,18 @@
         var filter = function (i, v) {
             return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
         };
+        var lists = [];
         $.each(tx.selection.getParagraphElements(), function (i, v) {
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
+                lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 $(v.parentNode).wrap(html).contents().unwrap();
-            } else if (tx.selection.focusNode.widget.id === 'list') {
+                lists.push(v.parentNode);
+            } else if (tx.selection.focusNode.widget.id === 'list' && $.inArray(v.parentNode, lists) < 0) {
                 outdentParagraph(v);
             }
-        });
-    }
-
-    function addCommandHotKeys(name, hotkeys) {
-        (hotkeys || '').replace(/(\w+):(\w+)/g, function (v, a, b) {
-            Typer.widgets[name][a] = function (e) {
-                e.typer.invoke(b);
-            };
         });
     }
 
@@ -162,7 +167,7 @@
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
                 var paragraphs = tx.selection.getParagraphElements();
-                $(tx.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
+                $(tx.selection.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
                 $('span:has(span)', paragraphs).each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
                         return v.nodeType === 3;
@@ -172,7 +177,6 @@
             }
         }
     };
-    addCommandHotKeys('inlineStyle', 'ctrlB:bold ctrlI:italic ctrlU:underline');
 
     Typer.widgets.formatting = {
         beforeStateChange: function (e) {
@@ -193,13 +197,16 @@
                 formattingWithClassName: tagNameWithClasses
             });
         },
+        enter: function (e) {
+            e.typer.invoke('insertLine');
+        },
         commands: {
             justifyCenter: justifyCommand,
             justifyFull: justifyCommand,
             justifyLeft: justifyCommand,
             justifyRight: justifyCommand,
             formatting: function (tx, value) {
-                var m = /^([^.]*)(?:\.(.+))?/.exec(value) || [];
+                var m = /^([a-z\d]*)(?:\.(.+))?/i.exec(value) || [];
                 if (m[1] === 'ol' || m[1] === 'ul') {
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
@@ -211,23 +218,33 @@
             }
         }
     };
-    addCommandHotKeys('formatting', 'enter:insertLine ctrlShiftL:justifyLeft ctrlShiftE:justifyCenter ctrlShiftR:justifyRight');
 
     Typer.widgets.lineBreak = {
         inline: true,
+        shiftEnter: function (e) {
+            e.typer.insertHtml('<br>');
+        },
         commands: {
             insertLineBreak: function (tx) {
                 tx.insertHtml('<br>');
             }
         }
     };
-    addCommandHotKeys('lineBreak', 'shiftEnter:insertLineBreak');
 
     Typer.widgets.list = {
         element: 'ul,ol',
         editable: 'ul,ol',
         insert: listCommand,
         remove: 'keepText',
+        tab: function (e) {
+            e.typer.invoke('indent');
+        },
+        shiftTab: function (e) {
+            e.typer.invoke('outdent');
+        },
+        init: function (e) {
+            $(e.widget.element).filter('ol').attr('type-css-value', LIST_STYLE_TYPE[$(e.widget.element).attr('type')] || 'decimal');
+        },
         commands: {
             indent: function (tx) {
                 $.map(tx.selection.getParagraphElements(), indentParagraph);
@@ -385,6 +402,24 @@
         'formatting:justifyCenter': 'format_align_center',
         'formatting:justifyRight': 'format_align_right',
         'formatting:justifyFull': 'format_align_justify'
+    });
+
+    Typer.ui.setShortcut({
+        bold: 'ctrlB',
+        italic: 'ctrlI',
+        underline: 'ctrlU',
+        justifyLeft: 'ctrlShiftL',
+        justifyCenter: 'ctrlShiftE',
+        justifyRight: 'ctrlShiftR'
+    });
+
+    Typer.ui.addHook('tab', function (typer) {
+        if (typer.widgetEnabled('list')) {
+            typer.invoke(function (tx) {
+                $.map(tx.selection.getParagraphElements(), indentParagraph);
+            });
+            return true;
+        }
     });
 
 } (jQuery, window.Typer));

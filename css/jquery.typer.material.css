@@ -344,6 +344,18 @@
     z-index: 1;
 }
 
+.typer-ui-menu:after {
+    content: 'more_horiz';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    font-family: 'Material Icons';
+    line-height: 1;
+    vertical-align: top;
+    font-feature-settings: "liga" 1;
+    pointer-events: none;
+}
+
 .typer-ui-menupane {
     display: none;
     position: absolute;
@@ -357,7 +369,6 @@
     left: 100%;
 }
 
-.typer-ui-menu:hover > .typer-ui-menupane,
 .typer-ui-menu.open > .typer-ui-menupane {
     display: block;
     display: -ms-flexbox;
@@ -425,6 +436,7 @@
     border-top: 0.5em solid #555;
     border-left: 0.4em solid transparent;
     border-right: 0.4em solid transparent;
+    pointer-events: none;
 }
 
 .typer-ui-dropdown:hover:after {
@@ -469,8 +481,8 @@
     vertical-align: top;
     line-height: 1.33;
     cursor: text;
-    flex-grow: 1;
-    -ms-flex: 1;
+    flex: 1 0 auto;
+    -ms-flex: 1 0 auto;
     -webkit-user-select: text;
     -moz-user-select: text;
     -ms-user-select: text;

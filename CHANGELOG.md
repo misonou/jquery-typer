@@ -1,3 +1,15 @@
+## 0.9.1 / 2017-01-20
+
+- Introduce shortcuts and hooks
+- Allow rich-text copy and paste within the same window on IE and Firefox
+- Improved handling on copying content
+- Fix: many fixes to `TyperCaret` esp. traversal over characters and words
+- Fix: incorrect position returned by `caretRangeFromPoint` polyfill
+- Fix: `TyperDOMNodeIterator` erroneous iteration
+- Fix: `TyperCaret.moveToPoint` moves to incorrect position when the point is visually covered by other elements
+- Fix: focus lost from element with `retainFocus` called
+- Fix: incorrect selection after `TyperTransaction.execCommand`
+
 ## 0.9.0 / 2017-01-12
 
 - (Breaking) Rewrite `TyperSelection` and introduce `TyperCaret`

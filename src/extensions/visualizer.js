@@ -22,7 +22,7 @@
             .has-typer-visualizer:focus { outline:none; }\
             .has-typer-visualizer::selection,.has-typer-visualizer ::selection { background-color:transparent; }\
             .has-typer-visualizer::-moz-selection,.has-typer-visualizer ::-moz-selection { background-color:transparent; }\
-            .typer-visualizer { position:fixed;pointer-events:none; }\
+            .typer-visualizer { position:fixed;pointer-events:none;width:100%;height:100%; }\
             .typer-visualizer > div { position:fixed;box-sizing:border-box; }\
             .typer-visualizer .fill { background-color:rgba(0,31,81,0.2); }\
             .typer-visualizer .fill-margin { border:solid rgba(255,158,98,0.2); }\
@@ -269,7 +269,7 @@
             $(container).children().detach();
         },
         widgetFocusin: function (e) {
-            activeWidget = e.data;
+            activeWidget = e.targetWidget;
             if (supported) {
                 updateSelection(e.widget.options);
             }

@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.0
+ * jQuery Typer Plugin v0.9.1
  *
  * The MIT License (MIT)
  *
@@ -27,7 +27,7 @@
 (function ($, window, document, String, Node, Range, DocumentFragment, WeakMap, array) {
     'use strict';
 
-    var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
+    var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
     var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
     var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
     var ZWSP = '\u200b';
@@ -57,7 +57,9 @@
 
     var isFunction = $.isFunction;
     var selection = window.getSelection();
-    var suppressIETextInput;
+    var caretRangeFromPoint_ = document.caretRangeFromPoint;
+    var clipboard = {};
+    var userFocus;
     var windowFocusedOut;
 
     function TyperSelection(typer, range) {
@@ -76,11 +78,12 @@
         this.options = options || {};
     }
 
-    function TyperEvent(eventName, typer, widget, data) {
+    function TyperEvent(eventName, typer, widget, data, props) {
         this.eventName = eventName;
         this.typer = typer;
         this.widget = widget || null;
         this.data = data !== undefined ? data : null;
+        $.extend(this, props);
     }
 
     function TyperNode(nodeType, element, widget) {
@@ -100,12 +103,27 @@
     function TyperDOMNodeIterator(root, whatToShow, filter) {
         this.whatToShow = whatToShow;
         this.filter = filter || null;
-        this.typerNodeIterator = is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT);
+        nodeIteratorInit(this, is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT));
     }
 
     function TyperCaret(typer, selection) {
         this.typer = typer;
-        this.selection = selection;
+        this.selection = selection || null;
+    }
+
+    function transaction(finalize) {
+        return function run(callback, args, thisArg) {
+            var originalValue = run.executing;
+            try {
+                run.executing = true;
+                return callback.apply(thisArg || this, args);
+            } finally {
+                run.executing = originalValue;
+                if (!run.executing && finalize) {
+                    finalize();
+                }
+            }
+        };
     }
 
     function replaceTimeout(source, fn, milliseconds) {
@@ -338,19 +356,11 @@
     }
 
     function rectEquals(a, b) {
-        return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+        return (a.left | 0) === (b.left | 0) && (a.top | 0) === (b.top | 0) && (a.width | 0) === (b.width | 0) && (a.height | 0) === (b.height | 0);
     }
 
-    function codeUpdate(callback) {
-        // IE fires textinput event on the parent element when the text node's value is modified
-        // even if modification is done through JavaScript rather than user action
-        if (!suppressIETextInput) {
-            setTimeout(function () {
-                suppressIETextInput = false;
-            });
-        }
-        suppressIETextInput = true;
-        callback();
+    function pointInRect(x, y, rect) {
+        return x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height;
     }
 
     function getActiveRange(container) {
@@ -360,67 +370,22 @@
         }
     }
 
-    function caretRangeFromPoint(x, y) {
-        function distanceFromRect(rect) {
-            var distX = rect.left > x ? rect.left - x : Math.min(0, rect.left + rect.width - x);
-            var distY = rect.top > y ? rect.top - y : Math.min(0, rect.top + rect.height - y);
-            return !distX || !distY ? distX || distY : distY > 0 ? Infinity : -Infinity;
-        }
-
-        function distanceFromCharacter(node, index) {
-            return distanceFromRect(createRange(node, index, true).getClientRects()[0] || {});
-        }
-
-        if (document.caretRangeFromPoint) {
-            return document.caretRangeFromPoint(x, y);
-        }
-        if (document.caretPositionFromPoint) {
-            var pos = document.caretPositionFromPoint(x, y);
-            return createRange(pos.offsetNode, pos.offset, true);
-        }
-        if (document.body.createTextRange) {
-            var element = document.elementFromPoint(x, y);
-            for (var dist, nextElement; dist !== Infinity; dist = Infinity, element = nextElement || element) {
-                for (var i = 0, length = element.childNodes.length; i < length; i++) {
-                    var node = element.childNodes[i];
-                    if (node.nodeType === 1 && tagName(node) !== 'br') {
-                        var thisDist = Math.abs(distanceFromRect(node.getBoundingClientRect()));
-                        if (thisDist > dist) {
-                            break;
-                        }
-                        dist = thisDist;
-                        nextElement = node;
-                    } else if (node.nodeType === 3 && distanceFromCharacter(node, node.length - 1) > 0) {
-                        var b0 = 0, b1 = node.length;
-                        while (b1 - b0 > 1) {
-                            var mid = (b1 + b0) >> 1;
-                            var p = distanceFromCharacter(node, mid) < 0;
-                            b0 = p ? mid : b0;
-                            b1 = p ? b1 : mid;
-                        }
-                        return createRange(node, Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1, true);
-                    }
+    function caretRangeFromPoint(x, y, element) {
+        var range = caretRangeFromPoint_.call(document, x, y);
+        if (element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
+            var elm = [];
+            try {
+                while (comparePosition(element, range.commonAncestorContainer, true)) {
+                    var target = $(range.commonAncestorContainer).parentsUntil(getCommonAncestor(element, range.commonAncestorContainer)).slice(-1)[0];
+                    target.style.pointerEvents = 'none';
+                    elm[elm.length] = target;
+                    range = caretRangeFromPoint_.call(document, x, y);
                 }
+            } finally {
+                $(elm).css('pointer-events', '');
             }
-            return createRange(element, COLLAPSE_END_INSIDE);
         }
-    }
-
-    function splitTextBoundary(state) {
-        var startTextNode = state.startTextNode;
-        var endTextNode = state.endTextNode;
-        var sameNode = (startTextNode === endTextNode);
-        if (endTextNode && state.endOffset < endTextNode.length) {
-            endTextNode.splitText(state.endOffset);
-        }
-        if (startTextNode && state.startOffset > 0) {
-            state.startTextNode = startTextNode.splitText(state.startOffset);
-            if (sameNode) {
-                state.endTextNode = state.startTextNode;
-                state.endOffset -= state.startOffset;
-            }
-            state.startOffset = 0;
-        }
+        return range;
     }
 
     function createDocumentFragment(node) {
@@ -428,7 +393,7 @@
     }
 
     function createTextNode(text) {
-        return document.createTextNode(trim(text) || ZWSP);
+        return document.createTextNode(text || ZWSP);
     }
 
     function createElement(name) {
@@ -468,15 +433,25 @@
         options = $.extend(true, {}, (!options || options.defaultOptions !== false) && Typer.defaultOptions, options);
 
         var typer = this;
-        var typerDocument;
         var topNodeType = options.inline || is(topElement, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
         var widgets = [];
         var widgetOptions = {};
-        var currentSelection;
-        var suppressSnapshot;
         var undoable = {};
-        var userFocus;
+        var currentSelection;
+        var typerDocument;
         var $self = $(topElement);
+
+        var codeUpdate = transaction(function () {
+            if (codeUpdate.needSnapshot) {
+                undoable.snapshot();
+            }
+            // IE fires textinput event on the parent element when the text node's value is modified
+            // even if modification is done through JavaScript rather than user action
+            codeUpdate.suppressTextEvent = true;
+            setTimeout(function () {
+                codeUpdate.suppressTextEvent = false;
+            });
+        });
 
         function TyperTransaction() { }
 
@@ -502,19 +477,23 @@
             return widget;
         }
 
-        function triggerEvent(eventMode, eventName, value) {
+        function triggerEvent(eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
             var handlerCalled;
-            $.each(widgets, function (i, v) {
-                var options = widgetOptions[v.id];
-                if (isFunction(options[eventName])) {
-                    handlerCalled = true;
-                    return options[eventName].call(options, new TyperEvent(eventName, typer, v, value)) !== false || eventMode !== EVENT_HANDLER;
-                }
+            codeUpdate(function () {
+                $.each(widgets, function (i, v) {
+                    var options = widgetOptions[v.id];
+                    if (isFunction(options[eventName])) {
+                        handlerCalled = true;
+                        return options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props)) !== false || eventMode !== EVENT_HANDLER;
+                    }
+                });
             });
             if (is(eventMode, TyperWidget)) {
                 setTimeout(function () {
-                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), eventMode);
+                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
+                        targetWidget: eventMode
+                    });
                 });
             }
             return handlerCalled;
@@ -523,6 +502,8 @@
         function createTyperDocument(rootElement, fireEvent) {
             var nodeMap = new WeakMap();
             var dirtyElements = [];
+            var self = {};
+            var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
             var observer;
 
             function addChild(parent, node) {
@@ -562,7 +543,7 @@
                     delete node.widget;
                     $.each(widgetOptions, function (i, v) {
                         if (is(node.element, v.element)) {
-                            node.widget = new TyperWidget(typer, i, node.element, v.options);
+                            node.widget = new TyperWidget(nodeSource, i, node.element, v.options);
                             return false;
                         }
                     });
@@ -675,16 +656,16 @@
                     childList: true
                 });
             }
-            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(typer, '__root__', topElement, options)));
+            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(nodeSource, '__root__', topElement, options)));
             dirtyElements.push(null);
 
-            return {
+            return $.extend(self, {
                 getNode: getNode,
                 getEditableNode: function (element) {
                     var focusNode = getNode(element) || nodeMap.get(rootElement);
                     return is(focusNode, NODE_WIDGET) ? getNode(focusNode.widget.element) : focusNode;
                 }
-            };
+            });
         }
 
         function getRangeFromTextOffset(node, offset) {
@@ -696,7 +677,12 @@
         function updateState(fireEvent) {
             var activeRange = getActiveRange(topElement);
             if (activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
-                currentSelection.select(activeRange);
+                try {
+                    typer.snapshot = $.noop;
+                    currentSelection.select(activeRange);
+                } finally {
+                    typer.snapshot = undoable.snapshot;
+                }
             }
             if (fireEvent !== false) {
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
@@ -744,7 +730,7 @@
                         node.element.normalize();
                         $(node.element).contents().each(function (i, v) {
                             if (v.nodeType === 3) {
-                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)|^[^\S\u00a0]+|[^\S\u00a0]+$/g, '').replace(/\b\u00a0\b/g, ' ');
+                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ');
                             }
                         });
                         if (is(node, NODE_INLINE)) {
@@ -756,12 +742,8 @@
                             }
                         } else if (is(node, NODE_EDITABLE)) {
                             $(node.element).contents().each(function (i, v) {
-                                if (v.nodeType === 3) {
-                                    if (trim(v.nodeValue)) {
-                                        $(v).wrap('<p>');
-                                    } else {
-                                        removeNode(v);
-                                    }
+                                if (v.nodeType === 3 && trim(v.nodeValue)) {
+                                    $(v).wrap('<p>');
                                 }
                             });
                             if (!node.element.childNodes[0]) {
@@ -780,7 +762,7 @@
                     if (!$(v).data('typerIEFix')) {
                         $(v).data('typerIEFix', true);
                         $(v).bind('input textinput', function (e) {
-                            if (!suppressIETextInput) {
+                            if (!codeUpdate.executing && !codeUpdate.suppressTextEvent) {
                                 $self.trigger(e);
                             }
                         });
@@ -800,6 +782,10 @@
             var isSingleEditable = state.isSingleEditable;
 
             if (!range.collapsed) {
+                var caret = state.getCaret('end').clone();
+                var appendSpace = !caret.moveByCharacter(1) || caret.node !== state.endNode || (caret.textNode && /\s/.test(caret.textNode.nodeValue[caret.offset - 1]));
+                var lastChild;
+
                 var stack = [[topElement, fragment]];
                 iterate(state.createTreeWalker(-1, function (node) {
                     while (is(node.element, Node) && !containsOrEquals(stack[0][0], node.element)) {
@@ -830,11 +816,15 @@
                             }
                         }
                         if (content) {
+                            lastChild = content.lastChild;
                             stack[0][1].appendChild(content);
                         }
                     }
                     return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                 }));
+                if (appendSpace && lastChild) {
+                    $(createTextNode(' ')).insertAfter(lastChild);
+                }
             }
             if (isFunction(callback)) {
                 var startPoint = createRange(range, true);
@@ -903,20 +893,20 @@
                         }
                         var splitEnd = createRange(splitLastNode.element, COLLAPSE_END_OUTSIDE);
                         var splitContent = createRange(caretPoint, splitEnd).extractContents();
-                        var splitFirstNode = splitContent.childNodes[0];
+                        var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
 
                         if (!/\S/.test(splitLastNode.element.textContent)) {
                             caretPoint.insertNode(createTextNode());
                         }
-                        if (!/\S/.test(splitFirstNode.textContent)) {
+                        if (splitFirstNode && !/\S/.test(splitFirstNode.textContent)) {
                             splitFirstNode.appendChild(createTextNode());
                         }
                         if (splitLastNode.element.textContent.slice(-1) === ' ') {
                             var n1 = iterateToArray(document.createNodeIterator(splitLastNode.element, 4, null, false)).filter(mapFn('nodeValue')).slice(-1)[0];
                             n1.nodeValue = n1.nodeValue.slice(0, -1) + '\u00a0';
                         }
-                        if (splitFirstNode.textContent.charAt(0) === ' ') {
+                        if (splitFirstNode && splitFirstNode.textContent.charAt(0) === ' ') {
                             var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
                             n2.nodeValue = '\u00a0' + n2.nodeValue.slice(1);
                         }
@@ -928,13 +918,15 @@
                     }
                     insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT);
                     if (is(node, NODE_ANY_INLINE)) {
-                        nodeToInsert = wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes);
+                        nodeToInsert = createDocumentFragment(wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes));
                     } else if (insertAsInline && paragraphAsInline) {
                         nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
                     }
+                    var lastNode = nodeToInsert.lastChild;
                     if (insertAsInline) {
-                        caretPoint.insertNode(nodeToInsert);
-                        caretPoint.collapse(false);
+                        if (lastNode) {
+                            caretPoint.insertNode(nodeToInsert);
+                        }
                         paragraphAsInline = false;
                     } else {
                         var caretNode = typerDocument.getEditableNode(caretPoint.startContainer);
@@ -943,17 +935,16 @@
                         } else {
                             createRange(caretNode.element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
                         }
-                        caretPoint = createRange(nodeToInsert, COLLAPSE_END_INSIDE);
                         insertAsInline = is(node, NODE_ANY_ALLOWTEXT);
                         hasInsertedBlock = true;
                     }
+                    caretPoint = createRange(lastNode, COLLAPSE_END_INSIDE) || caretPoint;
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     createRange(state.startNode.element, COLLAPSE_END_INSIDE).insertNode(createRange(state.endNode.element, true).extractContents());
                     removeNode(state.endNode.element);
                 }
-                normalize(createRange(startPoint, caretPoint));
-                currentSelection.select(newPoint || caretPoint, true);
+                currentSelection.select(newPoint || caretPoint);
             });
         }
 
@@ -1055,11 +1046,13 @@
                 },
                 snapshot: function (delay) {
                     replaceTimeout('snapshot');
-                    if (delay) {
+                    if (+delay === delay || !currentSelection) {
                         replaceTimeout('snapshot', takeSnapshot, delay);
-                    } else if (delay !== false && !suppressSnapshot) {
+                    } else if (delay === true || !codeUpdate.executing) {
+                        codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     } else {
+                        codeUpdate.needSnapshot = true;
                         updateState(false);
                     }
                 }
@@ -1086,7 +1079,7 @@
 
             function sparseSnapshot(e) {
                 setTimeout(function () {
-                    undoable.snapshot(e.timeStamp - lastInputTime < 50 ? 50 : 0);
+                    undoable.snapshot(e.timeStamp - lastInputTime < 200 ? 200 : 0);
                     lastInputTime = e.timeStamp;
                 });
             }
@@ -1096,7 +1089,7 @@
                     insertContents(currentSelection, '');
                 } else {
                     var selection = currentSelection.clone();
-                    if (selection.moveByCharacter('extend', e.eventName === 'backspace' ? -1 : 1) && selection.isSingleEditable) {
+                    if (selection.extendCaret.moveByCharacter(e.eventName === 'backspace' ? -1 : 1) && selection.isSingleEditable) {
                         insertContents(selection, '');
                     }
                 }
@@ -1119,23 +1112,18 @@
                             handlers.mouseup();
                             return;
                         }
-                        currentSelection.moveToPoint('extend', e.clientX, e.clientY);
+                        currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
                         setTimeout(function () {
                             currentSelection.focus();
                         });
-                        replaceTimeout(normalizeInputEvent, updateState);
                         e.preventDefault();
                     },
                     mouseup: function () {
                         mousedown = false;
                         $(document.body).unbind(handlers);
-                        replaceTimeout(normalizeInputEvent, function () {
-                            normalize(currentSelection.focusNode.element);
-                            undoable.snapshot();
-                        });
                     }
                 };
-                currentSelection.moveToPoint(e.clientX, e.clientY);
+                (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                 $(document.body).bind(handlers);
                 mousedown = true;
                 e.stopPropagation();
@@ -1173,16 +1161,19 @@
                     if (modifierCount) {
                         var keyEventName = lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode)));
                         if (triggerEvent(EVENT_HANDLER, keyEventName) || /ctrl(?![axcvr]$)|alt|enter/i.test(keyEventName)) {
-                            keyDefaultPrevented = true;
                             e.preventDefault();
-                            return;
                         }
+                        triggerEvent(EVENT_STATIC, 'keystroke', keyEventName, {
+                            preventDefault: e.preventDefault.bind(e),
+                            isDefaultPrevented: function () {
+                                return e.isDefaultPrevented();
+                            }
+                        });
                     }
-                    keyDefaultPrevented = false;
+                    keyDefaultPrevented = e.isDefaultPrevented();
                     replaceTimeout(normalizeInputEvent, function () {
-                        if (!composition) {
+                        if (!composition && !keyDefaultPrevented) {
                             updateState();
-                            normalize(currentSelection.focusNode.element);
                             if (currentSelection.focusNode.widget !== activeWidget) {
                                 triggerWidgetFocusout();
                             }
@@ -1204,7 +1195,7 @@
             });
 
             $self.bind('keypress textInput textinput', function (e) {
-                if (!suppressIETextInput) {
+                if (!codeUpdate.executing && !codeUpdate.suppressTextEvent) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
@@ -1229,13 +1220,13 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                var content = extractContents(currentSelection, e.type);
-                var textContent = extractText(content);
+                clipboard.content = extractContents(currentSelection, e.type);
+                clipboard.textContent = extractText(clipboard.content);
                 if (window.clipboardData) {
-                    clipboardData.setData('Text', textContent);
+                    clipboardData.setData('Text', clipboard.textContent);
                 } else {
-                    clipboardData.setData('text/plain', textContent);
-                    clipboardData.setData('text/html', $('<div id="Typer">').append(content)[0].outerHTML);
+                    clipboardData.setData('text/plain', clipboard.textContent);
+                    clipboardData.setData('text/html', $('<div id="Typer">').append(clipboard.content.cloneNode(true))[0].outerHTML);
                     clipboardData.setData('application/x-typer', 'true');
                 }
                 e.stopPropagation();
@@ -1248,10 +1239,9 @@
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
                     insertContents(currentSelection, content);
-                } else if ($.inArray('text/plain', clipboardData.types) >= 0) {
-                    insertContents(currentSelection, clipboardData.getData('text/plain'));
-                } else if (window.clipboardData) {
-                    insertContents(currentSelection, clipboardData.getData('Text'));
+                } else {
+                    var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
+                    insertContents(currentSelection, textContent === clipboard.textContent ? clipboard.content.cloneNode(true) : textContent);
                 }
                 e.stopPropagation();
                 e.preventDefault();
@@ -1284,28 +1274,27 @@
             });
 
             $self.bind('dblclick', function (e) {
-                if (currentSelection.moveToPoint(e.clientX, e.clientY)) {
-                    currentSelection.expand('word');
-                }
+                currentSelection.select('word');
                 e.preventDefault();
             });
 
             $self.bind('focusin', function () {
+                var mousedown1 = mousedown;
                 setTimeout(function () {
-                    if (!userFocus) {
+                    if (!userFocus.has(typer)) {
                         triggerEvent(EVENT_ALL, 'focusin');
-                        if (!mousedown) {
+                        if (!mousedown1) {
                             currentSelection.focus();
                         }
                     }
                     windowFocusedOut = false;
-                    userFocus = null;
+                    userFocus.delete(typer);
                 });
             });
 
             $self.bind('focusout', function () {
                 setTimeout(function () {
-                    if (!windowFocusedOut && !userFocus) {
+                    if (!windowFocusedOut && !userFocus.has(typer)) {
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
                     }
@@ -1324,10 +1313,7 @@
                         if (!extend && !currentSelection.isCaret) {
                             currentSelection.collapse(direction < 0 ? 'start' : 'end');
                         } else {
-                            currentSelection[i]('extend', direction);
-                            if (!extend) {
-                                currentSelection.collapse('extend');
-                            }
+                            (extend ? currentSelection.extendCaret : currentSelection)[i](direction);
                         }
                     };
                 });
@@ -1374,13 +1360,13 @@
 
         var retainFocusHandlers = {
             focusin: function (e) {
-                userFocus = e.currentTarget;
+                userFocus.set(typer, e.currentTarget);
             },
             focusout: function (e) {
                 var focusoutTarget = e.currentTarget;
                 setTimeout(function () {
-                    if (userFocus === focusoutTarget && !getActiveRange(topElement)) {
-                        userFocus = null;
+                    if (!containsOrEquals(focusoutTarget, e.relatedTarget) && userFocus.get(typer) === focusoutTarget && !getActiveRange(topElement)) {
+                        userFocus.delete(typer);
                         $self.trigger('focusout');
                     }
                 });
@@ -1407,6 +1393,10 @@
             getSelection: function () {
                 return currentSelection;
             },
+            extractText: function (selection) {
+                var content = extractContents(selection, 'copy');
+                return extractText(content);
+            },
             nodeFromPoint: function (x, y) {
                 return typerDocument.getNode(document.elementFromPoint(x, y));
             },
@@ -1414,28 +1404,21 @@
                 $(element).bind(retainFocusHandlers);
             },
             invoke: function (command, value) {
-                var originalValue = suppressSnapshot;
-                var originalSelection = currentSelection.clone();
-                var timestamp = currentSelection.timestamp;
-                try {
-                    suppressSnapshot = true;
+                var tx = new TyperTransaction();
+                if (typeof command === 'string') {
+                    tx.commandName = command;
+                    tx.widget = findWidgetWithCommand(command);
+                    command = tx.widget && widgetOptions[tx.widget.id].commands[command];
+                }
+                if (isFunction(command)) {
+                    var originalSelection = currentSelection.clone();
+                    var timestamp = currentSelection.timestamp;
                     codeUpdate(function () {
-                        var tx = new TyperTransaction();
-                        if (typeof command === 'string') {
-                            tx.commandName = command;
-                            tx.widget = findWidgetWithCommand(command);
-                            command = tx.widget && widgetOptions[tx.widget.id].commands[command];
-                        }
-                        if (isFunction(command)) {
-                            command.call(typer, tx, value);
+                        command.call(typer, tx, value);
+                        if (timestamp === currentSelection.timestamp) {
+                            currentSelection.select(originalSelection);
                         }
                     });
-                } finally {
-                    if (timestamp === currentSelection.timestamp) {
-                        currentSelection.select(originalSelection);
-                    }
-                    suppressSnapshot = originalValue;
-                    undoable.snapshot();
                 }
             }
         });
@@ -1468,19 +1451,20 @@
                 }
             },
             execCommand: function (commandName, value) {
+                var r1 = currentSelection.baseCaret.getRange();
+                var r2 = currentSelection.extendCaret.getRange();
+                var s1 = createElement('span');
+                var s2 = createElement('span');
+                r1.insertNode(s1);
+                r2.insertNode(s2);
+                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
                 $.each(currentSelection.getEditableRanges(), function (i, v) {
                     applyRange(v);
                     document.execCommand(commandName, false, value || '');
                 });
-                currentSelection.focus();
-            },
-            getSelectedText: function () {
-                var content = extractContents(currentSelection, 'copy');
-                return extractText(content);
-            },
-            getSelectedTextNodes: function () {
-                splitTextBoundary(currentSelection);
-                return iterateToArray(currentSelection.createDOMNodeIterator(4));
+                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
+                removeNode(s1);
+                removeNode(s2);
             }
         });
 
@@ -1668,57 +1652,12 @@
         }
     });
 
-    function nodeIteratorCreateNodeIterator(inst, dir) {
-        var node = inst.typerNodeIterator.currentNode;
-        if (!is(node, NODE_ANY_ALLOWTEXT)) {
-            return document.createNodeIterator(node.element, 0, null, false);
-        }
-        var iterator = document.createTreeWalker(node.element, inst.whatToShow | 1, function (v) {
-            return acceptNode(inst, v) | 1;
+    function nodeIteratorInit(inst, iterator) {
+        var typer = iterator.currentNode.widget.typer;
+        var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
+            return treeWalkerAcceptNode(iterator, typer.getNode(v), true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
-        if (dir === 'previousNode') {
-            var before = inst.currentNode;
-            while (iterator.lastChild());
-            while (comparePosition(before, iterator.currentNode, true) <= 0 && iterator[dir]());
-        }
-        return iterator;
-    }
-
-    function nodeIteratorTraverseTyperNode(inst, dir, into) {
-        if (dir === 'previousNode') {
-            return (into && inst.typerNodeIterator.lastChild()) || inst.typerNodeIterator.previousSibling() || inst.typerNodeIterator.parentNode();
-        }
-        return (!into && inst.typerNodeIterator.nextSibling()) || inst.typerNodeIterator.nextNode();
-    }
-
-    function nodeIteratorTraverse(inst, dir) {
-        var before = inst.currentNode;
-        if (inst.iterator[dir]()) {
-            if (inst.currentNode.parentNode !== before.parentNode && acceptNode(inst.iterator, before) === 1 && nodeIteratorTraverseTyperNode(inst, dir, true)) {
-                inst.iteratorStack.unshift({
-                    dir: dir,
-                    iterator: inst.iterator
-                });
-                inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
-                if (acceptNode(inst.iterator) === 1 || inst.iterator[dir]()) {
-                    return inst.currentNode;
-                }
-            }
-            return inst.currentNode;
-        }
-        while (inst.iteratorStack[0]) {
-            var d = inst.iteratorStack.shift();
-            if (d.dir === dir) {
-                inst.iterator = d.iterator;
-                return inst.currentNode;
-            }
-        }
-        while (nodeIteratorTraverseTyperNode(inst, dir)) {
-            inst.iterator = nodeIteratorCreateNodeIterator(inst, dir);
-            if ((inst.currentNode !== before && acceptNode(inst.iterator) === 1) || inst.iterator[dir]()) {
-                return inst.currentNode;
-            }
-        }
+        defineProperty(inst, 'iterator', iterator2, false);
     }
 
     definePrototype(TyperDOMNodeIterator, {
@@ -1728,22 +1667,11 @@
         set currentNode(node) {
             this.iterator.currentNode = node;
         },
-        get typerNodeIterator() {
-            return null;
-        },
-        set typerNodeIterator(iterator) {
-            if (!is(iterator.currentNode, NODE_ANY_ALLOWTEXT)) {
-                iterator.nextNode();
-            }
-            defineProperty(this, 'typerNodeIterator', iterator, false);
-            defineProperty(this, 'iteratorStack', [], false);
-            defineProperty(this, 'iterator', nodeIteratorCreateNodeIterator(this), false);
-        },
         previousNode: function () {
-            return nodeIteratorTraverse(this, 'previousNode');
+            return this.iterator.previousNode();
         },
         nextNode: function () {
-            return nodeIteratorTraverse(this, 'nextNode');
+            return this.iterator.nextNode();
         }
     });
 
@@ -1764,6 +1692,50 @@
         return nodes;
     }
 
+    function typerSelectionSplitText(inst) {
+        var p1 = inst.getCaret('start');
+        var p2 = inst.getCaret('end');
+        var sameNode = (p1.textNode === p2.textNode);
+        if (p2.textNode && p2.offset < p2.textNode.length) {
+            p2.textNode.splitText(p2.offset);
+        }
+        if (p1.textNode && p1.offset > 0) {
+            var offset = p1.offset;
+            typerSelectionAtomic(inst, function () {
+                caretSetPositionRaw(p1, p1.node, p1.element, p1.textNode.splitText(p1.offset), 0);
+                if (sameNode) {
+                    caretSetPositionRaw(p2, p2.node, p2.element, p1.textNode, p2.offset - offset);
+                }
+            });
+        }
+    }
+
+    function typerSelectionUpdate(inst) {
+        inst.timestamp = +new Date();
+        inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
+        inst.isCaret = !inst.direction;
+        inst.focusNode = inst.typer.getEditableNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
+            inst[typerSelectionUpdate.NAMES[i + 4]] = p1[typerSelectionUpdate.NAMES[i]];
+            inst[typerSelectionUpdate.NAMES[i + 8]] = p2[typerSelectionUpdate.NAMES[i]];
+        }
+    }
+    typerSelectionUpdate.NAMES = 'node element textNode offset startNode startElement startTextNode startOffset endNode endElement endTextNode endOffset'.split(' ');
+
+    function typerSelectionAtomic(inst, callback, args, thisArg) {
+        inst._lock = inst._lock || transaction(function () {
+            delete inst._lock;
+            typerSelectionUpdate(inst);
+            if (inst === inst.typer.getSelection()) {
+                if (!userFocus.has(inst.typer)) {
+                    inst.focus();
+                }
+                inst.typer.snapshot();
+            }
+        });
+        return inst._lock(callback, args, thisArg);
+    }
+
     definePrototype(TyperSelection, {
         get isSingleEditable() {
             return !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
@@ -1775,7 +1747,7 @@
                 case 'start':
                     return this.direction < 0 ? this.extendCaret : this.baseCaret;
                 case 'end':
-                    return this.direction > 0 ? this.extendCaret : this.baseCaret;
+                    return this.direction < 0 ? this.baseCaret : this.extendCaret;
                 default:
                     return this.baseCaret;
             }
@@ -1788,6 +1760,9 @@
         },
         getEditableRanges: function () {
             var range = createRange(this);
+            if (is(this.focusNode, NODE_ANY_INLINE)) {
+                return [range];
+            }
             return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
                 return createRange(range, createRange(v.element));
             });
@@ -1807,34 +1782,32 @@
         getSelectedElements: function () {
             return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT), mapFn('element'));
         },
+        getSelectedText: function () {
+            return this.typer.extractText(this);
+        },
+        getSelectedTextNodes: function () {
+            typerSelectionSplitText(this);
+            var range = createRange(this);
+            var iterator = new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_WIDGET | NODE_ANY_ALLOWTEXT), 4, function (v) {
+                return rangeIntersects(range, createRange(v, true)) ? 1 : 2;
+            });
+            return iterateToArray(iterator);
+        },
         createTreeWalker: function (whatToShow, filter) {
             return typerSelectionDeepIterator(this, whatToShow, filter);
-        },
-        createDOMNodeIterator: function (whatToShow, filter) {
-            return new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_WIDGET | NODE_ANY_ALLOWTEXT), whatToShow, filter);
         },
         collapse: function (point) {
             point = this.getCaret(point);
             return (point === this.baseCaret ? this.extendCaret : this.baseCaret).moveTo(point);
         },
-        select: function (point, a, b, c) {
-            if (typeof point === 'string') {
-                return this.getCaret(point).moveTo(a);
-            }
-            var range = is(point, Range) || createRange(point, a, b, c);
-            return (this.baseCaret.moveTo(range, COLLAPSE_START_OUTSIDE) + (range.collapsed ? this.extendCaret.moveTo(this.baseCaret) : this.extendCaret.moveTo(range, COLLAPSE_END_OUTSIDE))) > 0;
-        },
-        expand: function (mode) {
-            var direction = this.direction || 1;
-            return (this.baseCaret['moveBy' + capfirst(mode)](-1 * direction) + this.extendCaret['moveBy' + capfirst(mode)](1 * direction)) > 0;
-        },
-        shrink: function (mode) {
-            var direction = this.direction;
-            var value = !!(direction && (this.baseCaret['moveBy' + capfirst(mode)](1 * direction) + this.extendCaret['moveBy' + capfirst(mode)](-1 * direction)));
-            if (this.direction !== direction) {
-                this.collapse();
-            }
-            return value;
+        select: function (startNode, startOffset, endNode, endOffset) {
+            return typerSelectionAtomic(this, function () {
+                if (startNode === 'word') {
+                    return this.getCaret('start').moveByWord(-1) + this.getCaret('end').moveByWord(1) > 0;
+                }
+                var range = createRange(startNode, startOffset, endNode, endOffset);
+                return this.baseCaret.moveTo(range, COLLAPSE_START_OUTSIDE) + (range.collapsed ? this.extendCaret.moveTo(this.baseCaret) : this.extendCaret.moveTo(range, COLLAPSE_END_OUTSIDE)) > 0;
+            });
         },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
@@ -1850,49 +1823,32 @@
     });
 
     $.each('moveToPoint moveToText moveByLine moveToLineEnd moveByWord moveByCharacter'.split(' '), function (i, v) {
-        TyperSelection.prototype[v] = function (point) {
-            var collapse = typeof point !== 'string';
-            var value = !!TyperCaret.prototype[v].apply(this.getCaret(point), slice(arguments, +!collapse));
-            if (collapse) {
-                this.collapse();
-            }
-            return value;
+        TyperSelection.prototype[v] = function () {
+            return typerSelectionAtomic(this, function () {
+                return TyperCaret.prototype[v].apply(this.extendCaret, arguments) + this.collapse('extend') > 0;
+            }, slice(arguments));
         };
     });
 
-    function caretTextNodeIterator(inst, whatToShow) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(inst.typer.getNode(inst.typer.element), whatToShow), 4);
-        iterator.typerNodeIterator.currentNode = inst.typer.getNode(inst.element);
+    function caretTextNodeIterator(inst) {
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(inst.typer.getNode(inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
         iterator.currentNode = inst.textNode || inst.element;
         return iterator;
     }
 
-    function caretUpdateSelection(inst) {
-        inst.timestamp = +new Date();
-        inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
-        inst.isCaret = !inst.direction;
-        inst.focusNode = inst.typer.getEditableNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
-        for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
-            inst[caretUpdateSelection.NAMES[i + 4]] = p1[caretUpdateSelection.NAMES[i]];
-            inst[caretUpdateSelection.NAMES[i + 8]] = p2[caretUpdateSelection.NAMES[i]];
-        }
-        if (inst === inst.typer.getSelection()) {
-            inst.focus();
-            inst.typer.snapshot();
-        }
+    function caretAtomic(inst, callback) {
+        return inst.selection ? typerSelectionAtomic(inst.selection, callback, null, inst) : callback.call(inst);
     }
-    caretUpdateSelection.NAMES = 'node element textNode offset startNode startElement startTextNode startOffset endNode endElement endTextNode endOffset'.split(' ');
 
     function caretSetPositionRaw(inst, node, element, textNode, offset) {
-        inst.node = node;
-        inst.element = element;
-        inst.textNode = textNode || null;
-        inst.offset = offset || 0;
-        inst.wholeTextOffset = inst.offset + (textNode && getWholeTextOffset(node, textNode));
-        if (inst.selection) {
-            caretUpdateSelection(inst.selection);
-        }
-        return inst;
+        caretAtomic(inst, function () {
+            inst.node = node;
+            inst.element = element;
+            inst.textNode = textNode || null;
+            inst.offset = offset || 0;
+            inst.wholeTextOffset = inst.offset + (textNode ? getWholeTextOffset(node, textNode) : 0);
+        });
+        return true;
     }
 
     function caretSetPosition(inst, element, offset, end) {
@@ -1901,7 +1857,7 @@
             textNode = element.nextSibling;
             offset = 0;
         } else if (element.nodeType === 1 && element.childNodes[0]) {
-            if (end || offset === element.childNodes.length) {
+            if (offset === element.childNodes.length || (end && element.childNodes[(offset || 1) - 1].nodeType === 1)) {
                 element = element.childNodes[(offset || 1) - 1];
                 offset = element.length;
                 end = true;
@@ -1922,7 +1878,7 @@
             } else if (!is(node, NODE_ANY_ALLOWTEXT)) {
                 node = any(node.childNodes, function (v) {
                     return comparePosition(textNode, v.element) < 0;
-                }) || node.lastChild;
+                }) || node.lastChild || node;
                 element = node.element;
                 textNode = null;
                 end = true;
@@ -1943,7 +1899,7 @@
 
     definePrototype(TyperCaret, {
         getRange: function () {
-            if (this.textNode && !this.textNode.parentNode) {
+            if (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length)) {
                 // use calculated text offset from paragraph node in case anchored text node is detached from DOM
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
@@ -1951,7 +1907,9 @@
             return createRange(this.textNode || this.element, this.offset, !!this.textNode);
         },
         clone: function () {
-            return Object.create(TyperCaret.prototype).moveTo(this);
+            var clone = new TyperCaret(this.typer);
+            clone.moveTo(this);
+            return clone;
         },
         moveTo: function (startNode, startOffset, endNode, endOffset) {
             if (is(startNode, TyperCaret)) {
@@ -1959,10 +1917,10 @@
             }
             var range = createRange(startNode, startOffset, endNode, endOffset);
             var startPoint = this.selection && this.selection.getCaret('start').getRange();
-            return range && caretSetPosition(this, range.startContainer, range.startOffset, startPoint && compareRangePosition(startPoint, range) < 0);
+            return !!range && caretSetPosition(this, range.startContainer, range.startOffset, startPoint && compareRangePosition(startPoint, range) < 0);
         },
         moveToPoint: function (x, y) {
-            return this.moveTo(caretRangeFromPoint(x, y));
+            return this.moveTo(caretRangeFromPoint(x, y, this.typer.element));
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
@@ -1971,16 +1929,15 @@
                     for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
                 } else if (1 / offset < 0) {
                     while (iterator.nextNode());
-                    offset = iterator.currentNode.length;
                 }
                 node = iterator.currentNode;
             }
-            return caretSetPosition(this, node, getOffset(node, offset));
+            return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
         moveToLineEnd: function (direction) {
             var rect = this.getRange().getBoundingClientRect();
             var minx = rect.left;
-            iterate(new TyperDOMNodeIterator(this.node, 4), function (v) {
+            iterate(new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4), function (v) {
                 $.each(createRange(v).getClientRects(), function (i, v) {
                     if (v.top <= rect.top + rect.height && v.top + v.height >= rect.top) {
                         minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.left + v.width);
@@ -1990,7 +1947,7 @@
             return this.moveToPoint(minx, rect.top + rect.height / 2);
         },
         moveByLine: function (direction) {
-            var iterator = caretTextNodeIterator(this, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE);
+            var iterator = caretTextNodeIterator(this);
             var rect = this.getRange().getBoundingClientRect();
             while (true) {
                 var rects = slice(createRange(iterator.currentNode).getClientRects());
@@ -2006,27 +1963,27 @@
             }
         },
         moveByWord: function (direction) {
-            var re = direction < 0 ? /\b(\S*\s+|\S+)$/g : /^(\s+\S*|\S+)\b/g;
+            var re = direction < 0 ? /\b(\S*\s+|\S+)$/ : /^(\s+\S*|\S+)\b/;
+            var str = '';
+            var matched;
             if (this.textNode) {
-                var str = direction < 0 ? this.textNode.nodeValue.substr(0, this.offset) : this.textNode.nodeValue.slice(this.offset);
-                if (!re.test(str)) {
-                    return this.moveByCharacter(direction);
-                }
-                if (RegExp.$1.length !== getOffset(str, 0 * -direction)) {
+                str = direction < 0 ? this.textNode.nodeValue.substr(0, this.offset) : this.textNode.nodeValue.slice(this.offset);
+                if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
                     return this.moveToText(this.textNode, this.offset + direction * RegExp.$1.length);
                 }
             }
-            var iterator = new TyperDOMNodeIterator(this.node, 4);
+            var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
             iterator.currentNode = this.textNode || this.element;
             while (iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
-                if (re.test(iterator.currentNode.nodeValue) && RegExp.$1.length !== getOffset(iterator.currentNode, 0 * -direction)) {
-                    return this.moveToText(iterator.currentNode, RegExp.$1.length);
+                str = direction < 0 ? iterator.currentNode.nodeValue + str : str + iterator.currentNode.nodeValue;
+                if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
+                    return this.moveToText(iterator.currentNode, direction * (RegExp.$1.length - (str.length - iterator.currentNode.length)));
                 }
             }
-            return iterator.currentNode && this.moveToText(iterator.currentNode, 0 * -direction);
+            return !matched || !iterator.currentNode ? false : this.moveToText(iterator.currentNode, 0 * -direction);
         },
         moveByCharacter: function (direction) {
-            var iterator = caretTextNodeIterator(this, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE);
+            var iterator = caretTextNodeIterator(this);
             var rect = this.getRange().getBoundingClientRect();
             var offset = this.offset;
             while (true) {
@@ -2034,7 +1991,9 @@
                     if (!iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
                         return false;
                     }
-                    offset = direction < 0 ? iterator.currentNode.length + 1 : -1;
+                    var p1 = new TyperCaret(this.typer);
+                    p1.moveToText(iterator.currentNode);
+                    offset = (direction < 0 ? iterator.currentNode.length : 0) + (p1.node !== this.node && -direction);
                 }
                 offset += direction;
                 var newRect = createRange(iterator.currentNode, offset, true).getBoundingClientRect();
@@ -2049,8 +2008,10 @@
     $.each('moveByLine moveByWord moveByCharacter'.split(' '), function (i, v) {
         var fn = TyperCaret.prototype[v];
         TyperCaret.prototype[v] = function (direction) {
-            for (var step = direction; step && fn.call(this, direction / Math.abs(direction)); step += step > 0 ? -1 : 1);
-            return !direction || step !== direction ? this : null;
+            return caretAtomic(this, function () {
+                for (var step = direction; step && fn.call(this, direction / Math.abs(direction)); step += step > 0 ? -1 : 1);
+                return !direction || step !== direction;
+            });
         };
     });
 
@@ -2101,6 +2062,53 @@
                 delete key[this.__dataKey__];
             }
         });
+    }
+    userFocus = new WeakMap();
+
+    // polyfill for document.caretRangeFromPoint
+    if (typeof caretRangeFromPoint_ === 'undefined') {
+        caretRangeFromPoint_ = function () {
+            if (document.caretPositionFromPoint) {
+                return function (x, y) {
+                    var pos = document.caretPositionFromPoint(x, y);
+                    return createRange(pos.offsetNode, pos.offset, true);
+                };
+            }
+            return function (x, y) {
+                function distanceFromCharacter(node, index) {
+                    var rect = createRange(node, index, true).getClientRects()[0];
+                    if (rect) {
+                        var distX = rect.left > x ? rect.left - x : Math.min(0, rect.left + rect.width - x);
+                        var distY = rect.top > y ? rect.top - y : Math.min(0, rect.top + rect.height - y);
+                        return !distY ? distX : distY > 0 ? Infinity : -Infinity;
+                    }
+                }
+
+                var elements = [];
+                for (var element = document.elementFromPoint(x, y); element;) {
+                    elements.unshift(element);
+                    element = any(element.children, function (v) {
+                        return pointInRect(x, y, v.getBoundingClientRect());
+                    });
+                }
+                for (var j = 0, length = elements.length; j < length; j++) {
+                    for (var i = 0, length2 = elements[j].childNodes.length; i < length2; i++) {
+                        var node = elements[j].childNodes[i];
+                        if (node.nodeType === 3 && distanceFromCharacter(node, 0) <= 0 && distanceFromCharacter(node, node.length - 1) >= 0) {
+                            var b0 = 0, b1 = node.length;
+                            while (b1 - b0 > 1) {
+                                var mid = (b1 + b0) >> 1;
+                                var p = distanceFromCharacter(node, mid) < 0;
+                                b0 = p ? mid : b0;
+                                b1 = p ? b1 : mid;
+                            }
+                            return createRange(node, Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1, true);
+                        }
+                    }
+                }
+                return createRange(elements[0], COLLAPSE_END_INSIDE);
+            };
+        } ();
     }
 
 } (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
@@ -2154,6 +2162,7 @@
     var definedIcons = {};
     var definedLabels = {};
     var definedThemes = {};
+    var definedShortcuts = {};
 
     function define(name, base, ctor) {
         /* jshint -W054 */
@@ -2310,7 +2319,6 @@
         }
 
         function executeFromEvent(e) {
-            e.stopPropagation();
             if ($(e.target).is(':checkbox')) {
                 setTimeout(function () {
                     ui.setValue(control, !!e.target.checked);
@@ -2506,6 +2514,51 @@
         addLabels: function (language, values) {
             $.extend(definedLabels, values);
         },
+        addHook: function (keystroke, hook) {
+            if (typeof keystroke === 'object') {
+                $.each(keystroke, Typer.ui.addHook);
+                return;
+            }
+            (keystroke || '').replace(/\S+/g, function (v) {
+                definedShortcuts[v] = definedShortcuts[v] || [];
+                definedShortcuts[v].push({
+                    hook: hook
+                });
+            });
+        },
+        setShortcut: function (command, keystroke) {
+            if (typeof command === 'object') {
+                $.each(command, Typer.ui.setShortcut);
+                return;
+            }
+            command = parseCompactSyntax(command);
+            definedShortcuts._map = definedShortcuts._map || {};
+
+            var current = definedShortcuts._map[command.name] = definedShortcuts._map[command.name] || [];
+            var before = current.slice(0);
+            (keystroke || '').replace(/\S+/g, function (v) {
+                var index = before.indexOf(v);
+                if (index >= 0) {
+                    before.splice(index, 1);
+                } else {
+                    current[current.length] = v;
+                    definedShortcuts[v] = definedShortcuts[v] || [];
+                    definedShortcuts[v].push({
+                        command: command.name,
+                        value: (command.params || '').value
+                    });
+                }
+            });
+            $.each(before, function (i, v) {
+                current.splice(current.indexOf(v), 1);
+                $.each(definedShortcuts[v], function (i, w) {
+                    if (w.command === command.name && w.value === (command.params || '').value) {
+                        definedShortcuts[v].splice(i, 1);
+                        return false;
+                    }
+                });
+            });
+        },
         setZIndex: function (element, over) {
             element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
                 return /absolute|fixed|relative/.test($(v).css('position'));
@@ -2603,6 +2656,24 @@
         'ui:button-cancel': 'close'
     });
 
+    Typer.defaultOptions.shortcut = true;
+
+    Typer.widgets.shortcut = {
+        keystroke: function (e) {
+            $.each(definedShortcuts[e.data] || [], function (i, v) {
+                if (v.hook && v.hook(e.typer)) {
+                    e.preventDefault();
+                    return false;
+                }
+                if (e.typer.hasCommand(v.command)) {
+                    e.typer.invoke(v.command, v.value);
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        }
+    };
+
 } (jQuery, window.Typer));
 
 (function ($, Typer) {
@@ -2621,6 +2692,13 @@
         strikeThrough: 'strike',
         superscript: 'sup',
         subscript: 'sub'
+    };
+    var LIST_STYLE_TYPE = {
+        '1': 'decimal',
+        'A': 'upper-alpha',
+        'a': 'lower-alpha',
+        'I': 'upper-roman',
+        'i': 'lower-roman'
     };
 
     function getTextAlign(element) {
@@ -2672,9 +2750,12 @@
     }
 
     function indentParagraph(element) {
-        var list = $(element.parentNode).filter('ul,ol')[0];
-        var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
-        var newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        var list = $(element).parent('ul,ol')[0] || $(element).prev('ul,ol')[0] || $('<ul>').insertBefore(element)[0];
+        var newList = list;
+        if (newList === element.parentNode) {
+            var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
+            newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+        }
         $('<li>').append(element.childNodes).appendTo(newList);
         removeParagraph(element);
         if ($(newList).parent('li')[0] && !newList.previousSibling) {
@@ -2726,23 +2807,18 @@
         var filter = function (i, v) {
             return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
         };
+        var lists = [];
         $.each(tx.selection.getParagraphElements(), function (i, v) {
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
+                lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 $(v.parentNode).wrap(html).contents().unwrap();
-            } else if (tx.selection.focusNode.widget.id === 'list') {
+                lists.push(v.parentNode);
+            } else if (tx.selection.focusNode.widget.id === 'list' && $.inArray(v.parentNode, lists) < 0) {
                 outdentParagraph(v);
             }
-        });
-    }
-
-    function addCommandHotKeys(name, hotkeys) {
-        (hotkeys || '').replace(/(\w+):(\w+)/g, function (v, a, b) {
-            Typer.widgets[name][a] = function (e) {
-                e.typer.invoke(b);
-            };
         });
     }
 
@@ -2769,7 +2845,7 @@
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
                 var paragraphs = tx.selection.getParagraphElements();
-                $(tx.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
+                $(tx.selection.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
                 $('span:has(span)', paragraphs).each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
                         return v.nodeType === 3;
@@ -2779,7 +2855,6 @@
             }
         }
     };
-    addCommandHotKeys('inlineStyle', 'ctrlB:bold ctrlI:italic ctrlU:underline');
 
     Typer.widgets.formatting = {
         beforeStateChange: function (e) {
@@ -2800,13 +2875,16 @@
                 formattingWithClassName: tagNameWithClasses
             });
         },
+        enter: function (e) {
+            e.typer.invoke('insertLine');
+        },
         commands: {
             justifyCenter: justifyCommand,
             justifyFull: justifyCommand,
             justifyLeft: justifyCommand,
             justifyRight: justifyCommand,
             formatting: function (tx, value) {
-                var m = /^([^.]*)(?:\.(.+))?/.exec(value) || [];
+                var m = /^([a-z\d]*)(?:\.(.+))?/i.exec(value) || [];
                 if (m[1] === 'ol' || m[1] === 'ul') {
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
@@ -2818,23 +2896,33 @@
             }
         }
     };
-    addCommandHotKeys('formatting', 'enter:insertLine ctrlShiftL:justifyLeft ctrlShiftE:justifyCenter ctrlShiftR:justifyRight');
 
     Typer.widgets.lineBreak = {
         inline: true,
+        shiftEnter: function (e) {
+            e.typer.insertHtml('<br>');
+        },
         commands: {
             insertLineBreak: function (tx) {
                 tx.insertHtml('<br>');
             }
         }
     };
-    addCommandHotKeys('lineBreak', 'shiftEnter:insertLineBreak');
 
     Typer.widgets.list = {
         element: 'ul,ol',
         editable: 'ul,ol',
         insert: listCommand,
         remove: 'keepText',
+        tab: function (e) {
+            e.typer.invoke('indent');
+        },
+        shiftTab: function (e) {
+            e.typer.invoke('outdent');
+        },
+        init: function (e) {
+            $(e.widget.element).filter('ol').attr('type-css-value', LIST_STYLE_TYPE[$(e.widget.element).attr('type')] || 'decimal');
+        },
         commands: {
             indent: function (tx) {
                 $.map(tx.selection.getParagraphElements(), indentParagraph);
@@ -2994,6 +3082,24 @@
         'formatting:justifyFull': 'format_align_justify'
     });
 
+    Typer.ui.setShortcut({
+        bold: 'ctrlB',
+        italic: 'ctrlI',
+        underline: 'ctrlU',
+        justifyLeft: 'ctrlShiftL',
+        justifyCenter: 'ctrlShiftE',
+        justifyRight: 'ctrlShiftR'
+    });
+
+    Typer.ui.addHook('tab', function (typer) {
+        if (typer.widgetEnabled('list')) {
+            typer.invoke(function (tx) {
+                $.map(tx.selection.getParagraphElements(), indentParagraph);
+            });
+            return true;
+        }
+    });
+
 } (jQuery, window.Typer));
 
 (function ($, Typer) {
@@ -3003,7 +3109,7 @@
         element: 'a[href]',
         inline: true,
         insert: function (tx, value) {
-            value = value || (/^[a-z]+:\/\//g.test(tx.getSelectedText()) && RegExp.input) || '#';
+            value = value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input) || '#';
             if (tx.selection.isCaret) {
                 var element = $('<a>').text(value).attr('href', value)[0];
                 tx.insertHtml(element);
@@ -3030,14 +3136,21 @@
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
-                if (typeof toolbar.options.selectLink === 'function') {
-                    return toolbar.options.selectLink();
+                if (self.widget) {
+                    return null;
                 }
-                return toolbar.prompt('dialog:selectLink', self.widget ? $(self.widget.element).attr('href') : '');
+                var currentValue = self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(toolbar.typer.getSelection().getSelectedText()) ? RegExp.input : '';
+                if (typeof toolbar.options.selectLink === 'function') {
+                    return toolbar.options.selectLink(currentValue);
+                }
+                return toolbar.prompt('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
+                if (!value) {
+                    return null;
+                }
                 if (self.widget) {
-                    tx.invoke('setURL', value);
+                    tx.typer.invoke('setURL', value);
                 } else {
                     tx.insertWidget('link', value);
                 }
@@ -3088,6 +3201,20 @@
         'link:url': 'insert_link'
     });
 
+    Typer.ui.addHook('space', function (typer) {
+        if (typer.widgetEnabled('link')) {
+            var selection = typer.getSelection().clone();
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^[a-z]+:\/\//g.test(selection.getSelectedText())) {
+                typer.snapshot(true);
+                typer.getSelection().select(selection);
+                typer.invoke(function (tx) {
+                    tx.insertWidget('link');
+                });
+                typer.getSelection().collapse('end');
+            }
+        }
+    });
+
 } (jQuery, window.Typer));
 
 (function ($, Typer) {
@@ -3103,6 +3230,9 @@
         insert: function (tx, options) {
             var element = Typer.createElement(reMediaType.exec(options.src || options) && (RegExp.$1 ? 'img' : RegExp.$2 ? 'video' : 'audio'));
             element.src = options.src || options;
+            if (element.tagName === 'video') {
+                $(element).attr('controls', '');
+            }
             tx.insertHtml(element);
         }
     };
@@ -3362,6 +3492,7 @@
     }
 
     function showToolbar(toolbar, position) {
+        toolbar.update();
         if (toolbar.widget || !toolbar.options.container) {
             clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
@@ -3370,22 +3501,26 @@
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
+
+            var height = $(toolbar.element).height();
             if (position) {
                 toolbar.position = 'fixed';
-                $(toolbar.element).css(position);
             } else if (toolbar.position !== 'fixed') {
                 var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
-                var height = $(toolbar.element).height();
-
-                if (rect.top + rect.height > document.body.offsetHeight) {
-                    toolbar.position = '';
-                } else if (rect.top < height) {
-                    toolbar.position = 'bottom';
-                }
-                $(toolbar.element).css({
+                position = {
                     left: rect.left + $(window).scrollLeft(),
-                    top: (toolbar.position === 'bottom' ? Math.min((rect.top + rect.height) + 10, $(window).height() - height - 10) : Math.max(0, rect.top - height - 10)) + $(window).scrollTop()
-                });
+                    top: Math.max(0, rect.top - height - 10) + $(window).scrollTop()
+                };
+            }
+            if (position) {
+                var range = toolbar.typer.getSelection().getRange();
+                if (range) {
+                    var r = range.getClientRects()[0] || range.getBoundingClientRect();
+                    if (r.top >= position.top && r.top <= position.top + height) {
+                        position.top = r.top + r.height + 10;
+                    }
+                }
+                $(toolbar.element).css(position);
             }
         }
     }
@@ -3457,35 +3592,30 @@
             e.widget.state = e.widget.toolbar.state = {};
         },
         widgetInit: function (e) {
-            var widget = e.data;
-            widget.toolbar = createToolbar(e.typer, e.widget.options, widget);
+            e.targetWidget.toolbar = createToolbar(e.typer, e.widget.options, e.targetWidget);
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            setTimeout(hideToolbar);
+            timeout = setTimeout(hideToolbar);
         },
         widgetFocusin: function (e) {
-            var widget = e.data;
-            if (widget.toolbar.all['toolbar:widget'].controls[0]) {
-                widget.toolbar.update();
-                showToolbar(widget.toolbar);
+            if (e.targetWidget.toolbar.all['toolbar:widget'].controls[0]) {
+                showToolbar(e.targetWidget.toolbar);
             }
         },
         widgetFocusout: function (e) {
             showToolbar(e.widget.toolbar);
         },
         widgetDestroy: function (e) {
-            var widget = e.data;
-            if (widget.toolbar) {
-                widget.toolbar.destroy();
+            if (e.targetWidget.toolbar) {
+                e.targetWidget.toolbar.destroy();
                 showToolbar(e.widget.toolbar);
             }
         },
         stateChange: function () {
             if (activeToolbar) {
-                activeToolbar.update();
                 showToolbar(activeToolbar);
             }
         }
@@ -3580,7 +3710,7 @@
             .has-typer-visualizer:focus { outline:none; }\
             .has-typer-visualizer::selection,.has-typer-visualizer ::selection { background-color:transparent; }\
             .has-typer-visualizer::-moz-selection,.has-typer-visualizer ::-moz-selection { background-color:transparent; }\
-            .typer-visualizer { position:fixed;pointer-events:none; }\
+            .typer-visualizer { position:fixed;pointer-events:none;width:100%;height:100%; }\
             .typer-visualizer > div { position:fixed;box-sizing:border-box; }\
             .typer-visualizer .fill { background-color:rgba(0,31,81,0.2); }\
             .typer-visualizer .fill-margin { border:solid rgba(255,158,98,0.2); }\
@@ -3827,7 +3957,7 @@
             $(container).children().detach();
         },
         widgetFocusin: function (e) {
-            activeWidget = e.data;
+            activeWidget = e.targetWidget;
             if (supported) {
                 updateSelection(e.widget.options);
             }
@@ -3925,22 +4055,36 @@
             });
         },
         init: function (ui) {
-            $(ui.element).on('mouseover', '.typer-ui-menu', function (e) {
-                setTimeout(function () {
-                    var callout = $('.typer-ui-menupane', e.currentTarget)[0];
-                    var nested = !!$(e.currentTarget).parents('.typer-ui-menu')[1];
-                    var rect = callout.getBoundingClientRect();
-                    if (rect.top + rect.height > $(window).height()) {
-                        $(callout).css('bottom', nested ? '0' : '100%');
-                    } else if (rect.top < 0) {
-                        $(callout).css('bottom', 'auto');
-                    }
-                    if (rect.left + rect.width > $(window).width()) {
-                        $(callout).css('right', nested ? '100%' : '0');
-                    } else if (rect.left < 0) {
-                        $(callout).css('right', 'auto');
-                    }
-                });
+            $(ui.element).click(function (e) {
+                $('.typer-ui-menu.open', ui.element).not($(e.target).parentsUntil(ui.element)).removeClass('open');
+            });
+            $(ui.element).focusout(function (e) {
+                if (!$.contains(ui.element, e.relatedTarget)) {
+                    $('.typer-ui-menu.open', ui.element).removeClass('open');
+                }
+            });
+            $(ui.element).on('click', '.typer-ui-menu>:not(.typer-ui-menupane)', function (e) {
+                var thisMenu = e.currentTarget.parentNode;
+                $('.typer-ui-menu.open', ui.element).not(thisMenu).removeClass('open');
+                if ($(thisMenu).find('>.typer-ui-menupane>:not(.disabled)')[0]) {
+                    $(thisMenu).toggleClass('open');
+                    setTimeout(function () {
+                        var callout = $('.typer-ui-menupane', thisMenu)[0];
+                        var nested = !!$(thisMenu).parents('.typer-ui-menu')[0];
+                        var rect = callout.getBoundingClientRect();
+                        if (rect.top + rect.height > $(window).height()) {
+                            $(callout).css('bottom', nested ? '0' : '100%');
+                        } else if (rect.top < 0) {
+                            $(callout).css('bottom', 'auto');
+                        }
+                        if (rect.left + rect.width > $(window).width()) {
+                            $(callout).css('right', nested ? '100%' : '0');
+                        } else if (rect.left < 0) {
+                            $(callout).css('right', 'auto');
+                        }
+                    });
+                }
+                e.stopPropagation();
             });
         }
     };

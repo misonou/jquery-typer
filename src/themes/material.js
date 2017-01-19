@@ -77,22 +77,36 @@
             });
         },
         init: function (ui) {
-            $(ui.element).on('mouseover', '.typer-ui-menu', function (e) {
-                setTimeout(function () {
-                    var callout = $('.typer-ui-menupane', e.currentTarget)[0];
-                    var nested = !!$(e.currentTarget).parents('.typer-ui-menu')[1];
-                    var rect = callout.getBoundingClientRect();
-                    if (rect.top + rect.height > $(window).height()) {
-                        $(callout).css('bottom', nested ? '0' : '100%');
-                    } else if (rect.top < 0) {
-                        $(callout).css('bottom', 'auto');
-                    }
-                    if (rect.left + rect.width > $(window).width()) {
-                        $(callout).css('right', nested ? '100%' : '0');
-                    } else if (rect.left < 0) {
-                        $(callout).css('right', 'auto');
-                    }
-                });
+            $(ui.element).click(function (e) {
+                $('.typer-ui-menu.open', ui.element).not($(e.target).parentsUntil(ui.element)).removeClass('open');
+            });
+            $(ui.element).focusout(function (e) {
+                if (!$.contains(ui.element, e.relatedTarget)) {
+                    $('.typer-ui-menu.open', ui.element).removeClass('open');
+                }
+            });
+            $(ui.element).on('click', '.typer-ui-menu>:not(.typer-ui-menupane)', function (e) {
+                var thisMenu = e.currentTarget.parentNode;
+                $('.typer-ui-menu.open', ui.element).not(thisMenu).removeClass('open');
+                if ($(thisMenu).find('>.typer-ui-menupane>:not(.disabled)')[0]) {
+                    $(thisMenu).toggleClass('open');
+                    setTimeout(function () {
+                        var callout = $('.typer-ui-menupane', thisMenu)[0];
+                        var nested = !!$(thisMenu).parents('.typer-ui-menu')[0];
+                        var rect = callout.getBoundingClientRect();
+                        if (rect.top + rect.height > $(window).height()) {
+                            $(callout).css('bottom', nested ? '0' : '100%');
+                        } else if (rect.top < 0) {
+                            $(callout).css('bottom', 'auto');
+                        }
+                        if (rect.left + rect.width > $(window).width()) {
+                            $(callout).css('right', nested ? '100%' : '0');
+                        } else if (rect.left < 0) {
+                            $(callout).css('right', 'auto');
+                        }
+                    });
+                }
+                e.stopPropagation();
             });
         }
     };

@@ -11,6 +11,9 @@
         insert: function (tx, options) {
             var element = Typer.createElement(reMediaType.exec(options.src || options) && (RegExp.$1 ? 'img' : RegExp.$2 ? 'video' : 'audio'));
             element.src = options.src || options;
+            if (element.tagName === 'video') {
+                $(element).attr('controls', '');
+            }
             tx.insertHtml(element);
         }
     };

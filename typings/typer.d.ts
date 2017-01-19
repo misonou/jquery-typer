@@ -2,7 +2,7 @@ type NodeFilterResult = 1 | 2 | 3;
 type Rangeable = Range | Node | TyperRangeable;
 type CollapseMode = boolean | CollapseModeIntValue;
 type CaretPoint = 'base' | 'extend' | 'start' | 'end';
-type SelectionAlterMode = 'line' | 'word' | 'character';
+type SelectMode = 'word';
 
 declare enum CollapseModeIntValue {
     COLLAPSE_START_INSIDE = 7,
@@ -34,8 +34,8 @@ interface Callback<T> {
     (node: T): any;
 }
 
-interface TyperEventHandler {
-    (event: TyperEvent, value?: any): any;
+interface TyperEventHandler<T extends TyperEvent> {
+    (event: T): any;
 }
 
 interface TyperCommand {
@@ -66,18 +66,28 @@ interface TyperEvent {
     readonly data: any;
 }
 
-interface TyperEventReceiver extends Map<TyperEventHandler> {
-    init?: TyperEventHandler;
-    destroy?: TyperEventHandler;
-    change?: TyperEventHandler;
-    beforeStateChange?: TyperEventHandler;
-    stateChange?: TyperEventHandler;
-    focusin?: TyperEventHandler;
-    focusout?: TyperEventHandler;
-    widgetInit?: TyperEventHandler;
-    widgetDestory?: TyperEventHandler;
-    widgetFocusin?: TyperEventHandler;
-    widgetFocusout?: TyperEventHandler;
+interface TyperWidgetEvent extends TyperEvent {
+    readonly targetWidget: TyperWidget;
+}
+
+interface TyperDefaultPreventableEvent extends TyperEvent {
+    preventDefault(): void;
+    isDefaultPrevented(): boolean;
+}
+
+interface TyperEventReceiver extends Map<TyperEventHandler<TyperEvent>> {
+    init?: TyperEventHandler<TyperEvent>;
+    destroy?: TyperEventHandler<TyperEvent>;
+    change?: TyperEventHandler<TyperEvent>;
+    beforeStateChange?: TyperEventHandler<TyperEvent>;
+    stateChange?: TyperEventHandler<TyperEvent>;
+    focusin?: TyperEventHandler<TyperEvent>;
+    focusout?: TyperEventHandler<TyperEvent>;
+    keystroke?: TyperEventHandler<TyperDefaultPreventableEvent>;
+    widgetInit?: TyperEventHandler<TyperWidgetEvent>;
+    widgetDestroy?: TyperEventHandler<TyperWidgetEvent>;
+    widgetFocusin?: TyperEventHandler<TyperWidgetEvent>;
+    widgetFocusout?: TyperEventHandler<TyperWidgetEvent>;
 }
 
 interface Typer extends TyperDocument, TyperUndoable {
@@ -87,6 +97,7 @@ interface Typer extends TyperDocument, TyperUndoable {
     widgetEnabled(widgetName: string): boolean;
     getStaticWidgets(): TyperWidget[];
     getSelection(): TyperSelection;
+    extractText(selection: TyperSelection): string;
     nodeFromPoint(x: number, y: number): TyperNode;
     retainFocus(element: Element): void;
     invoke(command: string | TyperCommand): void;
@@ -102,7 +113,7 @@ interface TyperOptions extends Map<any>, TyperEventReceiver {
 }
 
 interface TyperWidget {
-    readonly typer: Typer;
+    readonly typer: TyperDocument | Typer;
     readonly id: number;
     readonly element: Element;
     readonly options: Map<any>;
@@ -131,13 +142,13 @@ interface TyperCaret extends TyperRangeable {
 
     getRange(): Range;
     clone(): TyperCaret;
-    moveTo(direction: number): TyperCaret | null;
-    moveToPoint(direction: number): TyperCaret | null;
-    moveToText(direction: number): TyperCaret | null;
-    moveToLineEnd(direction: number): TyperCaret | null;
-    moveByLine(direction: number): TyperCaret | null;
-    moveByWord(direction: number): TyperCaret | null;
-    moveByCharacter(direction: number): TyperCaret | null;
+    moveTo(direction: number): boolean;
+    moveToPoint(direction: number): boolean;
+    moveToText(direction: number): boolean;
+    moveToLineEnd(direction: number): boolean;
+    moveByLine(direction: number): boolean;
+    moveByWord(direction: number): boolean;
+    moveByCharacter(direction: number): boolean;
 }
 
 interface TyperSelection extends TyperRangeable {
@@ -156,12 +167,14 @@ interface TyperSelection extends TyperRangeable {
     getParagraphElements(): Element[];
     getRange(collapse?: boolean): Range;
     getSelectedElements(): Element[];
+    getSelectedText(): string;
+    getSelectedTextNodes(): Text[];
     getWidgets(): TyperWidget[];
 
     createTreeWalker(whatToShow: number, filter?: (node: TyperNode) => NodeFilterResult): TyperTreeWalker;
     createDOMNodeIterator(whatToShow: number, filter?: (node: Node) => NodeFilterResult): TyperDOMNodeIterator;
 
-    select(point: CaretPoint, range: Range): boolean;
+    select(mode: SelectMode): boolean;
     select(range: TyperRangeable): boolean;
     select(startNode: Node, collapse: CollapseMode): boolean;
     select(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): boolean;
@@ -174,16 +187,6 @@ interface TyperSelection extends TyperRangeable {
     moveByLine(direction: number): boolean;
     moveByWord(direction: number): boolean;
     moveByCharacter(direction: number): boolean;
-
-    moveToPoint(point: CaretPoint, direction: number): boolean;
-    moveToText(point: CaretPoint, direction: number): boolean;
-    moveToLineEnd(point: CaretPoint, direction: number): boolean;
-    moveByLine(point: CaretPoint, direction: number): boolean;
-    moveByWord(point: CaretPoint, direction: number): boolean;
-    moveByCharacter(point: CaretPoint, direction: number): boolean;
-
-    expand(mode: SelectionAlterMode): boolean;
-    shrink(mode: SelectionAlterMode): boolean;
 
     focus(): void;
     clone(): TyperSelection;
@@ -199,8 +202,6 @@ interface TyperTransaction {
     insertWidget(name: string, options: TyperWidgetOptions): void;
     removeWidget(widget: TyperWidget): void;
     execCommand(commandName: string, ...args): void;
-    getSelectedText(): string;
-    getSelectedTextNodes(): Text[];
 }
 
 interface TyperNode {
