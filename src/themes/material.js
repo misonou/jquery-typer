@@ -94,12 +94,12 @@
                         var callout = $('.typer-ui-menupane', thisMenu)[0];
                         var nested = !!$(thisMenu).parents('.typer-ui-menu')[0];
                         var rect = callout.getBoundingClientRect();
-                        if (rect.top + rect.height > $(window).height()) {
+                        if (rect.bottom > $(window).height()) {
                             $(callout).css('bottom', nested ? '0' : '100%');
                         } else if (rect.top < 0) {
                             $(callout).css('bottom', 'auto');
                         }
-                        if (rect.left + rect.width > $(window).width()) {
+                        if (rect.right > $(window).width()) {
                             $(callout).css('right', nested ? '100%' : '0');
                         } else if (rect.left < 0) {
                             $(callout).css('right', 'auto');

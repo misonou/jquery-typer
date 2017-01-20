@@ -38,7 +38,7 @@
                 if (range) {
                     var r = range.getClientRects()[0] || range.getBoundingClientRect();
                     if (r.top >= position.top && r.top <= position.top + height) {
-                        position.top = r.top + r.height + 10;
+                        position.top = r.bottom + 10;
                     }
                 }
                 $(toolbar.element).css(position);

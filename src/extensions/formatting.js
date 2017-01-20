@@ -133,7 +133,7 @@
         $.each(tx.selection.getParagraphElements(), function (i, v) {
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
-                $(v).wrap('<li>').contents().unwrap().parent()[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
+                $(v)[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list).wrap('<li>').contents().unwrap();
                 lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 $(v.parentNode).wrap(html).contents().unwrap();
@@ -222,7 +222,7 @@
     Typer.widgets.lineBreak = {
         inline: true,
         shiftEnter: function (e) {
-            e.typer.insertHtml('<br>');
+            e.typer.invoke('insertLineBreak');
         },
         commands: {
             insertLineBreak: function (tx) {
