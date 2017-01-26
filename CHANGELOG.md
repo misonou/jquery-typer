@@ -1,3 +1,17 @@
+## 0.9.2 / 2017-01-26
+
+- (Breaking) Parameter change for `Typer.createRange`
+- Handles right mouse click and context menu
+- Allow sorting of UI controls by specifying `before` and `allow`
+- Allow more common browser shortcuts enabled when editing content
+- Minor changes to event propagations
+- Updates on UI components and enhance async support
+- Fix: IE10- hit test issue on `pointer-events: none`
+- Fix: computation on text rects
+- Fix: extra newlines when extracting text from selection
+- Fix: floating point issue of `rectEquals` on transformed element
+- Fix: `TyperCaret` issue on detached element
+
 ## 0.9.1 / 2017-01-20
 
 - Introduce shortcuts and hooks

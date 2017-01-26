@@ -9,10 +9,28 @@
         return new Array(count + 1).join(str);
     }
 
-    function moveToCell(tx, dx, dy) {
-        var cell = $('>tbody>tr', tx.widget.element).eq(Math.max(0, tx.widget.row + dx)).children()[Math.max(0, tx.widget.column + dy)];
-        tx.normalize(tx.widget.element);
-        tx.moveCaret(cell, -0);
+    function getSelectionInfo(selection) {
+        var rows = [];
+        var cols = [];
+        Typer.iterate(selection.createTreeWalker(Typer.NODE_EDITABLE | Typer.NODE_EDITABLE_PARAGRAPH), function (v) {
+            rows[rows.length] = $(v).parent().index();
+            cols[cols.length] = $(v).index();
+        });
+        return {
+            minRow: Math.min.apply(null, rows),
+            maxRow: Math.max.apply(null, rows),
+            minColumn: Math.min.apply(null, cols),
+            maxColumn: Math.max.apply(null, cols)
+        };
+    }
+
+    function tabNextCell(selection, dir, selector) {
+        if (selection.isSingleEditable) {
+            var nextCell = $(selection.focusNode.element)[dir]()[0] || $(selection.focusNode.element).parent()[dir]().children(selector)[0];
+            if (nextCell) {
+                selection.moveToText(nextCell, -0);
+            }
+        }
     }
 
     Typer.widgets.table = {
@@ -25,109 +43,78 @@
             }, options);
             tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns)), options.rows) + '</table>');
         },
-        beforeStateChange: function (e) {
-            var selection = e.typer.getSelection();
-            var selectedCells = selection.getEditableElements(e.widget);
-            var c = selectedCells.length > 1 ? -1 : $(selectedCells).index();
-            var r = selectedCells.length > 1 ? -1 : $(selectedCells).parent().index();
-            $.extend(e.widget, {
-                row: r,
-                rowCount: $('>tbody>tr', e.widget.element).length,
-                rowCells: $('>tbody>tr:nth-child(' + (r + 1) + ')>*', e.widget.element).get(),
-                column: c,
-                columnCount: $('>tbody>tr:first>*', e.widget.element).length,
-                columnCells: $('>tbody>tr>*:nth-child(' + (c + 1) + ')', e.widget.element).get()
-            });
-        },
         tab: function (e) {
-            var cells = $('>tbody>tr>*', e.widget.element).get();
-            var currentIndex = e.widget.row * e.widget.columnCount + e.widget.column;
-            if (currentIndex < cells.length - 1) {
-                e.typer.moveCaret(cells[currentIndex + 1]);
-            }
+            tabNextCell(e.typer.getSelection(), 'next', ':first-child');
         },
         shiftTab: function (e) {
-            var cells = $('>tbody>tr>*', e.widget.element).get();
-            var currentIndex = e.widget.row * e.widget.columnCount + e.widget.column;
-            if (currentIndex > 0) {
-                e.typer.moveCaret(cells[currentIndex - 1], -0);
-            }
+            tabNextCell(e.typer.getSelection(), 'prev', ':last-child');
         },
         ctrlEnter: function (e) {
-            if (e.widget.row === 0 && e.widget.column === 0) {
-                e.typer.invoke('insertSpaceBefore');
-            } else if (e.widget.row === e.widget.rowCount - 1 && e.widget.column === e.widget.columnCount - 1) {
-                e.typer.invoke('insertSpaceAfter');
-            }
+            e.typer.invoke(function (tx) {
+                tx.selection.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
+                tx.insertText('');
+            });
         },
         commands: {
-            justifyLeft: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'left');
-            },
-            justifyCenter: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'center');
-            },
-            justifyRight: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'right');
-            },
             addColumnBefore: function (tx) {
-                $(tx.widget.columnCells).filter('th').before(TH_HTML);
-                $(tx.widget.columnCells).filter('td').before(TD_HTML);
-                moveToCell(tx, 0, 0);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
+                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
             },
             addColumnAfter: function (tx) {
-                $(tx.widget.columnCells).filter('th').after(TH_HTML);
-                $(tx.widget.columnCells).filter('td').after(TD_HTML);
-                moveToCell(tx, 0, 1);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
+                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
             },
             addRowAbove: function (tx) {
-                $(tx.widget.rowCells).before(TR_HTML.replace('%', repeat(TD_HTML, tx.widget.columnCount)));
-                moveToCell(tx, 0, 0);
+                var info = getSelectionInfo(tx.selection);
+                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
+                $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
             },
             addRowBelow: function (tx) {
-                $(tx.widget.rowCells).after(TR_HTML.replace('%', repeat(TD_HTML, tx.widget.columnCount)));
-                moveToCell(tx, 1, 0);
+                var info = getSelectionInfo(tx.selection);
+                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
+                $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
             },
             removeColumn: function (tx) {
-                $(tx.widget.columnCells).remove();
-                moveToCell(tx, 0, -1);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
+                    $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
+                });
             },
             removeRow: function (tx) {
-                $(tx.widget.rowCells).remove();
-                moveToCell(tx, -1, 0);
+                var info = getSelectionInfo(tx.selection);
+                $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
             },
             toggleTableHeader: function (tx) {
                 if ($(tx.widget.element).find('th')[0]) {
-                    $(tx.widget.element).find('tr:has(th)').remove();
-                    if (tx.widget.row === 0) {
-                        moveToCell(tx, 0, 0);
-                    }
+                    $(tx.widget.element).find('th').wrap('<td>').contents().unwrap();
                 } else {
-                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, tx.widget.columnCount)));
-                    moveToCell(tx, -tx.widget.row, -tx.widget.column);
+                    var columnCount = $(tx.widget.element).find('>tbody>tr')[0].childElementCount;
+                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, columnCount)));
                 }
-            },
-            insertSpaceBefore: function (tx) {
-                tx.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
-                tx.insertText('');
-            },
-            insertSpaceAfter: function (tx) {
-                tx.select(tx.widget.element, Typer.COLLAPSE_END_OUTSIDE);
-                tx.insertText('');
             }
         }
     };
 
     $.extend(Typer.ui.controls, {
-        'insert:table': Typer.ui.callout({
-            controls: 'table:*',
+        'insert:table': Typer.ui.button({
             requireWidgetEnabled: 'table',
             hiddenWhenDisabled: true,
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('table');
-            },
-            active: function (toolbar, self) {
-                return self.widget;
+            }
+        }),
+        'contextmenu:table': Typer.ui.callout({
+            controls: 'table:*',
+            requireWidget: 'table',
+            hiddenWhenDisabled: true
+        }),
+        'table:toggleTableHeader': Typer.ui.checkbox({
+            requireWidget: 'table',
+            execute: 'toggleTableHeader',
+            stateChange: function (toolbar, self) {
+                self.value = !!$(self.widget.element).find('th')[0];
             }
         }),
         'table:addColumnBefore': Typer.ui.button({
@@ -158,16 +145,14 @@
 
     Typer.ui.addLabels('en', {
         'insert:table': 'Table',
-        'table:addColumnBefore': 'Add Column Before',
-        'table:addColumnAfter': 'Add Column After',
-        'table:addRowAbove': 'Add Row Above',
-        'table:addRowBelow': 'Add Row Below',
-        'table:removeColumn': 'Remove Column',
-        'table:removeRow': 'Remove Row'
-    });
-
-    Typer.ui.addIcons('material', {
-        'insert:table': 'border_all'
+        'contextmenu:table': 'Modify table',
+        'table:toggleTableHeader': 'Toggle header',
+        'table:addColumnBefore': 'Add column before',
+        'table:addColumnAfter': 'Add column after',
+        'table:addRowAbove': 'Add row above',
+        'table:addRowBelow': 'Add row below',
+        'table:removeColumn': 'Remove column',
+        'table:removeRow': 'Remove row'
     });
 
 } (jQuery, window.Typer));

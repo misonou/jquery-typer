@@ -244,6 +244,9 @@
         },
         init: function (e) {
             $(e.widget.element).filter('ol').attr('type-css-value', LIST_STYLE_TYPE[$(e.widget.element).attr('type')] || 'decimal');
+            if ($(e.widget.element).parent('li')[0] && !e.widget.element.previousSibling) {
+                $(Typer.createTextNode()).insertBefore(e.widget.element);
+            }
         },
         commands: {
             indent: function (tx) {
@@ -263,6 +266,11 @@
      * Controls
      * ********************************/
 
+    function isEnabled(toolbar, inline) {
+        var selection = toolbar.typer.getSelection();
+        return !!(inline ? (selection.startNode.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE)) : selection.getParagraphElements()[0]);
+    }
+
     var simpleCommandButton = Typer.ui.button.extend(function (command, widget) {
         this._super({
             requireWidget: widget,
@@ -270,6 +278,9 @@
             execute: command,
             active: function (toolbar, self) {
                 return self.widget && self.widget[command];
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, widget === 'inlineStyle');
             }
         });
     });
@@ -290,10 +301,7 @@
 
     $.extend(Typer.ui.controls, {
         'toolbar:formatting': Typer.ui.group('formatting:*', {
-            rqeuireTyper: true,
-            enabled: function (toolbar) {
-                return !!toolbar.typer.getSelection().getParagraphElements()[0];
-            }
+            requireTyper: true
         }),
         'formatting:paragraph': Typer.ui.dropdown({
             requireCommand: 'formatting',
@@ -310,6 +318,9 @@
                         }
                     });
                 });
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:inlineStyle': Typer.ui.dropdown({
@@ -327,6 +338,9 @@
                         }
                     });
                 });
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, true);
             }
         }),
         'formatting:bold': simpleCommandButton('bold', 'inlineStyle'),
@@ -340,6 +354,9 @@
             },
             active: function (toolbar, self) {
                 return self.widget && self.widget.element.tagName.toLowerCase() === 'ul';
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:orderedList': Typer.ui.callout({
@@ -353,6 +370,9 @@
             ],
             active: function (toolbar, self) {
                 return self.widget && self.widget.element.tagName.toLowerCase() === 'ol';
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:indent': simpleCommandButton('indent', 'list'),
@@ -372,16 +392,16 @@
         'formatting:italic': 'Italic',
         'formatting:underline': 'Underlined',
         'formatting:strikeThrough': 'Strikethrough',
-        'formatting:unorderedList': 'Bullet List',
-        'formatting:orderedList': 'Numbered List',
+        'formatting:unorderedList': 'Bullet list',
+        'formatting:orderedList': 'Numbered list',
         'formatting:indent': 'Indent',
         'formatting:outdent': 'Outdent',
-        'formatting:justifyLeft': 'Align Left',
-        'formatting:justifyCenter': 'Align Center',
-        'formatting:justifyRight': 'Align Right',
-        'formatting:justifyFull': 'Align Justified',
+        'formatting:justifyLeft': 'Align left',
+        'formatting:justifyCenter': 'Align center',
+        'formatting:justifyRight': 'Align right',
+        'formatting:justifyFull': 'Align justified',
         'formatting:paragraph': 'Formatting',
-        'formatting:inlineStyle': 'Text Style',
+        'formatting:inlineStyle': 'Text style',
         'formatting:orderedList:1': 'Decimal numbers',
         'formatting:orderedList:a': 'Alphabetically ordered list, lowercase',
         'formatting:orderedList:A': 'Alphabetically ordered list, uppercase',
@@ -390,18 +410,18 @@
     });
 
     Typer.ui.addIcons('material', {
-        'formatting:bold': 'format_bold',
-        'formatting:italic': 'format_italic',
-        'formatting:underline': 'format_underlined',
-        'formatting:strikeThrough': 'strikethrough_s',
-        'formatting:unorderedList': 'format_list_bulleted',
-        'formatting:orderedList': 'format_list_numbered',
-        'formatting:indent': 'format_indent_increase',
-        'formatting:outdent': 'format_indent_decrease',
-        'formatting:justifyLeft': 'format_align_left',
-        'formatting:justifyCenter': 'format_align_center',
-        'formatting:justifyRight': 'format_align_right',
-        'formatting:justifyFull': 'format_align_justify'
+        'formatting:bold': '\ue238',          // format_bold
+        'formatting:italic': '\ue23f',        // format_italic
+        'formatting:underline': '\ue249',     // format_underlined
+        'formatting:strikeThrough': '\ue257', // strikethrough_s
+        'formatting:unorderedList': '\ue241', // format_list_bulleted
+        'formatting:orderedList': '\ue242',   // format_list_numbered
+        'formatting:indent': '\ue23e',        // format_indent_increase
+        'formatting:outdent': '\ue23d',       // format_indent_decrease
+        'formatting:justifyLeft': '\ue236',   // format_align_left
+        'formatting:justifyCenter': '\ue234', // format_align_center
+        'formatting:justifyRight': '\ue237',  // format_align_right
+        'formatting:justifyFull': '\ue235'    // format_align_justify
     });
 
     Typer.ui.setShortcut({

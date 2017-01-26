@@ -68,7 +68,7 @@
 }
 
 .active > .typer-ui-label .material-icons:empty:before {
-    content: 'done';
+    content: '\00e876';
 }
 
 
@@ -112,10 +112,15 @@
 .typer-ui-toolbar label:hover,
 .typer-ui-toolbar label:focus,
 .typer-ui-toolbar label.active,
+.typer-ui-menupane label:hover,
+.typer-ui-menupane label:focus,
+.typer-ui-menupane label.active,
+.typer-ui-menu:hover > button,
+.typer-ui-menu.focus > button,
+.typer-ui-menu.active > button,
 .typer-ui button:hover,
 .typer-ui button:focus,
-.typer-ui button.active,
-.typer-ui .active > button {
+.typer-ui button.active {
     background-color: rgba(211, 211, 211, 0.4);
     color: #212121;
 }
@@ -166,7 +171,6 @@
     font-family: 'Material Icons';
     line-height: 1;
     vertical-align: top;
-    font-feature-settings: "liga" 1;
 }
 
 .typer-ui input[type="checkbox"]:hover:before,
@@ -181,7 +185,7 @@
 
 .typer-ui input[type="checkbox"]:checked:before,
 .typer-ui input[type="radio"]:checked:before {
-    content: 'done';
+    content: '\00e876';
 }
 
 .typer-ui input[type="checkbox"]:active:after,
@@ -307,37 +311,33 @@
 /* Composite Control */
 
 .typer-ui-toolbar {
-    background-color: white;
     white-space: nowrap;
 }
 
 .typer-ui-toolbar-floating {
-    position: absolute;
-    padding-left: 10px;
+    position: fixed;
+    background-color: white;
     box-shadow: 0 0 10px;
-    z-index: 1000;
 }
 
-.typer-ui-toolbar-floating:before {
-    content: '';
-    display: block;
-    position: absolute;
-    top: 1px;
-    bottom: 1px;
-    left: 1px;
-    width: 10px;
-    cursor: move;
-}
-
-.typer-ui-group,
-.typer-ui-group > * {
+.typer-ui-toolbar .typer-ui-group,
+.typer-ui-toolbar .typer-ui-group > * {
     display: inline-block;
     position: relative;
     vertical-align: top;
 }
 
+.typer-ui-toolbar [role="shortcut"] {
+    display: none;
+}
+
 .typer-ui-menu {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
     position: relative;
+    -ms-flex-direction: column;
+    flex-direction: column;
 }
 
 .typer-ui-menu:hover {
@@ -345,14 +345,27 @@
 }
 
 .typer-ui-menu:after {
-    content: 'more_horiz';
+    content: '\00e5d3';
     position: absolute;
     right: 0;
     bottom: 0;
     font-family: 'Material Icons';
     line-height: 1;
     vertical-align: top;
-    font-feature-settings: "liga" 1;
+    pointer-events: none;
+}
+
+.typer-ui-menupane .typer-ui-menu:after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 0;
+    height: 0;
+    margin: -0.4em 0.5em 0 0;
+    border-left: 0.5em solid #555;
+    border-top: 0.4em solid transparent;
+    border-bottom: 0.4em solid transparent;
     pointer-events: none;
 }
 
@@ -365,21 +378,21 @@
 }
 
 .typer-ui-menupane .typer-ui-menupane {
-    top: 0;
     left: 100%;
 }
 
-.typer-ui-menu.open > .typer-ui-menupane {
+.typer-ui-menu.open > .typer-ui-menupane,
+.typer-ui-menu.open > .typer-ui-menu:hover .typer-ui-menupane,
+.typer-ui-contextmenu .typer-ui-menu:hover .typer-ui-menupane {
     display: block;
     display: -ms-flexbox;
     display: flex;
+    display: block\9;
     -ms-flex-direction: column;
     flex-direction: column;
 }
 
-.typer-ui-menupane > *,
-.typer-ui-menupane > .typer-ui-menu > label,
-.typer-ui-menupane > .typer-ui-menu > button {
+.typer-ui-menupane > * {
     display: block;
     box-sizing: border-box;
     align-items: stretch;
@@ -388,8 +401,11 @@
 
 .typer-ui-menupane label,
 .typer-ui-menupane button {
+    display: block;
     display: -ms-inline-flexbox;
     display: inline-flex;
+    display: block\9;
+    width: 100%\9;
     -ms-flex-wrap: nowrap;
     align-items: center;
 }
@@ -406,6 +422,35 @@
 
 .typer-ui-menupane button .typer-ui-menu-annotation:empty {
     display: none;
+}
+
+.typer-ui-menupane .typer-ui-group:before,
+.typer-ui-menupane .typer-ui-group:after {
+    content: '';
+    display: block;
+    margin: 0.25em 0;
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.typer-ui-menupane .typer-ui-group.visible-first:before,
+.typer-ui-menupane .typer-ui-group.visible-last:after,
+.typer-ui-menupane .typer-ui-group + .typer-ui-group:before {
+    content: none;
+}
+
+.typer-ui-contextmenu {
+    display: block;
+    min-width: 0;
+}
+
+.typer-ui-contextmenu .typer-ui-group {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
 }
 
 .typer-ui-dropdown {
@@ -461,9 +506,8 @@
 
 .typer-ui-dropdown .typer-ui-menupane button.active:before {
     position: absolute;
-    content: 'done';
+    content: '\00e876';
     font-family: 'Material Icons';
-    font-feature-settings: "liga" 1;
     top: 50%;
     left: 0.7em;
     line-height: 1;
@@ -477,6 +521,7 @@
     position: relative;
     margin: 0 0 0.42em 0.25em;
     padding: 0.75em 0.25em 0.17em;
+    min-width: 3em;
     border-bottom: 1px solid transparent;
     vertical-align: top;
     line-height: 1.33;
@@ -488,55 +533,75 @@
     -ms-user-select: text;
 }
 
+.typer-ui-textbox.has-value [contenteditable] {
+    min-width: 0;
+}
+
 .typer-ui-textbox [contenteditable]:hover,
 .typer-ui-textbox [contenteditable]:focus {
     border-bottom-color: #aeb8c2;
 }
 
-.typer-ui-textbox.empty [contenteditable] {
-    min-width: 3em;
+.typer-ui-textbox [contenteditable]:focus {
+    border-bottom-color: #8696b8;
 }
 
-.typer-ui-textbox.empty [contenteditable]:after {
+.typer-ui-textbox [contenteditable]:after {
     content: 'Enter text';
+    display: inline-block;
     color: #aeb8c2;
+    white-space: nowrap;
+    pointer-events: none;
 }
 
-.typer-ui-textbox.empty [contenteditable][data-placeholder]:after {
+.typer-ui-textbox [contenteditable][data-placeholder]:after {
     content: attr(data-placeholder);
 }
 
-.typer-ui-textbox.empty [contenteditable]:focus {
-    border-bottom-color: #8696b8;
+.typer-ui-textbox.has-value [contenteditable]:after {
+    display: none;
 }
 
 .typer-ui-dialog {
     position: fixed;
-    top: 0;
-    left: 20px;
-    right: 20px;
+    top: 50%;
+    left: 50%;
     padding: 0.5em;
-    background-color: rgba(238, 238, 238, 0.95);
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-    -webkit-transform: translateY(-120%);
-    -moz-transform: translateY(-120%);
-    -ms-transform: translateY(-120%);
-    -o-transform: translateY(-120%);
-    transform: translateY(-120%);
-    -webkit-transition: -webkit-transform 0.2s ease-in-out;
-    -moz-transition: -moz-transform 0.2s ease-in-out;
-    -ms-transition: -ms-transform 0.2s ease-in-out;
-    -o-transition: -o-transform 0.2s ease-in-out;
-    transition: transform 0.2s ease-in-out;
+    min-width: 350px;
+    max-width: calc(100% - 0.4em - 10px);
+    max-height: calc(100% - 0.4em - 10px);
+    background-color: rgba(255, 255, 255, 0.95);
+    -webkit-transition: 0.1s ease-in;
+    -moz-transition: 0.1s ease-in;
+    -ms-transition: 0.1s ease-in;
+    transition: 0.1s ease-in;
+    -webkit-transition-property: top, left, filter, transform, opacity;
+    -moz-transition-property: top, left, filter, transform, opacity;
+    -ms-transition-property: top, left, filter, transform, opacity;
+    transition-property: top, left, filter, transform, opacity;
+    -webkit-transform: translate(-50%, -50%) scale(0.9);
+    -moz-transform: translate(-50%, -50%) scale(0.9);
+    -ms-transform: translate(-50%, -50%) scale(0.9);
+    transform: translate(-50%, -50%) scale(0.9);
+    -webkit-filter: blur(2px);
+    -moz-filter: blur(2px);
+    -ms-filter: blur(2px);
+    filter: blur(2px);
+    opacity: 0;
     z-index: 1001;
 }
 
 .typer-ui-dialog.open {
-    -webkit-transform: translateY(0);
-    -moz-transform: translateY(0);
-    -ms-transform: translateY(0);
-    -o-transform: translateY(0);
-    transform: translateY(0);
+    -webkit-transform: translate(-50%, -50%);
+    -moz-transform: translate(-50%, -50%);
+    -ms-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
+    -webkit-filter: none;
+    -moz-filter: none;
+    -ms-filter: none;
+    filter: none;
+    opacity: 1;
 }
 
 .typer-ui-dialog.busy:after {
@@ -549,14 +614,6 @@
     background: rgba(255, 255, 255, 0.5) url('data:image/gif;,');
     cursor: progress;
     z-index: 1000;
-}
-
-.typer-ui-dialog {
-    left: 50%;
-    right: 0;
-    margin-left: -250px;
-    max-width: 500px;
-    background-color: rgba(255, 255, 255, 0.95);
 }
 
 .typer-ui-dialog h1 {
@@ -582,7 +639,26 @@
     background-color: transparent;
     margin-left: -0.25em;
     margin-right: -0.25em;
-    border-bottom: 1px solid #aeb8c2;
+    border-bottom-color: #aeb8c2;
+    -webkit-transition: padding 0.1s;
+    -moz-transition: padding 0.1s;
+    -ms-transition: padding 0.1s;
+    transition: padding 0.1s;
+}
+
+.typer-ui-dialog .typer-ui-textbox [contenteditable]:after {
+    display: inline-block;
+}
+
+.typer-ui-dialog .typer-ui-textbox.has-value [contenteditable] {
+    padding-top: 1.75em;
+}
+
+.typer-ui-dialog .typer-ui-textbox.has-value [contenteditable]:after {
+    position: absolute;
+    left: 0.25em;
+    bottom: 100%;
+    margin-bottom: -1.75em;
 }
 
 .typer-ui-dialog .typer-ui-group[role*="buttonset"] {

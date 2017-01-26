@@ -7,10 +7,6 @@
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
-    var COLLAPSE_START_INSIDE = 7;
-    var COLLAPSE_START_OUTSIDE = 6;
-    var COLLAPSE_END_INSIDE = 3;
-    var COLLAPSE_END_OUTSIDE = 2;
     var NODE_WIDGET = 1;
     var NODE_EDITABLE = 2;
     var NODE_EDITABLE_PARAGRAPH = 32;
@@ -250,8 +246,8 @@
     }
 
     function getWholeTextOffset(node, textNode) {
-        var iterator = new TyperDOMNodeIterator(node, 4);
-        for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length);
+        var iterator = new TyperDOMNodeIterator(node, 5);
+        for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length || 0);
         return offset;
     }
 
@@ -259,37 +255,24 @@
         if (startNode && isFunction(startNode.getRange)) {
             return startNode.getRange();
         }
-        var startOffsetNum = +startOffset === startOffset;
         var range;
         if (is(startNode, Node)) {
             range = document.createRange();
-            if (endNode) {
-                if (startOffsetNum) {
-                    range.setStart(startNode, getOffset(startNode, startOffset));
-                } else {
-                    range[startOffset ? 'setStartBefore' : 'setStartAfter'](startNode);
-                }
-                if (is(endNode, Node) && connected(startNode, endNode)) {
-                    if (+endOffset === endOffset) {
-                        range.setEnd(endNode, getOffset(endNode, endOffset));
-                    } else {
-                        range[endOffset ? 'setEndBefore' : 'setEndAfter'](endNode);
-                    }
+            if (+startOffset !== startOffset) {
+                range[(startOffset === 'contents' || !startNode.parentNode) ? 'selectNodeContents' : 'selectNode'](startNode);
+                if (typeof startOffset === 'boolean') {
+                    range.collapse(startOffset);
                 }
             } else {
-                range[(startOffset === true || (startOffsetNum && (startOffset & 1)) || !startNode.parentNode) ? 'selectNodeContents' : 'selectNode'](startNode);
-                if (startOffsetNum && (startOffset & 2)) {
-                    range.collapse(!!(startOffset & 4));
-                }
+                range.setStart(startNode, getOffset(startNode, startOffset));
+            }
+            if (is(endNode, Node) && connected(startNode, endNode)) {
+                range.setEnd(endNode, getOffset(endNode, endOffset));
             }
         } else if (is(startNode, Range)) {
             range = startNode.cloneRange();
-            if (!range.collapsed) {
-                if (typeof startOffset === 'boolean') {
-                    range.collapse(startOffset);
-                } else if (startOffsetNum && (startOffset & 2)) {
-                    range.collapse(!!(startOffset & 4));
-                }
+            if (!range.collapsed && typeof startOffset === 'boolean') {
+                range.collapse(startOffset);
             }
         }
         if (is(startOffset, Range) && connected(range, startOffset)) {
@@ -330,20 +313,47 @@
     }
 
     function rectEquals(a, b) {
-        return (a.left | 0) === (b.left | 0) && (a.top | 0) === (b.top | 0) && (a.width | 0) === (b.width | 0) && (a.height | 0) === (b.height | 0);
+        function check(prop) {
+            return Math.abs(a[prop] - b[prop]) < 1;
+        }
+        return check('left') && check('top') && check('bottom') && check('right');
     }
 
     function pointInRect(x, y, rect) {
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
-    function computeTextRect(node, bounding) {
-        var target = is(node, bounding ? Element : Range) || createRange(node, bounding ? undefined : true);
-        if (target.collapsed && target.startContainer.nodeType === 3 && !target.startContainer.length) {
+    function computeTextRects(node) {
+        var target = is(node, Range) || createRange(node, 'contents');
+        var zeroLength = target.collapsed && target.startContainer.nodeType === 3 && !target.startContainer.length;
+        if (zeroLength) {
+            // no rects are returned for zero-length text node
+            // return rects as if there was content
             target.startContainer.nodeValue = ZWSP;
-            target = createRange(target.startContainer);
         }
-        return bounding ? target.getBoundingClientRect() : target.getClientRects();
+        try {
+            if (target.collapsed) {
+                // no rects are returned for caret ranges anchored at the end of text node
+                // calculate rect from the last character
+                if (target.startOffset === target.startContainer.length) {
+                    target.setStart(target.startContainer, target.startOffset - 1);
+                    var rect = target.getClientRects()[0];
+                    return [{
+                        top: rect.top,
+                        left: rect.right,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                        width: 0,
+                        height: rect.height
+                    }];
+                }
+            }
+            return target.getClientRects();
+        } finally {
+            if (zeroLength) {
+                target.startContainer.nodeValue = '';
+            }
+        }
     }
 
     function getActiveRange(container) {
@@ -452,12 +462,10 @@
         }
 
         function findWidgetWithCommand(name) {
-            var widget;
-            $.each(getTargetedWidgets(EVENT_HANDLER), function (i, v) {
-                widget = isFunction((widgetOptions[v.id].commands || {})[name]) && v;
-                return !widget;
+            return any(getTargetedWidgets(EVENT_HANDLER), function (v) {
+                var options = widgetOptions[v.id];
+                return options.commands && isFunction(options.commands[name]);
             });
-            return widget;
         }
 
         function triggerEvent(eventMode, eventName, data, props) {
@@ -659,7 +667,7 @@
 
         function updateState(fireEvent) {
             var activeRange = getActiveRange(topElement);
-            if (activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+            if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                 try {
                     typer.snapshot = $.noop;
                     currentSelection.select(activeRange);
@@ -674,7 +682,7 @@
         }
 
         function normalize(range) {
-            range = is(range, Range) || createRange(range || topElement, true);
+            range = is(range, Range) || createRange(topElement, 'contents');
             codeUpdate(function () {
                 var selection = new TyperSelection(typer, range);
                 if (is(selection.focusNode, NODE_EDITABLE) && !selection.focusNode.childNodes[0]) {
@@ -687,6 +695,9 @@
                 }
                 var selectedRange = createRange(currentSelection);
                 iterate(selection.createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
+                    if (is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
+                        $(node.element).wrap('<p>');
+                    }
                     if (is(node, NODE_ANY_ALLOWTEXT)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
@@ -704,35 +715,30 @@
                                 // prevent unintended non-breaking space (&nbsp;) between word boundaries when inserting contents
                                 v.nodeValue = v.nodeValue.slice(0, -1) + ' ';
                             }
+                            if (v.nodeType === 3 && v !== currentSelection.startTextNode && v !== currentSelection.endTextNode) {
+                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ');
+                            }
                         });
                         if (!/\S/.test(node.element.textContent)) {
                             $(createTextNode()).appendTo(node.element);
                         }
-                    }
-                    if (!rangeIntersects(selectedRange, node.element)) {
-                        node.element.normalize();
-                        $(node.element).contents().each(function (i, v) {
-                            if (v.nodeType === 3) {
-                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ');
-                            }
-                        });
-                        if (is(node, NODE_INLINE)) {
+                        if (is(node, NODE_INLINE) && node.element !== currentSelection.startElement && node.element !== currentSelection.endElement) {
                             if (tagName(node.element.previousSibling) === tagName(node.element) && compareAttrs(node.element, node.element.previousSibling)) {
                                 $(node.element).contents().appendTo(node.element.previousSibling);
                                 removeNode(node.element);
-                            } else if (VOID_TAGS.indexOf(tagName(node.element)) < 0 && node.element.childElementCount === 0 && !trim(node.element.textContent)) {
-                                removeNode(node.element);
-                            }
-                        } else if (is(node, NODE_EDITABLE)) {
-                            $(node.element).contents().each(function (i, v) {
-                                if (v.nodeType === 3 && trim(v.nodeValue)) {
-                                    $(v).wrap('<p>');
-                                }
-                            });
-                            if (!node.element.childNodes[0]) {
-                                $(EMPTY_LINE).appendTo(node.element);
                             }
                         }
+                    } else if (!node.element.childNodes[0]) {
+                        $(EMPTY_LINE).appendTo(node.element);
+                    } else {
+                        $(node.element).contents().each(function (i, v) {
+                            if (v.nodeType === 3 && trim(v.nodeValue)) {
+                                $(v).wrap('<p>');
+                            }
+                        });
+                    }
+                    if (!rangeIntersects(selectedRange, node.element) || rangeCovers(selectedRange, node.element)) {
+                        node.element.normalize();
                     }
                 });
                 // Mozilla adds <br type="_moz"> when a container is empty
@@ -818,11 +824,11 @@
                 // normalize before inserting content
                 if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode) {
                     normalize(range);
-                    newState = new TyperSelection(typer, createRange(newState.startNode.element, true));
+                    newState = new TyperSelection(typer, createRange(newState.startNode.element, 'contents'));
                 }
                 // ensure start point lies within valid selection
                 if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
-                    startPoint = createRange(newState.startNode.element, COLLAPSE_START_INSIDE);
+                    startPoint = createRange(newState.startNode.element, 0);
                 }
                 callback(newState, startPoint, endPoint);
             } else {
@@ -874,7 +880,7 @@
                         while (!is(splitLastNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
-                        var splitEnd = createRange(splitLastNode.element, COLLAPSE_END_OUTSIDE);
+                        var splitEnd = createRange(splitLastNode.element, false);
                         var splitContent = createRange(caretPoint, splitEnd).extractContents();
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
@@ -893,7 +899,7 @@
                             var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
                             n2.nodeValue = n2.nodeValue.slice(1);
                         }
-                        caretPoint = createRange(splitFirstNode || splitEnd, COLLAPSE_START_INSIDE);
+                        caretPoint = splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
                         newPoint = newPoint || caretPoint.cloneRange();
                         endPoint = createRange(splitEnd, false);
                         paragraphAsInline = true;
@@ -916,15 +922,15 @@
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                             caretPoint.insertNode(nodeToInsert);
                         } else {
-                            createRange(caretNode.element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
+                            createRange(caretNode.element, true).insertNode(nodeToInsert);
                         }
                         insertAsInline = is(node, NODE_ANY_ALLOWTEXT);
                         hasInsertedBlock = true;
                     }
-                    caretPoint = createRange(lastNode, COLLAPSE_END_INSIDE) || caretPoint;
+                    caretPoint = (lastNode && createRange(lastNode, -0)) || caretPoint;
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    createRange(state.startNode.element, COLLAPSE_END_INSIDE).insertNode(createRange(state.endNode.element, true).extractContents());
+                    createRange(state.startNode.element, -0).insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     removeNode(state.endNode.element);
                 }
                 currentSelection.select(newPoint || caretPoint);
@@ -945,7 +951,7 @@
                 iterate(new TyperTreeWalker(v, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE, function (v) {
                     text += text && '\n\n';
                     iterate(new TyperDOMNodeIterator(v, 5, function (v) {
-                        text += v.nodeValue || (tagName(v) === 'br' ? '\n' : '');
+                        text += v.nodeType === 3 ? v.nodeValue.replace(/\s+|\u00a0/g, ' ') : tagName(v) === 'br' ? '\n' : '';
                     }));
                     return 2;
                 }));
@@ -982,7 +988,7 @@
                 var offset = parseInt($(element).attr(attr));
                 if (element) {
                     $(element).removeAttr(attr);
-                    return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, start ? COLLAPSE_START_OUTSIDE : COLLAPSE_END_OUTSIDE);
+                    return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, !!start);
                 }
             }
 
@@ -1106,10 +1112,11 @@
                         $(document.body).unbind(handlers);
                     }
                 };
-                (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                $(document.body).bind(handlers);
-                mousedown = true;
-                e.stopPropagation();
+                if (e.which === 1) {
+                    (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
+                    $(document.body).bind(handlers);
+                    mousedown = true;
+                }
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
@@ -1126,7 +1133,6 @@
             });
 
             $self.bind('keydown keypress keyup', function (e) {
-                e.stopPropagation();
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1143,7 +1149,7 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode)));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName) || /ctrl(?![axcvr]$)|alt|enter/i.test(keyEventName)) {
+                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
                         triggerEvent(EVENT_STATIC, 'keystroke', keyEventName, {
@@ -1152,6 +1158,9 @@
                                 return e.isDefaultPrevented();
                             }
                         });
+                        if (/ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                            e.preventDefault();
+                        }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
                     replaceTimeout(normalizeInputEvent, function () {
@@ -1198,7 +1207,6 @@
                     }
                 };
                 $self.bind(handlers);
-                e.stopPropagation();
             });
 
             $self.bind('cut copy', function (e) {
@@ -1212,7 +1220,6 @@
                     clipboardData.setData('text/html', $('<div id="Typer">').append(clipboard.content.cloneNode(true))[0].outerHTML);
                     clipboardData.setData('application/x-typer', 'true');
                 }
-                e.stopPropagation();
                 e.preventDefault();
             });
 
@@ -1226,7 +1233,6 @@
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     insertContents(currentSelection, textContent === clipboard.textContent ? clipboard.content.cloneNode(true) : textContent);
                 }
-                e.stopPropagation();
                 e.preventDefault();
                 if (IS_IE) {
                     // IE put the caret in the wrong position after user code
@@ -1256,6 +1262,13 @@
                 }
             });
 
+            $self.bind('contextmenu', function (e) {
+                var range = caretRangeFromPoint(e.clientX, e.clientY, topElement);
+                if (currentSelection.isCaret || !rangeIntersects(currentSelection, range)) {
+                    currentSelection.select(range);
+                }
+            });
+
             $self.bind('dblclick', function (e) {
                 currentSelection.select('word');
                 e.preventDefault();
@@ -1281,6 +1294,7 @@
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
                     }
+                    normalize();
                 });
             });
 
@@ -1440,18 +1454,18 @@
                 var s2 = createElement('span');
                 r1.insertNode(s1);
                 r2.insertNode(s2);
-                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
+                currentSelection.select(createRange(s1, false), createRange(s2, true));
                 $.each(currentSelection.getEditableRanges(), function (i, v) {
                     applyRange(v);
                     document.execCommand(commandName, false, value || '');
                 });
-                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
+                currentSelection.select(createRange(s1, false), createRange(s2, true));
                 removeNode(s1);
                 removeNode(s2);
             }
         });
 
-        currentSelection = new TyperSelection(typer, createRange(topElement, COLLAPSE_START_INSIDE));
+        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         normalize();
         triggerEvent(EVENT_STATIC, 'init');
     }
@@ -1459,10 +1473,6 @@
     window.Typer = Typer;
 
     $.extend(Typer, {
-        COLLAPSE_START_INSIDE: COLLAPSE_START_INSIDE,
-        COLLAPSE_START_OUTSIDE: COLLAPSE_START_OUTSIDE,
-        COLLAPSE_END_INSIDE: COLLAPSE_END_INSIDE,
-        COLLAPSE_END_OUTSIDE: COLLAPSE_END_OUTSIDE,
         NODE_WIDGET: NODE_WIDGET,
         NODE_PARAGRAPH: NODE_PARAGRAPH,
         NODE_EDITABLE: NODE_EDITABLE,
@@ -1665,16 +1675,6 @@
         });
     }
 
-    function typerSelectionGetWidgets(inst) {
-        var nodes = [];
-        for (var node = inst.focusNode; node; node = node.parentNode) {
-            if (is(node, NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE)) {
-                nodes.unshift(node);
-            }
-        }
-        return nodes;
-    }
-
     function typerSelectionSplitText(inst) {
         var p1 = inst.getCaret('start');
         var p2 = inst.getCaret('end');
@@ -1698,6 +1698,9 @@
         inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
         inst.isCaret = !inst.direction;
         inst.focusNode = inst.typer.getEditableNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        while (!is(inst.focusNode, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE)) {
+            inst.focusNode = inst.focusNode.parentNode;
+        }
         for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
             inst[typerSelectionUpdate.NAMES[i + 4]] = p1[typerSelectionUpdate.NAMES[i]];
             inst[typerSelectionUpdate.NAMES[i + 8]] = p2[typerSelectionUpdate.NAMES[i]];
@@ -1751,10 +1754,12 @@
             });
         },
         getWidgets: function () {
-            return $.map(typerSelectionGetWidgets(this), mapFn('widget'));
-        },
-        getEditableElements: function () {
-            return $.map(typerSelectionGetWidgets(this).concat(iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE))), mapFn('element'));
+            var nodes = [];
+            for (var node = this.focusNode; node; node = node.parentNode) {
+                nodes.unshift(node.widget);
+                node = this.typer.getNode(node.widget.element);
+            }
+            return nodes;
         },
         getParagraphElements: function () {
             var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
@@ -1772,7 +1777,7 @@
             typerSelectionSplitText(this);
             var range = createRange(this);
             var iterator = new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_WIDGET | NODE_ANY_ALLOWTEXT), 4, function (v) {
-                return rangeIntersects(range, createRange(v, true)) ? 1 : 2;
+                return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
             });
             return iterateToArray(iterator);
         },
@@ -1789,11 +1794,12 @@
                     return this.getCaret('start').moveByWord(-1) + this.getCaret('end').moveByWord(1) > 0;
                 }
                 var range = createRange(startNode, startOffset, endNode, endOffset);
-                return this.baseCaret.moveTo(range, COLLAPSE_START_OUTSIDE) + (range.collapsed ? this.extendCaret.moveTo(this.baseCaret) : this.extendCaret.moveTo(range, COLLAPSE_END_OUTSIDE)) > 0;
+                return this.baseCaret.moveTo(createRange(range, true)) + this.extendCaret.moveTo(createRange(range, false)) > 0;
             });
         },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
+                userFocus.delete(this.typer);
                 applyRange(createRange(this));
             }
         },
@@ -1828,8 +1834,8 @@
             inst.node = node;
             inst.element = element;
             inst.textNode = textNode || null;
-            inst.offset = offset || 0;
-            inst.wholeTextOffset = inst.offset + (textNode ? getWholeTextOffset(node, textNode) : 0);
+            inst.offset = offset;
+            inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
         });
         return true;
     }
@@ -1871,36 +1877,38 @@
             var iterator2 = new TyperDOMNodeIterator(node, 4);
             iterator2.currentNode = element;
             while (iterator2.nextNode() && end);
-            textNode = iterator2.currentNode;
+            if (iterator2.currentNode.nodeType === 3) {
+                textNode = iterator2.currentNode;
+            }
             offset = end ? textNode && textNode.length : 0;
         }
         if (is(node, NODE_ANY_ALLOWTEXT)) {
-            for (; !is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH); node = node.parentNode);
+            for (; node.parentNode && !is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH); node = node.parentNode);
         }
-        return caretSetPositionRaw(inst, node, element, textNode, textNode ? offset : end ? COLLAPSE_END_OUTSIDE : COLLAPSE_START_OUTSIDE);
+        return caretSetPositionRaw(inst, node, element, textNode, textNode ? offset : !end);
     }
 
     definePrototype(TyperCaret, {
         getRange: function () {
-            if (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length)) {
+            if ((this.element && !this.element.parentNode) || (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length))) {
                 // use calculated text offset from paragraph node in case anchored text node is detached from DOM
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
             }
-            return createRange(this.textNode || this.element, this.offset, !!this.textNode);
+            return createRange(this.textNode || this.element, this.offset);
         },
         clone: function () {
             var clone = new TyperCaret(this.typer);
             clone.moveTo(this);
             return clone;
         },
-        moveTo: function (startNode, startOffset, endNode, endOffset) {
-            if (is(startNode, TyperCaret)) {
-                return caretSetPositionRaw(this, startNode.node, startNode.element, startNode.textNode, startNode.offset);
+        moveTo: function (node, offset) {
+            var range = is(node, Range) || createRange(node, offset);
+            if (range) {
+                var end = this.selection && this === this.selection.extendCaret && compareRangePosition(this.selection.baseCaret, range) < 0;
+                return caretSetPosition(this, range.startContainer, range.startOffset, end);
             }
-            var range = createRange(startNode, startOffset, endNode, endOffset);
-            var startPoint = this.selection && this.selection.getCaret('start').getRange();
-            return !!range && caretSetPosition(this, range.startContainer, range.startOffset, startPoint && compareRangePosition(startPoint, range) < 0);
+            return false;
         },
         moveToPoint: function (x, y) {
             return this.moveTo(caretRangeFromPoint(x, y, this.typer.element));
@@ -1918,10 +1926,10 @@
             return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
         moveToLineEnd: function (direction) {
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             var minx = rect.left;
             iterate(new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4), function (v) {
-                $.each(computeTextRect(v), function (i, v) {
+                $.each(computeTextRects(v), function (i, v) {
                     if (v.top <= rect.bottom && v.bottom >= rect.top) {
                         minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.right);
                     }
@@ -1931,9 +1939,9 @@
         },
         moveByLine: function (direction) {
             var iterator = caretTextNodeIterator(this);
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             do {
-                var rects = computeTextRect(iterator.currentNode);
+                var rects = computeTextRects(iterator.currentNode);
                 var newRect = any(direction < 0 ? slice(rects).reverse() : rects, function (v) {
                     return direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom;
                 });
@@ -1965,7 +1973,7 @@
         },
         moveByCharacter: function (direction) {
             var iterator = caretTextNodeIterator(this);
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             var offset = this.offset;
             while (true) {
                 while (iterator.currentNode.nodeType === 1 || offset === getOffset(iterator.currentNode, 0 * -direction)) {
@@ -1977,8 +1985,8 @@
                     offset = (direction < 0 ? iterator.currentNode.length : 0) + (p1.node !== this.node && -direction);
                 }
                 offset += direction;
-                var newRect = computeTextRect(createRange(iterator.currentNode, offset));
-                if (!rectEquals(rect, newRect)) {
+                var newRect = computeTextRects(createRange(iterator.currentNode, offset))[0];
+                if (newRect && !rectEquals(rect, newRect)) {
                     return this.moveToText(iterator.currentNode, offset);
                 }
             }
@@ -2051,12 +2059,13 @@
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
                     var pos = document.caretPositionFromPoint(x, y);
-                    return createRange(pos.offsetNode, pos.offset, true);
+                    return createRange(pos.offsetNode, pos.offset);
                 };
             }
             return function (x, y) {
                 function distanceFromCharacter(node, index) {
-                    var rect = createRange(node, index, true).getClientRects()[0];
+                    while (node.nodeValue.charCodeAt(index) === 10 && --index);
+                    var rect = computeTextRects(createRange(node, index))[0];
                     if (rect) {
                         var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
                         var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
@@ -2075,20 +2084,34 @@
                     return Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1;
                 }
 
+                function hitTestChildElements(node) {
+                    var currentZIndex;
+                    var target;
+                    $(node).children().each(function (i, v) {
+                        if (pointInRect(x, y, v.getBoundingClientRect()) && $(v).css('pointer-events') !== 'none') {
+                            var zIndex = $(v).css('position') === 'static' ? undefined : parseInt($(v).css('z-index')) || 0;
+                            if (currentZIndex === undefined || zIndex > currentZIndex) {
+                                currentZIndex = zIndex;
+                                target = v;
+                            }
+                        }
+                    });
+                    return target;
+                }
+
                 // IE returns outer element when the coordinate exactly on the box boundaries
                 // manually finds the innermost selectable element and starts searching caret position there first
+                // also before IE11 pointer-events does not thus cannot use document.elementFromPoint
                 var stack = [];
-                var element = document.elementFromPoint(x, y);
+                var element = window.ActiveXObject ? document.body : document.elementFromPoint(x, y);
                 for (var child = element; child; element = child || element) {
                     stack.unshift(child);
-                    child = any(element.children, function (v) {
-                        return pointInRect(x, y, v.getBoundingClientRect()) && $(v).css('pointer-events') !== 'none';
-                    });
+                    child = hitTestChildElements(element);
                 }
                 var lastTextNode;
                 for (var i = 0, length = stack.length; i < length; i++) {
                     var textNodesInLine = $.grep(stack[i].childNodes, function (v) {
-                        return v.nodeType === 3 && any(computeTextRect(v), function (v) {
+                        return v.nodeType === 3 && any(computeTextRects(v), function (v) {
                             return v.top <= y && v.bottom >= y;
                         });
                     });
@@ -2096,13 +2119,13 @@
                         return distanceFromCharacter(v, v.length - 1) >= 0;
                     });
                     if (textNode) {
-                        return createRange(textNode, findOffset(textNode), true);
+                        return createRange(textNode, findOffset(textNode));
                     }
                     if (textNodesInLine[0] && (!lastTextNode || comparePosition(lastTextNode, textNodesInLine[textNodesInLine.length - 1]) < 0)) {
                         lastTextNode = textNodesInLine[textNodesInLine.length - 1];
                     }
                 }
-                return lastTextNode ? createRange(lastTextNode, -0, true) : createRange(element, COLLAPSE_END_INSIDE);
+                return createRange(lastTextNode, -0);
             };
         } ();
     }

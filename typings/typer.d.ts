@@ -1,15 +1,7 @@
 type NodeFilterResult = 1 | 2 | 3;
 type Rangeable = Range | Node | TyperRangeable;
-type CollapseMode = boolean | CollapseModeIntValue;
 type CaretPoint = 'base' | 'extend' | 'start' | 'end';
 type SelectMode = 'word';
-
-declare enum CollapseModeIntValue {
-    COLLAPSE_START_INSIDE = 7,
-    COLLAPSE_START_OUTSIDE = 6,
-    COLLAPSE_END_INSIDE = 3,
-    COLLAPSE_END_OUTSIDE = 2,
-}
 
 declare enum TyperNodeType {
     NODE_WIDGET = 1,
@@ -176,9 +168,9 @@ interface TyperSelection extends TyperRangeable {
 
     select(mode: SelectMode): boolean;
     select(range: TyperRangeable): boolean;
-    select(startNode: Node, collapse: CollapseMode): boolean;
-    select(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): boolean;
-    select(range: Range, collapse?: CollapseMode): boolean;
+    select(startNode: Node, collapse?: boolean): boolean;
+    select(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): boolean;
+    select(range: Range, collapse?: boolean): boolean;
     select(start: Range, end: Range): boolean;
 
     moveToPoint(direction: number): boolean;
@@ -238,10 +230,6 @@ interface TyperDOMNodeIterator extends Iterator<Node> {
 }
 
 interface TyperStatic {
-    readonly COLLAPSE_START_INSIDE: CollapseModeIntValue;
-    readonly COLLAPSE_START_OUTSIDE: CollapseModeIntValue;
-    readonly COLLAPSE_END_INSIDE: CollapseModeIntValue;
-    readonly COLLAPSE_END_OUTSIDE: CollapseModeIntValue;
     readonly NODE_WIDGET: TyperNodeType;
     readonly NODE_EDITABLE: TyperNodeType;
     readonly NODE_EDITABLE_PARAGRAPH: TyperNodeType;
@@ -268,16 +256,16 @@ interface TyperStatic {
     rangeCovers(a: Rangeable, b: Rangeable): boolean;
     rangeEquals(a: Rangeable, b: Rangeable): boolean;
     rectEquals(a: ClientRect, b: ClientRect): boolean;
-    caretRangeFromPoint(e: MouseEvent): Range;
+    caretRangeFromPoint(x: number, y: number, within?: Element): Range;
     createElement(tagName: string): Element;
-    createTextNode(nodeValue: string): Text;
+    createTextNode(nodeValue?: string): Text;
     createDocumentFragment(content: Node | string): DocumentFragment
     trim(str: string): string;
 
     createRange(range: TyperRangeable): Range;
-    createRange(startNode: Node, collapse: CollapseMode): Range;
-    createRange(startNode: Node, startOffset: number | boolean, endNode: Node, endOffset?: number | boolean): Range;
-    createRange(range: Range, collapse?: CollapseMode): Range;
+    createRange(startNode: Node, collapse?: boolean): Range;
+    createRange(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): Range;
+    createRange(range: Range, collapse?: boolean): Range;
     createRange(start: Range, end: Range): Range;
 }
 

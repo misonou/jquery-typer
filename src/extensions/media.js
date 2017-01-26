@@ -72,14 +72,14 @@
     Typer.ui.addLabels('en', {
         'insert:image': 'Image',
         'insert:video': 'Video',
-        'media:altText': 'Alternate Text',
-        'dialog:selectImage': 'Enter Image URL'
+        'media:altText': 'Alternate text',
+        'dialog:selectImage': 'Enter image URL'
     });
 
     Typer.ui.addIcons('material', {
-        'insert:image': 'insert_photo',
-        'insert:video': 'videocam',
-        'media:altText': 'comment'
+        'insert:image': '\ue251',  // insert_photo
+        'insert:video': '\ue04b',  // videocam
+        'media:altText': '\ue0b9'  // comment
     });
 
 } (jQuery, window.Typer));

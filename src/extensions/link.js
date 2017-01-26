@@ -11,6 +11,7 @@
                 tx.insertHtml(element);
             } else {
                 tx.execCommand('createLink', value);
+                tx.selection.collapse('end');
             }
         },
         remove: 'keepText',
@@ -29,26 +30,37 @@
     $.extend(Typer.ui.controls, {
         'toolbar:link': Typer.ui.callout({
             controls: 'link:*',
+            after: 'toolbar:insert',
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
                 if (self.widget) {
                     return null;
                 }
-                var currentValue = self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(toolbar.typer.getSelection().getSelectedText()) ? RegExp.input : '';
+                var selectedText = self.widget || toolbar.typer.getSelection().getSelectedText();
+                var currentValue = {
+                    href: self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(selectedText) ? selectedText : '',
+                    text: self.widget ? $(self.widget.element).text() : selectedText
+                };
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.prompt('dialog:selectLink', currentValue);
+                return toolbar.spawn('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
                     return null;
                 }
+                var href = value.href || value;
+                var text = value.text || href;
                 if (self.widget) {
-                    tx.typer.invoke('setURL', value);
+                    $(self.element).text(text);
+                    tx.typer.invoke('setURL', href);
                 } else {
-                    tx.insertWidget('link', value);
+                    var textNode = Typer.createTextNode(text);
+                    tx.insertHtml(textNode);
+                    tx.selection.select(textNode);
+                    tx.insertWidget('link', href);
                 }
             },
             active: function (toolbar, self) {
@@ -81,20 +93,39 @@
             hiddenWhenDisabled: true,
             requireWidget: 'link',
             execute: 'unlink'
+        }),
+        'contextmenu:openLink': Typer.ui.button({
+            requireWidget: 'link',
+            hiddenWhenDisabled: true,
+            execute: function (toolbar, self) {
+                window.open(self.widget.element.href);
+            }
+        }),
+        'dialog-control:selectLink-text': Typer.ui.textbox(),
+        'dialog-control:selectLink-url': Typer.ui.textbox(),
+        'dialog:selectLink': Typer.ui.dialog({
+            controls: 'dialog-control:selectLink-text dialog-control:selectLink-url ui:prompt-buttonset',
+            valueMap: {
+                text: 'dialog-control:selectLink-text',
+                href: 'dialog-control:selectLink-url'
+            }
         })
     });
 
     Typer.ui.addLabels('en', {
-        'toolbar:link': 'Insert Link',
+        'toolbar:link': 'Insert hyperlink',
         'link:url': 'Link URL',
-        'link:blank': 'Open in New Window',
-        'link:unlink': 'Remove Link',
-        'dialog:selectLink': 'Enter URL'
+        'link:blank': 'Open in new window',
+        'link:unlink': 'Remove hyperlink',
+        'dialog:selectLink': 'Create hyperlink',
+        'dialog-control:selectLink-text': 'Text',
+        'dialog-control:selectLink-url': 'URL',
+        'contextmenu:openLink': 'Open hyperlink'
     });
 
     Typer.ui.addIcons('material', {
-        'toolbar:link': 'insert_link',
-        'link:url': 'insert_link'
+        'toolbar:link': '\ue250',  // insert_link
+        'link:url': '\ue250'       // insert_link
     });
 
     Typer.ui.addHook('space', function (typer) {

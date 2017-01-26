@@ -9,6 +9,8 @@
     var definedLabels = {};
     var definedThemes = {};
     var definedShortcuts = {};
+    var bindTransforms = {};
+    var expandCache = {};
 
     function define(name, base, ctor) {
         /* jshint -W054 */
@@ -33,6 +35,47 @@
             return define(null, fn, ctor);
         };
         return fn;
+    }
+
+    function listen(obj, prop, callback) {
+        var myValue = obj[prop];
+        Object.defineProperty(obj, prop, {
+            enumerable: true,
+            configurable: true,
+            get: function () {
+                return myValue;
+            },
+            set: function (value) {
+                if (myValue !== value) {
+                    myValue = value;
+                    callback.call(this, prop, value);
+                }
+            }
+        });
+    }
+
+    function expandControls(str, controls) {
+        controls = controls || definedControls;
+
+        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '');
+        if (expandCache[cacheKey]) {
+            return expandCache[cacheKey].slice(0);
+        }
+        var tokens = (str || '').split(/\s+/);
+        var arr = [];
+        $.each(tokens, function (i, v) {
+            if (v.slice(-1) === '*') {
+                $.each(controls, function (i) {
+                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && tokens.indexOf('-' + i) < 0 && arr.indexOf(i) < 0) {
+                        arr[arr.length] = i;
+                    }
+                });
+            } else if (v.charAt(0) !== '-' && controls[v] && tokens.indexOf('-' + v) < 0 && arr.indexOf(v) < 0) {
+                arr[arr.length] = v;
+            }
+        });
+        expandCache[cacheKey] = arr.slice(0);
+        return arr;
     }
 
     function parseCompactSyntax(str) {
@@ -77,69 +120,63 @@
     function resolveControls(ui, control) {
         control = control || ui;
         if (isFunction(control.controls)) {
-            control.controls = control.controls(ui, control) || '';
+            control.controls = control.controls(ui, control);
         }
         if (typeof control.controls === 'string') {
-            var tokens = control.controls.split(/\s+/);
-            var controlsProto = {};
-            $.each(tokens, function (i, v) {
-                if (v.slice(-1) === '*') {
-                    $.each(definedControls, function (i, w) {
-                        if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && tokens.indexOf('-' + i) < 0 && !controlsProto[i]) {
-                            controlsProto[i] = Object.create(w);
-                        }
-                    });
-                } else if (v.charAt(0) !== '-') {
-                    var t = parseCompactSyntax(v);
-                    if (definedControls[t.name] && tokens.indexOf('-' + t.name) < 0 && !controlsProto[t.name]) {
-                        controlsProto[t.name] = $.extend(Object.create(definedControls[t.name]), t.params);
-                    }
-                }
-            });
-            control.controls = [];
-            $.each(controlsProto, function (i, v) {
-                v.name = v.name || i;
-                control.controls.push(v);
-            });
-        } else if ($.isArray(control.controls)) {
-            control.controls = $.map(control.controls, Object.create);
+            control.controls = expandControls(control.controls);
         }
-        $.each(control.controls || [], function (i, v) {
-            v.name = v.name || 'noname:' + (Math.random().toString(36).substr(2, 8));
-            v.parent = control;
-            if (v.label === undefined) {
-                v.label = v.name;
+
+        var defaultOrder = {};
+        control.controls = $.map(control.controls || [], function (v, i) {
+            var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
+            inst.parent = control;
+            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            if (inst.label === undefined) {
+                inst.label = inst.name;
             }
-            ui.all[v.name] = v;
-            resolveControls(ui, v);
+            defaultOrder[inst.name] = i;
+            ui.all[inst.name] = inst;
+            resolveControls(ui, inst);
+            return inst;
+        });
+        control.controls.sort(function (a, b) {
+            function m(a, b, prop, mult) {
+                return !a[prop] || (b[prop] && b[prop].indexOf(a.name)) ? 0 : mult * (a[prop].indexOf(b.name) >= 0 ? 1 : -1);
+            }
+            return m(a, b, 'after', 1) || m(a, b, 'before', -1) || m(b, a, 'after', -1) || m(b, a, 'before', 1) || defaultOrder[a.name] - defaultOrder[b.name];
         });
         return control.controls;
     }
 
     function renderControl(ui, control, params) {
         control = control || ui;
-        var bindedElements = [];
+        var bindedProperties = {};
 
-        function bindData() {
-            $.each(bindedElements, function (i, v) {
-                $.each(v[1], function (i, w) {
-                    if (i === '_') {
-                        $(v[0]).text(definedLabels[control[w]] || control[w] || '');
-                    } else if (boolAttrs.indexOf(i) >= 0) {
-                        $(v[0]).prop(i, !!control[w] && control[w] !== "false");
-                    } else if (control[w]) {
-                        $(v[0]).attr(i, definedLabels[control[w]] || control[w] || '');
-                    } else {
-                        $(v[0]).removeAttr(i);
-                    }
-                });
+        function propertyChanged(prop, value) {
+            value = (bindTransforms[prop] || bindTransforms.__default__)(value);
+            $.each(bindedProperties[prop], function (i, v) {
+                if (v[1] === '_') {
+                    $(v[0]).text(value || '');
+                } else if (boolAttrs.indexOf(v[1]) >= 0) {
+                    $(v[0]).prop(v[1], !!value && value !== "false");
+                } else if (value) {
+                    $(v[0]).attr(v[1], value);
+                } else {
+                    $(v[0]).removeAttr(v[1]);
+                }
             });
         }
 
         function bindPlaceholder(element) {
             $(element).find('*').andSelf().filter('[x\\:bind]').each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:bind'));
-                bindedElements.push([v, t.params]);
+                $.each(t.params, function (i, w) {
+                    if (!bindedProperties[w]) {
+                        bindedProperties[w] = [];
+                        listen(control, w, propertyChanged);
+                    }
+                    bindedProperties[w].push([v, i]);
+                });
             }).removeAttr('x:bind');
         }
 
@@ -175,7 +212,10 @@
         }
 
         control.element = replacePlaceholder(control.type);
-        control.bindData = bindData;
+        $(control.element).attr('role', control.name);
+        $.each(bindedProperties, function (i, v) {
+            propertyChanged(i, control[i]);
+        });
 
         var executeEvent = definedThemes[ui.theme][control.type + 'ExecuteOn'];
         if (typeof executeEvent === 'string') {
@@ -198,9 +238,6 @@
 
         var disabled = !ui.enabled(control);
         var visible = !control.hiddenWhenDisabled || !disabled;
-        if (visible) {
-            control.bindData();
-        }
 
         var $elm = $(control.element);
         var theme = definedThemes[ui.theme];
@@ -241,15 +278,21 @@
         fn(ui, ui, optArg);
     }
 
-    Typer.ui = define('TyperUI', null, function (options, theme) {
-        if (typeof options === 'string') {
+    Typer.ui = define('TyperUI', null, function (options, parentUI) {
+        if (parentUI) {
             options = {
-                theme: theme,
-                controls: options
+                theme: parentUI.theme,
+                typer: parentUI.typer,
+                widget: parentUI.widget,
+                controls: options,
+                parentUI: parentUI
             };
         }
         var self = $.extend(this, options);
         self.all = {};
+        Object.defineProperty(self.all, 'expandedFrom', {
+            value: self.controls
+        });
         self.controls = resolveControls(self);
         self.element = renderControl(self);
         $(self.element).addClass('typer-ui typer-ui-' + options.theme);
@@ -305,26 +348,58 @@
             }
             return !!callFunction(this, control, 'active');
         },
-        setValue: function (control, value) {
+        resolve: function (control) {
+            var self = this;
+            return $.map(expandControls(control, self.all), function (v) {
+                return self.all[v];
+            });
+        },
+        getValue: function (control) {
+            var self = this;
             if (typeof control === 'string') {
-                control = this.all[control] || {};
+                control = self.all[control] || {};
+            }
+            if (!control.valueMap) {
+                return control.value;
+            }
+            var value = {};
+            $.each(control.valueMap, function (i, v) {
+                value[i] = self.getValue(v);
+            });
+            return value;
+        },
+        setValue: function (control, value) {
+            var self = this;
+            if (typeof control === 'string') {
+                control = self.all[control] || {};
+            }
+            if (control.valueMap) {
+                var map = control.valueMap || {};
+                $.each(value, function (i, v) {
+                    $.each(self.resolve(map[i]), function (i, w) {
+                        self.setValue(w, v);
+                    });
+                });
+                return;
             }
             control.value = value;
-            if (control.executeOnSetValue && this.enabled(control)) {
-                executeControl(this, control);
+            if (control.executeOnSetValue && self.enabled(control)) {
+                executeControl(self, control);
             }
         },
         execute: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
-            }
             var self = this;
+            if (typeof control === 'string') {
+                control = self.all[control] || {};
+            } else if (!control) {
+                control = self.controls[0];
+            }
             if (self.enabled(control)) {
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         if (value !== undefined) {
-                            control.value = value;
+                            self.setValue(control, value);
                         }
                         executeControl(self, control);
                     });
@@ -334,12 +409,26 @@
                 }
             }
         },
-        prompt: function (label, value) {
-            var ui = Typer.ui('ui:prompt', this.theme);
-            var dialog = ui.all['ui:prompt'];
-            dialog.label = label;
-            dialog.value = value;
-            return ui.execute(dialog);
+        spawn: function (control, value) {
+            var ui = Typer.ui(control, this);
+            ui.setValue(control, value);
+            return ui.execute();
+        },
+        alert: function (message) {
+            var dialog = Typer.ui('ui:alert', this);
+            dialog.all['ui:alert'].label = message;
+            return dialog.execute();
+        },
+        confirm: function (message) {
+            var dialog = Typer.ui('ui:confirm', this);
+            dialog.all['ui:confirm'].label = message;
+            return dialog.execute();
+        },
+        prompt: function (message, value) {
+            var dialog = Typer.ui('ui:prompt', this);
+            dialog.all['ui:prompt'].label = message;
+            dialog.all['ui:prompt'].value = value;
+            return dialog.execute();
         }
     });
 
@@ -348,6 +437,10 @@
         themes: definedThemes,
         getIcon: function (control, iconSet) {
             return (definedIcons[control.icon] || definedIcons[control.name] || '')[iconSet] || '';
+        },
+        getShortcut: function (command) {
+            var current = definedShortcuts._map[command];
+            return current && current[0];
         },
         addIcons: function (iconSet, values) {
             $.each(values, function (i, v) {
@@ -406,6 +499,9 @@
             });
         },
         setZIndex: function (element, over) {
+            if ($(element).css('position') === 'static') {
+                element.style.position = 'relative';
+            }
             element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
                 return /absolute|fixed|relative/.test($(v).css('position'));
             }).slice(-1).css('z-index') || 0) + 1;
@@ -458,22 +554,43 @@
             executeOnSetValue: true
         }),
         dialog: define('TyperUIDialog', {
-            type: 'dialog'
-        }, function (controls, setup) {
-            this.controls = controls;
+            type: 'dialog',
+            resolve: 'ui:button-ok',
+            reject: 'ui:button-cancel'
+        }, function (options) {
+            $.extend(this, options);
             this.dialog = function (ui, self) {
                 var deferred = $.Deferred();
-                setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+                $.each(ui.resolve(self.resolve), function (i, v) {
+                    v.execute = function () {
+                        deferred.resolve(ui.getValue(self.resolveValue || self));
+                    };
+                });
+                $.each(ui.resolve(self.reject), function (i, v) {
+                    v.execute = function () {
+                        deferred.reject();
+                    };
+                });
+                if (isFunction(self.setup)) {
+                    self.setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+                }
                 ui.update();
                 ui.trigger(self, 'open');
                 deferred.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                 });
+                if (ui.parentUI) {
+                    Typer.ui.setZIndex(ui.element, ui.parentUI.element);
+                }
                 return deferred.promise();
             };
         })
     });
+
+    /* ********************************
+     * Built-in Controls and Resources
+     * ********************************/
 
     $.extend(definedControls, {
         'ui:button-ok': Typer.ui.button(),
@@ -483,13 +600,21 @@
             executeOnSetValue: false
         }),
         'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
-        'ui:prompt': Typer.ui.dialog('ui:prompt-input ui:prompt-buttonset', function (ui, self, resolve, reject) {
-            ui.all['ui:button-ok'].execute = function () {
-                resolve(ui.all['ui:prompt-input'].value);
-            };
-            ui.all['ui:button-cancel'].execute = reject;
-            ui.setValue('ui:prompt-input', self.value);
-        })
+        'ui:prompt': Typer.ui.dialog({
+            controls: 'ui:prompt-input ui:prompt-buttonset',
+            resolveValue: 'ui:prompt-input',
+            setup: function (ui, self) {
+                ui.setValue('ui:prompt-input', self.value);
+            }
+        }),
+        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
+        'ui:confirm': Typer.ui.dialog({
+            controls: 'ui:confirm-buttonset'
+        }),
+        'ui:alert-buttonset': Typer.ui.group('ui:button-ok'),
+        'ui:alert': Typer.ui.dialog({
+            controls: 'ui:alert-buttonset'
+        }),
     });
 
     Typer.ui.addLabels('en', {
@@ -498,26 +623,37 @@
     });
 
     Typer.ui.addIcons('material', {
-        'ui:button-ok': 'done',
-        'ui:button-cancel': 'close'
+        'ui:button-ok': '\ue876',
+        'ui:button-cancel': '\ue5cd'
     });
 
     Typer.defaultOptions.shortcut = true;
 
     Typer.widgets.shortcut = {
         keystroke: function (e) {
-            $.each(definedShortcuts[e.data] || [], function (i, v) {
-                if (v.hook && v.hook(e.typer)) {
-                    e.preventDefault();
-                    return false;
-                }
-                if (e.typer.hasCommand(v.command)) {
-                    e.typer.invoke(v.command, v.value);
-                    e.preventDefault();
-                    return false;
-                }
-            });
+            if (!e.isDefaultPrevented()) {
+                $.each(definedShortcuts[e.data] || [], function (i, v) {
+                    if (v.hook && v.hook(e.typer)) {
+                        e.preventDefault();
+                        return false;
+                    }
+                    if (e.typer.hasCommand(v.command)) {
+                        e.typer.invoke(v.command, v.value);
+                        e.preventDefault();
+                        return false;
+                    }
+                });
+            }
         }
+    };
+
+    bindTransforms.__default__ = function (value) {
+        return typeof value === 'string' && value in definedLabels ? definedLabels[value] : value;
+    };
+    bindTransforms.shortcut = function (value) {
+        return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+            return v.charAt(0).toUpperCase() + v.slice(1) + '+';
+        });
     };
 
 } (jQuery, window.Typer));

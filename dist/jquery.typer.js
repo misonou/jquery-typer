@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.1
+ * jQuery Typer Plugin v0.9.2
  *
  * The MIT License (MIT)
  *
@@ -33,10 +33,6 @@
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
-    var COLLAPSE_START_INSIDE = 7;
-    var COLLAPSE_START_OUTSIDE = 6;
-    var COLLAPSE_END_INSIDE = 3;
-    var COLLAPSE_END_OUTSIDE = 2;
     var NODE_WIDGET = 1;
     var NODE_EDITABLE = 2;
     var NODE_EDITABLE_PARAGRAPH = 32;
@@ -276,8 +272,8 @@
     }
 
     function getWholeTextOffset(node, textNode) {
-        var iterator = new TyperDOMNodeIterator(node, 4);
-        for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length);
+        var iterator = new TyperDOMNodeIterator(node, 5);
+        for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length || 0);
         return offset;
     }
 
@@ -285,37 +281,24 @@
         if (startNode && isFunction(startNode.getRange)) {
             return startNode.getRange();
         }
-        var startOffsetNum = +startOffset === startOffset;
         var range;
         if (is(startNode, Node)) {
             range = document.createRange();
-            if (endNode) {
-                if (startOffsetNum) {
-                    range.setStart(startNode, getOffset(startNode, startOffset));
-                } else {
-                    range[startOffset ? 'setStartBefore' : 'setStartAfter'](startNode);
-                }
-                if (is(endNode, Node) && connected(startNode, endNode)) {
-                    if (+endOffset === endOffset) {
-                        range.setEnd(endNode, getOffset(endNode, endOffset));
-                    } else {
-                        range[endOffset ? 'setEndBefore' : 'setEndAfter'](endNode);
-                    }
+            if (+startOffset !== startOffset) {
+                range[(startOffset === 'contents' || !startNode.parentNode) ? 'selectNodeContents' : 'selectNode'](startNode);
+                if (typeof startOffset === 'boolean') {
+                    range.collapse(startOffset);
                 }
             } else {
-                range[(startOffset === true || (startOffsetNum && (startOffset & 1)) || !startNode.parentNode) ? 'selectNodeContents' : 'selectNode'](startNode);
-                if (startOffsetNum && (startOffset & 2)) {
-                    range.collapse(!!(startOffset & 4));
-                }
+                range.setStart(startNode, getOffset(startNode, startOffset));
+            }
+            if (is(endNode, Node) && connected(startNode, endNode)) {
+                range.setEnd(endNode, getOffset(endNode, endOffset));
             }
         } else if (is(startNode, Range)) {
             range = startNode.cloneRange();
-            if (!range.collapsed) {
-                if (typeof startOffset === 'boolean') {
-                    range.collapse(startOffset);
-                } else if (startOffsetNum && (startOffset & 2)) {
-                    range.collapse(!!(startOffset & 4));
-                }
+            if (!range.collapsed && typeof startOffset === 'boolean') {
+                range.collapse(startOffset);
             }
         }
         if (is(startOffset, Range) && connected(range, startOffset)) {
@@ -356,20 +339,47 @@
     }
 
     function rectEquals(a, b) {
-        return (a.left | 0) === (b.left | 0) && (a.top | 0) === (b.top | 0) && (a.width | 0) === (b.width | 0) && (a.height | 0) === (b.height | 0);
+        function check(prop) {
+            return Math.abs(a[prop] - b[prop]) < 1;
+        }
+        return check('left') && check('top') && check('bottom') && check('right');
     }
 
     function pointInRect(x, y, rect) {
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
-    function computeTextRect(node, bounding) {
-        var target = is(node, bounding ? Element : Range) || createRange(node, bounding ? undefined : true);
-        if (target.collapsed && target.startContainer.nodeType === 3 && !target.startContainer.length) {
+    function computeTextRects(node) {
+        var target = is(node, Range) || createRange(node, 'contents');
+        var zeroLength = target.collapsed && target.startContainer.nodeType === 3 && !target.startContainer.length;
+        if (zeroLength) {
+            // no rects are returned for zero-length text node
+            // return rects as if there was content
             target.startContainer.nodeValue = ZWSP;
-            target = createRange(target.startContainer);
         }
-        return bounding ? target.getBoundingClientRect() : target.getClientRects();
+        try {
+            if (target.collapsed) {
+                // no rects are returned for caret ranges anchored at the end of text node
+                // calculate rect from the last character
+                if (target.startOffset === target.startContainer.length) {
+                    target.setStart(target.startContainer, target.startOffset - 1);
+                    var rect = target.getClientRects()[0];
+                    return [{
+                        top: rect.top,
+                        left: rect.right,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                        width: 0,
+                        height: rect.height
+                    }];
+                }
+            }
+            return target.getClientRects();
+        } finally {
+            if (zeroLength) {
+                target.startContainer.nodeValue = '';
+            }
+        }
     }
 
     function getActiveRange(container) {
@@ -478,12 +488,10 @@
         }
 
         function findWidgetWithCommand(name) {
-            var widget;
-            $.each(getTargetedWidgets(EVENT_HANDLER), function (i, v) {
-                widget = isFunction((widgetOptions[v.id].commands || {})[name]) && v;
-                return !widget;
+            return any(getTargetedWidgets(EVENT_HANDLER), function (v) {
+                var options = widgetOptions[v.id];
+                return options.commands && isFunction(options.commands[name]);
             });
-            return widget;
         }
 
         function triggerEvent(eventMode, eventName, data, props) {
@@ -685,7 +693,7 @@
 
         function updateState(fireEvent) {
             var activeRange = getActiveRange(topElement);
-            if (activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+            if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                 try {
                     typer.snapshot = $.noop;
                     currentSelection.select(activeRange);
@@ -700,7 +708,7 @@
         }
 
         function normalize(range) {
-            range = is(range, Range) || createRange(range || topElement, true);
+            range = is(range, Range) || createRange(topElement, 'contents');
             codeUpdate(function () {
                 var selection = new TyperSelection(typer, range);
                 if (is(selection.focusNode, NODE_EDITABLE) && !selection.focusNode.childNodes[0]) {
@@ -713,6 +721,9 @@
                 }
                 var selectedRange = createRange(currentSelection);
                 iterate(selection.createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
+                    if (is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
+                        $(node.element).wrap('<p>');
+                    }
                     if (is(node, NODE_ANY_ALLOWTEXT)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
@@ -730,35 +741,30 @@
                                 // prevent unintended non-breaking space (&nbsp;) between word boundaries when inserting contents
                                 v.nodeValue = v.nodeValue.slice(0, -1) + ' ';
                             }
+                            if (v.nodeType === 3 && v !== currentSelection.startTextNode && v !== currentSelection.endTextNode) {
+                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ');
+                            }
                         });
                         if (!/\S/.test(node.element.textContent)) {
                             $(createTextNode()).appendTo(node.element);
                         }
-                    }
-                    if (!rangeIntersects(selectedRange, node.element)) {
-                        node.element.normalize();
-                        $(node.element).contents().each(function (i, v) {
-                            if (v.nodeType === 3) {
-                                v.nodeValue = v.nodeValue.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ');
-                            }
-                        });
-                        if (is(node, NODE_INLINE)) {
+                        if (is(node, NODE_INLINE) && node.element !== currentSelection.startElement && node.element !== currentSelection.endElement) {
                             if (tagName(node.element.previousSibling) === tagName(node.element) && compareAttrs(node.element, node.element.previousSibling)) {
                                 $(node.element).contents().appendTo(node.element.previousSibling);
                                 removeNode(node.element);
-                            } else if (VOID_TAGS.indexOf(tagName(node.element)) < 0 && node.element.childElementCount === 0 && !trim(node.element.textContent)) {
-                                removeNode(node.element);
-                            }
-                        } else if (is(node, NODE_EDITABLE)) {
-                            $(node.element).contents().each(function (i, v) {
-                                if (v.nodeType === 3 && trim(v.nodeValue)) {
-                                    $(v).wrap('<p>');
-                                }
-                            });
-                            if (!node.element.childNodes[0]) {
-                                $(EMPTY_LINE).appendTo(node.element);
                             }
                         }
+                    } else if (!node.element.childNodes[0]) {
+                        $(EMPTY_LINE).appendTo(node.element);
+                    } else {
+                        $(node.element).contents().each(function (i, v) {
+                            if (v.nodeType === 3 && trim(v.nodeValue)) {
+                                $(v).wrap('<p>');
+                            }
+                        });
+                    }
+                    if (!rangeIntersects(selectedRange, node.element) || rangeCovers(selectedRange, node.element)) {
+                        node.element.normalize();
                     }
                 });
                 // Mozilla adds <br type="_moz"> when a container is empty
@@ -844,11 +850,11 @@
                 // normalize before inserting content
                 if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode) {
                     normalize(range);
-                    newState = new TyperSelection(typer, createRange(newState.startNode.element, true));
+                    newState = new TyperSelection(typer, createRange(newState.startNode.element, 'contents'));
                 }
                 // ensure start point lies within valid selection
                 if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
-                    startPoint = createRange(newState.startNode.element, COLLAPSE_START_INSIDE);
+                    startPoint = createRange(newState.startNode.element, 0);
                 }
                 callback(newState, startPoint, endPoint);
             } else {
@@ -900,7 +906,7 @@
                         while (!is(splitLastNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
-                        var splitEnd = createRange(splitLastNode.element, COLLAPSE_END_OUTSIDE);
+                        var splitEnd = createRange(splitLastNode.element, false);
                         var splitContent = createRange(caretPoint, splitEnd).extractContents();
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
@@ -919,7 +925,7 @@
                             var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
                             n2.nodeValue = n2.nodeValue.slice(1);
                         }
-                        caretPoint = createRange(splitFirstNode || splitEnd, COLLAPSE_START_INSIDE);
+                        caretPoint = splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
                         newPoint = newPoint || caretPoint.cloneRange();
                         endPoint = createRange(splitEnd, false);
                         paragraphAsInline = true;
@@ -942,15 +948,15 @@
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                             caretPoint.insertNode(nodeToInsert);
                         } else {
-                            createRange(caretNode.element, COLLAPSE_START_OUTSIDE).insertNode(nodeToInsert);
+                            createRange(caretNode.element, true).insertNode(nodeToInsert);
                         }
                         insertAsInline = is(node, NODE_ANY_ALLOWTEXT);
                         hasInsertedBlock = true;
                     }
-                    caretPoint = createRange(lastNode, COLLAPSE_END_INSIDE) || caretPoint;
+                    caretPoint = (lastNode && createRange(lastNode, -0)) || caretPoint;
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    createRange(state.startNode.element, COLLAPSE_END_INSIDE).insertNode(createRange(state.endNode.element, true).extractContents());
+                    createRange(state.startNode.element, -0).insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     removeNode(state.endNode.element);
                 }
                 currentSelection.select(newPoint || caretPoint);
@@ -971,7 +977,7 @@
                 iterate(new TyperTreeWalker(v, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE, function (v) {
                     text += text && '\n\n';
                     iterate(new TyperDOMNodeIterator(v, 5, function (v) {
-                        text += v.nodeValue || (tagName(v) === 'br' ? '\n' : '');
+                        text += v.nodeType === 3 ? v.nodeValue.replace(/\s+|\u00a0/g, ' ') : tagName(v) === 'br' ? '\n' : '';
                     }));
                     return 2;
                 }));
@@ -1008,7 +1014,7 @@
                 var offset = parseInt($(element).attr(attr));
                 if (element) {
                     $(element).removeAttr(attr);
-                    return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, start ? COLLAPSE_START_OUTSIDE : COLLAPSE_END_OUTSIDE);
+                    return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, !!start);
                 }
             }
 
@@ -1132,10 +1138,11 @@
                         $(document.body).unbind(handlers);
                     }
                 };
-                (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                $(document.body).bind(handlers);
-                mousedown = true;
-                e.stopPropagation();
+                if (e.which === 1) {
+                    (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
+                    $(document.body).bind(handlers);
+                    mousedown = true;
+                }
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
@@ -1152,7 +1159,6 @@
             });
 
             $self.bind('keydown keypress keyup', function (e) {
-                e.stopPropagation();
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1169,7 +1175,7 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode)));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName) || /ctrl(?![axcvr]$)|alt|enter/i.test(keyEventName)) {
+                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
                         triggerEvent(EVENT_STATIC, 'keystroke', keyEventName, {
@@ -1178,6 +1184,9 @@
                                 return e.isDefaultPrevented();
                             }
                         });
+                        if (/ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                            e.preventDefault();
+                        }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
                     replaceTimeout(normalizeInputEvent, function () {
@@ -1224,7 +1233,6 @@
                     }
                 };
                 $self.bind(handlers);
-                e.stopPropagation();
             });
 
             $self.bind('cut copy', function (e) {
@@ -1238,7 +1246,6 @@
                     clipboardData.setData('text/html', $('<div id="Typer">').append(clipboard.content.cloneNode(true))[0].outerHTML);
                     clipboardData.setData('application/x-typer', 'true');
                 }
-                e.stopPropagation();
                 e.preventDefault();
             });
 
@@ -1252,7 +1259,6 @@
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     insertContents(currentSelection, textContent === clipboard.textContent ? clipboard.content.cloneNode(true) : textContent);
                 }
-                e.stopPropagation();
                 e.preventDefault();
                 if (IS_IE) {
                     // IE put the caret in the wrong position after user code
@@ -1282,6 +1288,13 @@
                 }
             });
 
+            $self.bind('contextmenu', function (e) {
+                var range = caretRangeFromPoint(e.clientX, e.clientY, topElement);
+                if (currentSelection.isCaret || !rangeIntersects(currentSelection, range)) {
+                    currentSelection.select(range);
+                }
+            });
+
             $self.bind('dblclick', function (e) {
                 currentSelection.select('word');
                 e.preventDefault();
@@ -1307,6 +1320,7 @@
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
                     }
+                    normalize();
                 });
             });
 
@@ -1466,18 +1480,18 @@
                 var s2 = createElement('span');
                 r1.insertNode(s1);
                 r2.insertNode(s2);
-                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
+                currentSelection.select(createRange(s1, false), createRange(s2, true));
                 $.each(currentSelection.getEditableRanges(), function (i, v) {
                     applyRange(v);
                     document.execCommand(commandName, false, value || '');
                 });
-                currentSelection.select(createRange(s1, COLLAPSE_END_OUTSIDE), createRange(s2, COLLAPSE_START_OUTSIDE));
+                currentSelection.select(createRange(s1, false), createRange(s2, true));
                 removeNode(s1);
                 removeNode(s2);
             }
         });
 
-        currentSelection = new TyperSelection(typer, createRange(topElement, COLLAPSE_START_INSIDE));
+        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         normalize();
         triggerEvent(EVENT_STATIC, 'init');
     }
@@ -1485,10 +1499,6 @@
     window.Typer = Typer;
 
     $.extend(Typer, {
-        COLLAPSE_START_INSIDE: COLLAPSE_START_INSIDE,
-        COLLAPSE_START_OUTSIDE: COLLAPSE_START_OUTSIDE,
-        COLLAPSE_END_INSIDE: COLLAPSE_END_INSIDE,
-        COLLAPSE_END_OUTSIDE: COLLAPSE_END_OUTSIDE,
         NODE_WIDGET: NODE_WIDGET,
         NODE_PARAGRAPH: NODE_PARAGRAPH,
         NODE_EDITABLE: NODE_EDITABLE,
@@ -1691,16 +1701,6 @@
         });
     }
 
-    function typerSelectionGetWidgets(inst) {
-        var nodes = [];
-        for (var node = inst.focusNode; node; node = node.parentNode) {
-            if (is(node, NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE)) {
-                nodes.unshift(node);
-            }
-        }
-        return nodes;
-    }
-
     function typerSelectionSplitText(inst) {
         var p1 = inst.getCaret('start');
         var p2 = inst.getCaret('end');
@@ -1724,6 +1724,9 @@
         inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
         inst.isCaret = !inst.direction;
         inst.focusNode = inst.typer.getEditableNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        while (!is(inst.focusNode, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE)) {
+            inst.focusNode = inst.focusNode.parentNode;
+        }
         for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
             inst[typerSelectionUpdate.NAMES[i + 4]] = p1[typerSelectionUpdate.NAMES[i]];
             inst[typerSelectionUpdate.NAMES[i + 8]] = p2[typerSelectionUpdate.NAMES[i]];
@@ -1777,10 +1780,12 @@
             });
         },
         getWidgets: function () {
-            return $.map(typerSelectionGetWidgets(this), mapFn('widget'));
-        },
-        getEditableElements: function () {
-            return $.map(typerSelectionGetWidgets(this).concat(iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE))), mapFn('element'));
+            var nodes = [];
+            for (var node = this.focusNode; node; node = node.parentNode) {
+                nodes.unshift(node.widget);
+                node = this.typer.getNode(node.widget.element);
+            }
+            return nodes;
         },
         getParagraphElements: function () {
             var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
@@ -1798,7 +1803,7 @@
             typerSelectionSplitText(this);
             var range = createRange(this);
             var iterator = new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_WIDGET | NODE_ANY_ALLOWTEXT), 4, function (v) {
-                return rangeIntersects(range, createRange(v, true)) ? 1 : 2;
+                return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
             });
             return iterateToArray(iterator);
         },
@@ -1815,11 +1820,12 @@
                     return this.getCaret('start').moveByWord(-1) + this.getCaret('end').moveByWord(1) > 0;
                 }
                 var range = createRange(startNode, startOffset, endNode, endOffset);
-                return this.baseCaret.moveTo(range, COLLAPSE_START_OUTSIDE) + (range.collapsed ? this.extendCaret.moveTo(this.baseCaret) : this.extendCaret.moveTo(range, COLLAPSE_END_OUTSIDE)) > 0;
+                return this.baseCaret.moveTo(createRange(range, true)) + this.extendCaret.moveTo(createRange(range, false)) > 0;
             });
         },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
+                userFocus.delete(this.typer);
                 applyRange(createRange(this));
             }
         },
@@ -1854,8 +1860,8 @@
             inst.node = node;
             inst.element = element;
             inst.textNode = textNode || null;
-            inst.offset = offset || 0;
-            inst.wholeTextOffset = inst.offset + (textNode ? getWholeTextOffset(node, textNode) : 0);
+            inst.offset = offset;
+            inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
         });
         return true;
     }
@@ -1897,36 +1903,38 @@
             var iterator2 = new TyperDOMNodeIterator(node, 4);
             iterator2.currentNode = element;
             while (iterator2.nextNode() && end);
-            textNode = iterator2.currentNode;
+            if (iterator2.currentNode.nodeType === 3) {
+                textNode = iterator2.currentNode;
+            }
             offset = end ? textNode && textNode.length : 0;
         }
         if (is(node, NODE_ANY_ALLOWTEXT)) {
-            for (; !is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH); node = node.parentNode);
+            for (; node.parentNode && !is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH); node = node.parentNode);
         }
-        return caretSetPositionRaw(inst, node, element, textNode, textNode ? offset : end ? COLLAPSE_END_OUTSIDE : COLLAPSE_START_OUTSIDE);
+        return caretSetPositionRaw(inst, node, element, textNode, textNode ? offset : !end);
     }
 
     definePrototype(TyperCaret, {
         getRange: function () {
-            if (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length)) {
+            if ((this.element && !this.element.parentNode) || (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length))) {
                 // use calculated text offset from paragraph node in case anchored text node is detached from DOM
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
             }
-            return createRange(this.textNode || this.element, this.offset, !!this.textNode);
+            return createRange(this.textNode || this.element, this.offset);
         },
         clone: function () {
             var clone = new TyperCaret(this.typer);
             clone.moveTo(this);
             return clone;
         },
-        moveTo: function (startNode, startOffset, endNode, endOffset) {
-            if (is(startNode, TyperCaret)) {
-                return caretSetPositionRaw(this, startNode.node, startNode.element, startNode.textNode, startNode.offset);
+        moveTo: function (node, offset) {
+            var range = is(node, Range) || createRange(node, offset);
+            if (range) {
+                var end = this.selection && this === this.selection.extendCaret && compareRangePosition(this.selection.baseCaret, range) < 0;
+                return caretSetPosition(this, range.startContainer, range.startOffset, end);
             }
-            var range = createRange(startNode, startOffset, endNode, endOffset);
-            var startPoint = this.selection && this.selection.getCaret('start').getRange();
-            return !!range && caretSetPosition(this, range.startContainer, range.startOffset, startPoint && compareRangePosition(startPoint, range) < 0);
+            return false;
         },
         moveToPoint: function (x, y) {
             return this.moveTo(caretRangeFromPoint(x, y, this.typer.element));
@@ -1944,10 +1952,10 @@
             return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
         moveToLineEnd: function (direction) {
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             var minx = rect.left;
             iterate(new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4), function (v) {
-                $.each(computeTextRect(v), function (i, v) {
+                $.each(computeTextRects(v), function (i, v) {
                     if (v.top <= rect.bottom && v.bottom >= rect.top) {
                         minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.right);
                     }
@@ -1957,9 +1965,9 @@
         },
         moveByLine: function (direction) {
             var iterator = caretTextNodeIterator(this);
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             do {
-                var rects = computeTextRect(iterator.currentNode);
+                var rects = computeTextRects(iterator.currentNode);
                 var newRect = any(direction < 0 ? slice(rects).reverse() : rects, function (v) {
                     return direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom;
                 });
@@ -1991,7 +1999,7 @@
         },
         moveByCharacter: function (direction) {
             var iterator = caretTextNodeIterator(this);
-            var rect = computeTextRect(this, true);
+            var rect = computeTextRects(this)[0];
             var offset = this.offset;
             while (true) {
                 while (iterator.currentNode.nodeType === 1 || offset === getOffset(iterator.currentNode, 0 * -direction)) {
@@ -2003,8 +2011,8 @@
                     offset = (direction < 0 ? iterator.currentNode.length : 0) + (p1.node !== this.node && -direction);
                 }
                 offset += direction;
-                var newRect = computeTextRect(createRange(iterator.currentNode, offset));
-                if (!rectEquals(rect, newRect)) {
+                var newRect = computeTextRects(createRange(iterator.currentNode, offset))[0];
+                if (newRect && !rectEquals(rect, newRect)) {
                     return this.moveToText(iterator.currentNode, offset);
                 }
             }
@@ -2077,12 +2085,13 @@
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
                     var pos = document.caretPositionFromPoint(x, y);
-                    return createRange(pos.offsetNode, pos.offset, true);
+                    return createRange(pos.offsetNode, pos.offset);
                 };
             }
             return function (x, y) {
                 function distanceFromCharacter(node, index) {
-                    var rect = createRange(node, index, true).getClientRects()[0];
+                    while (node.nodeValue.charCodeAt(index) === 10 && --index);
+                    var rect = computeTextRects(createRange(node, index))[0];
                     if (rect) {
                         var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
                         var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
@@ -2101,20 +2110,34 @@
                     return Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1;
                 }
 
+                function hitTestChildElements(node) {
+                    var currentZIndex;
+                    var target;
+                    $(node).children().each(function (i, v) {
+                        if (pointInRect(x, y, v.getBoundingClientRect()) && $(v).css('pointer-events') !== 'none') {
+                            var zIndex = $(v).css('position') === 'static' ? undefined : parseInt($(v).css('z-index')) || 0;
+                            if (currentZIndex === undefined || zIndex > currentZIndex) {
+                                currentZIndex = zIndex;
+                                target = v;
+                            }
+                        }
+                    });
+                    return target;
+                }
+
                 // IE returns outer element when the coordinate exactly on the box boundaries
                 // manually finds the innermost selectable element and starts searching caret position there first
+                // also before IE11 pointer-events does not thus cannot use document.elementFromPoint
                 var stack = [];
-                var element = document.elementFromPoint(x, y);
+                var element = window.ActiveXObject ? document.body : document.elementFromPoint(x, y);
                 for (var child = element; child; element = child || element) {
                     stack.unshift(child);
-                    child = any(element.children, function (v) {
-                        return pointInRect(x, y, v.getBoundingClientRect()) && $(v).css('pointer-events') !== 'none';
-                    });
+                    child = hitTestChildElements(element);
                 }
                 var lastTextNode;
                 for (var i = 0, length = stack.length; i < length; i++) {
                     var textNodesInLine = $.grep(stack[i].childNodes, function (v) {
-                        return v.nodeType === 3 && any(computeTextRect(v), function (v) {
+                        return v.nodeType === 3 && any(computeTextRects(v), function (v) {
                             return v.top <= y && v.bottom >= y;
                         });
                     });
@@ -2122,13 +2145,13 @@
                         return distanceFromCharacter(v, v.length - 1) >= 0;
                     });
                     if (textNode) {
-                        return createRange(textNode, findOffset(textNode), true);
+                        return createRange(textNode, findOffset(textNode));
                     }
                     if (textNodesInLine[0] && (!lastTextNode || comparePosition(lastTextNode, textNodesInLine[textNodesInLine.length - 1]) < 0)) {
                         lastTextNode = textNodesInLine[textNodesInLine.length - 1];
                     }
                 }
-                return lastTextNode ? createRange(lastTextNode, -0, true) : createRange(element, COLLAPSE_END_INSIDE);
+                return createRange(lastTextNode, -0);
             };
         } ();
     }
@@ -2185,6 +2208,8 @@
     var definedLabels = {};
     var definedThemes = {};
     var definedShortcuts = {};
+    var bindTransforms = {};
+    var expandCache = {};
 
     function define(name, base, ctor) {
         /* jshint -W054 */
@@ -2209,6 +2234,47 @@
             return define(null, fn, ctor);
         };
         return fn;
+    }
+
+    function listen(obj, prop, callback) {
+        var myValue = obj[prop];
+        Object.defineProperty(obj, prop, {
+            enumerable: true,
+            configurable: true,
+            get: function () {
+                return myValue;
+            },
+            set: function (value) {
+                if (myValue !== value) {
+                    myValue = value;
+                    callback.call(this, prop, value);
+                }
+            }
+        });
+    }
+
+    function expandControls(str, controls) {
+        controls = controls || definedControls;
+
+        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '');
+        if (expandCache[cacheKey]) {
+            return expandCache[cacheKey].slice(0);
+        }
+        var tokens = (str || '').split(/\s+/);
+        var arr = [];
+        $.each(tokens, function (i, v) {
+            if (v.slice(-1) === '*') {
+                $.each(controls, function (i) {
+                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && tokens.indexOf('-' + i) < 0 && arr.indexOf(i) < 0) {
+                        arr[arr.length] = i;
+                    }
+                });
+            } else if (v.charAt(0) !== '-' && controls[v] && tokens.indexOf('-' + v) < 0 && arr.indexOf(v) < 0) {
+                arr[arr.length] = v;
+            }
+        });
+        expandCache[cacheKey] = arr.slice(0);
+        return arr;
     }
 
     function parseCompactSyntax(str) {
@@ -2253,69 +2319,63 @@
     function resolveControls(ui, control) {
         control = control || ui;
         if (isFunction(control.controls)) {
-            control.controls = control.controls(ui, control) || '';
+            control.controls = control.controls(ui, control);
         }
         if (typeof control.controls === 'string') {
-            var tokens = control.controls.split(/\s+/);
-            var controlsProto = {};
-            $.each(tokens, function (i, v) {
-                if (v.slice(-1) === '*') {
-                    $.each(definedControls, function (i, w) {
-                        if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && tokens.indexOf('-' + i) < 0 && !controlsProto[i]) {
-                            controlsProto[i] = Object.create(w);
-                        }
-                    });
-                } else if (v.charAt(0) !== '-') {
-                    var t = parseCompactSyntax(v);
-                    if (definedControls[t.name] && tokens.indexOf('-' + t.name) < 0 && !controlsProto[t.name]) {
-                        controlsProto[t.name] = $.extend(Object.create(definedControls[t.name]), t.params);
-                    }
-                }
-            });
-            control.controls = [];
-            $.each(controlsProto, function (i, v) {
-                v.name = v.name || i;
-                control.controls.push(v);
-            });
-        } else if ($.isArray(control.controls)) {
-            control.controls = $.map(control.controls, Object.create);
+            control.controls = expandControls(control.controls);
         }
-        $.each(control.controls || [], function (i, v) {
-            v.name = v.name || 'noname:' + (Math.random().toString(36).substr(2, 8));
-            v.parent = control;
-            if (v.label === undefined) {
-                v.label = v.name;
+
+        var defaultOrder = {};
+        control.controls = $.map(control.controls || [], function (v, i) {
+            var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
+            inst.parent = control;
+            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            if (inst.label === undefined) {
+                inst.label = inst.name;
             }
-            ui.all[v.name] = v;
-            resolveControls(ui, v);
+            defaultOrder[inst.name] = i;
+            ui.all[inst.name] = inst;
+            resolveControls(ui, inst);
+            return inst;
+        });
+        control.controls.sort(function (a, b) {
+            function m(a, b, prop, mult) {
+                return !a[prop] || (b[prop] && b[prop].indexOf(a.name)) ? 0 : mult * (a[prop].indexOf(b.name) >= 0 ? 1 : -1);
+            }
+            return m(a, b, 'after', 1) || m(a, b, 'before', -1) || m(b, a, 'after', -1) || m(b, a, 'before', 1) || defaultOrder[a.name] - defaultOrder[b.name];
         });
         return control.controls;
     }
 
     function renderControl(ui, control, params) {
         control = control || ui;
-        var bindedElements = [];
+        var bindedProperties = {};
 
-        function bindData() {
-            $.each(bindedElements, function (i, v) {
-                $.each(v[1], function (i, w) {
-                    if (i === '_') {
-                        $(v[0]).text(definedLabels[control[w]] || control[w] || '');
-                    } else if (boolAttrs.indexOf(i) >= 0) {
-                        $(v[0]).prop(i, !!control[w] && control[w] !== "false");
-                    } else if (control[w]) {
-                        $(v[0]).attr(i, definedLabels[control[w]] || control[w] || '');
-                    } else {
-                        $(v[0]).removeAttr(i);
-                    }
-                });
+        function propertyChanged(prop, value) {
+            value = (bindTransforms[prop] || bindTransforms.__default__)(value);
+            $.each(bindedProperties[prop], function (i, v) {
+                if (v[1] === '_') {
+                    $(v[0]).text(value || '');
+                } else if (boolAttrs.indexOf(v[1]) >= 0) {
+                    $(v[0]).prop(v[1], !!value && value !== "false");
+                } else if (value) {
+                    $(v[0]).attr(v[1], value);
+                } else {
+                    $(v[0]).removeAttr(v[1]);
+                }
             });
         }
 
         function bindPlaceholder(element) {
             $(element).find('*').andSelf().filter('[x\\:bind]').each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:bind'));
-                bindedElements.push([v, t.params]);
+                $.each(t.params, function (i, w) {
+                    if (!bindedProperties[w]) {
+                        bindedProperties[w] = [];
+                        listen(control, w, propertyChanged);
+                    }
+                    bindedProperties[w].push([v, i]);
+                });
             }).removeAttr('x:bind');
         }
 
@@ -2351,7 +2411,10 @@
         }
 
         control.element = replacePlaceholder(control.type);
-        control.bindData = bindData;
+        $(control.element).attr('role', control.name);
+        $.each(bindedProperties, function (i, v) {
+            propertyChanged(i, control[i]);
+        });
 
         var executeEvent = definedThemes[ui.theme][control.type + 'ExecuteOn'];
         if (typeof executeEvent === 'string') {
@@ -2374,9 +2437,6 @@
 
         var disabled = !ui.enabled(control);
         var visible = !control.hiddenWhenDisabled || !disabled;
-        if (visible) {
-            control.bindData();
-        }
 
         var $elm = $(control.element);
         var theme = definedThemes[ui.theme];
@@ -2417,15 +2477,21 @@
         fn(ui, ui, optArg);
     }
 
-    Typer.ui = define('TyperUI', null, function (options, theme) {
-        if (typeof options === 'string') {
+    Typer.ui = define('TyperUI', null, function (options, parentUI) {
+        if (parentUI) {
             options = {
-                theme: theme,
-                controls: options
+                theme: parentUI.theme,
+                typer: parentUI.typer,
+                widget: parentUI.widget,
+                controls: options,
+                parentUI: parentUI
             };
         }
         var self = $.extend(this, options);
         self.all = {};
+        Object.defineProperty(self.all, 'expandedFrom', {
+            value: self.controls
+        });
         self.controls = resolveControls(self);
         self.element = renderControl(self);
         $(self.element).addClass('typer-ui typer-ui-' + options.theme);
@@ -2481,26 +2547,58 @@
             }
             return !!callFunction(this, control, 'active');
         },
-        setValue: function (control, value) {
+        resolve: function (control) {
+            var self = this;
+            return $.map(expandControls(control, self.all), function (v) {
+                return self.all[v];
+            });
+        },
+        getValue: function (control) {
+            var self = this;
             if (typeof control === 'string') {
-                control = this.all[control] || {};
+                control = self.all[control] || {};
+            }
+            if (!control.valueMap) {
+                return control.value;
+            }
+            var value = {};
+            $.each(control.valueMap, function (i, v) {
+                value[i] = self.getValue(v);
+            });
+            return value;
+        },
+        setValue: function (control, value) {
+            var self = this;
+            if (typeof control === 'string') {
+                control = self.all[control] || {};
+            }
+            if (control.valueMap) {
+                var map = control.valueMap || {};
+                $.each(value, function (i, v) {
+                    $.each(self.resolve(map[i]), function (i, w) {
+                        self.setValue(w, v);
+                    });
+                });
+                return;
             }
             control.value = value;
-            if (control.executeOnSetValue && this.enabled(control)) {
-                executeControl(this, control);
+            if (control.executeOnSetValue && self.enabled(control)) {
+                executeControl(self, control);
             }
         },
         execute: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
-            }
             var self = this;
+            if (typeof control === 'string') {
+                control = self.all[control] || {};
+            } else if (!control) {
+                control = self.controls[0];
+            }
             if (self.enabled(control)) {
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         if (value !== undefined) {
-                            control.value = value;
+                            self.setValue(control, value);
                         }
                         executeControl(self, control);
                     });
@@ -2510,12 +2608,26 @@
                 }
             }
         },
-        prompt: function (label, value) {
-            var ui = Typer.ui('ui:prompt', this.theme);
-            var dialog = ui.all['ui:prompt'];
-            dialog.label = label;
-            dialog.value = value;
-            return ui.execute(dialog);
+        spawn: function (control, value) {
+            var ui = Typer.ui(control, this);
+            ui.setValue(control, value);
+            return ui.execute();
+        },
+        alert: function (message) {
+            var dialog = Typer.ui('ui:alert', this);
+            dialog.all['ui:alert'].label = message;
+            return dialog.execute();
+        },
+        confirm: function (message) {
+            var dialog = Typer.ui('ui:confirm', this);
+            dialog.all['ui:confirm'].label = message;
+            return dialog.execute();
+        },
+        prompt: function (message, value) {
+            var dialog = Typer.ui('ui:prompt', this);
+            dialog.all['ui:prompt'].label = message;
+            dialog.all['ui:prompt'].value = value;
+            return dialog.execute();
         }
     });
 
@@ -2524,6 +2636,10 @@
         themes: definedThemes,
         getIcon: function (control, iconSet) {
             return (definedIcons[control.icon] || definedIcons[control.name] || '')[iconSet] || '';
+        },
+        getShortcut: function (command) {
+            var current = definedShortcuts._map[command];
+            return current && current[0];
         },
         addIcons: function (iconSet, values) {
             $.each(values, function (i, v) {
@@ -2582,6 +2698,9 @@
             });
         },
         setZIndex: function (element, over) {
+            if ($(element).css('position') === 'static') {
+                element.style.position = 'relative';
+            }
             element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
                 return /absolute|fixed|relative/.test($(v).css('position'));
             }).slice(-1).css('z-index') || 0) + 1;
@@ -2634,22 +2753,43 @@
             executeOnSetValue: true
         }),
         dialog: define('TyperUIDialog', {
-            type: 'dialog'
-        }, function (controls, setup) {
-            this.controls = controls;
+            type: 'dialog',
+            resolve: 'ui:button-ok',
+            reject: 'ui:button-cancel'
+        }, function (options) {
+            $.extend(this, options);
             this.dialog = function (ui, self) {
                 var deferred = $.Deferred();
-                setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+                $.each(ui.resolve(self.resolve), function (i, v) {
+                    v.execute = function () {
+                        deferred.resolve(ui.getValue(self.resolveValue || self));
+                    };
+                });
+                $.each(ui.resolve(self.reject), function (i, v) {
+                    v.execute = function () {
+                        deferred.reject();
+                    };
+                });
+                if (isFunction(self.setup)) {
+                    self.setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+                }
                 ui.update();
                 ui.trigger(self, 'open');
                 deferred.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                 });
+                if (ui.parentUI) {
+                    Typer.ui.setZIndex(ui.element, ui.parentUI.element);
+                }
                 return deferred.promise();
             };
         })
     });
+
+    /* ********************************
+     * Built-in Controls and Resources
+     * ********************************/
 
     $.extend(definedControls, {
         'ui:button-ok': Typer.ui.button(),
@@ -2659,13 +2799,21 @@
             executeOnSetValue: false
         }),
         'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
-        'ui:prompt': Typer.ui.dialog('ui:prompt-input ui:prompt-buttonset', function (ui, self, resolve, reject) {
-            ui.all['ui:button-ok'].execute = function () {
-                resolve(ui.all['ui:prompt-input'].value);
-            };
-            ui.all['ui:button-cancel'].execute = reject;
-            ui.setValue('ui:prompt-input', self.value);
-        })
+        'ui:prompt': Typer.ui.dialog({
+            controls: 'ui:prompt-input ui:prompt-buttonset',
+            resolveValue: 'ui:prompt-input',
+            setup: function (ui, self) {
+                ui.setValue('ui:prompt-input', self.value);
+            }
+        }),
+        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
+        'ui:confirm': Typer.ui.dialog({
+            controls: 'ui:confirm-buttonset'
+        }),
+        'ui:alert-buttonset': Typer.ui.group('ui:button-ok'),
+        'ui:alert': Typer.ui.dialog({
+            controls: 'ui:alert-buttonset'
+        }),
     });
 
     Typer.ui.addLabels('en', {
@@ -2674,26 +2822,37 @@
     });
 
     Typer.ui.addIcons('material', {
-        'ui:button-ok': 'done',
-        'ui:button-cancel': 'close'
+        'ui:button-ok': '\ue876',
+        'ui:button-cancel': '\ue5cd'
     });
 
     Typer.defaultOptions.shortcut = true;
 
     Typer.widgets.shortcut = {
         keystroke: function (e) {
-            $.each(definedShortcuts[e.data] || [], function (i, v) {
-                if (v.hook && v.hook(e.typer)) {
-                    e.preventDefault();
-                    return false;
-                }
-                if (e.typer.hasCommand(v.command)) {
-                    e.typer.invoke(v.command, v.value);
-                    e.preventDefault();
-                    return false;
-                }
-            });
+            if (!e.isDefaultPrevented()) {
+                $.each(definedShortcuts[e.data] || [], function (i, v) {
+                    if (v.hook && v.hook(e.typer)) {
+                        e.preventDefault();
+                        return false;
+                    }
+                    if (e.typer.hasCommand(v.command)) {
+                        e.typer.invoke(v.command, v.value);
+                        e.preventDefault();
+                        return false;
+                    }
+                });
+            }
         }
+    };
+
+    bindTransforms.__default__ = function (value) {
+        return typeof value === 'string' && value in definedLabels ? definedLabels[value] : value;
+    };
+    bindTransforms.shortcut = function (value) {
+        return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+            return v.charAt(0).toUpperCase() + v.slice(1) + '+';
+        });
     };
 
 } (jQuery, window.Typer));
@@ -2944,6 +3103,9 @@
         },
         init: function (e) {
             $(e.widget.element).filter('ol').attr('type-css-value', LIST_STYLE_TYPE[$(e.widget.element).attr('type')] || 'decimal');
+            if ($(e.widget.element).parent('li')[0] && !e.widget.element.previousSibling) {
+                $(Typer.createTextNode()).insertBefore(e.widget.element);
+            }
         },
         commands: {
             indent: function (tx) {
@@ -2963,6 +3125,11 @@
      * Controls
      * ********************************/
 
+    function isEnabled(toolbar, inline) {
+        var selection = toolbar.typer.getSelection();
+        return !!(inline ? (selection.startNode.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE)) : selection.getParagraphElements()[0]);
+    }
+
     var simpleCommandButton = Typer.ui.button.extend(function (command, widget) {
         this._super({
             requireWidget: widget,
@@ -2970,6 +3137,9 @@
             execute: command,
             active: function (toolbar, self) {
                 return self.widget && self.widget[command];
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, widget === 'inlineStyle');
             }
         });
     });
@@ -2990,10 +3160,7 @@
 
     $.extend(Typer.ui.controls, {
         'toolbar:formatting': Typer.ui.group('formatting:*', {
-            rqeuireTyper: true,
-            enabled: function (toolbar) {
-                return !!toolbar.typer.getSelection().getParagraphElements()[0];
-            }
+            requireTyper: true
         }),
         'formatting:paragraph': Typer.ui.dropdown({
             requireCommand: 'formatting',
@@ -3010,6 +3177,9 @@
                         }
                     });
                 });
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:inlineStyle': Typer.ui.dropdown({
@@ -3027,6 +3197,9 @@
                         }
                     });
                 });
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, true);
             }
         }),
         'formatting:bold': simpleCommandButton('bold', 'inlineStyle'),
@@ -3040,6 +3213,9 @@
             },
             active: function (toolbar, self) {
                 return self.widget && self.widget.element.tagName.toLowerCase() === 'ul';
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:orderedList': Typer.ui.callout({
@@ -3053,6 +3229,9 @@
             ],
             active: function (toolbar, self) {
                 return self.widget && self.widget.element.tagName.toLowerCase() === 'ol';
+            },
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, false);
             }
         }),
         'formatting:indent': simpleCommandButton('indent', 'list'),
@@ -3072,16 +3251,16 @@
         'formatting:italic': 'Italic',
         'formatting:underline': 'Underlined',
         'formatting:strikeThrough': 'Strikethrough',
-        'formatting:unorderedList': 'Bullet List',
-        'formatting:orderedList': 'Numbered List',
+        'formatting:unorderedList': 'Bullet list',
+        'formatting:orderedList': 'Numbered list',
         'formatting:indent': 'Indent',
         'formatting:outdent': 'Outdent',
-        'formatting:justifyLeft': 'Align Left',
-        'formatting:justifyCenter': 'Align Center',
-        'formatting:justifyRight': 'Align Right',
-        'formatting:justifyFull': 'Align Justified',
+        'formatting:justifyLeft': 'Align left',
+        'formatting:justifyCenter': 'Align center',
+        'formatting:justifyRight': 'Align right',
+        'formatting:justifyFull': 'Align justified',
         'formatting:paragraph': 'Formatting',
-        'formatting:inlineStyle': 'Text Style',
+        'formatting:inlineStyle': 'Text style',
         'formatting:orderedList:1': 'Decimal numbers',
         'formatting:orderedList:a': 'Alphabetically ordered list, lowercase',
         'formatting:orderedList:A': 'Alphabetically ordered list, uppercase',
@@ -3090,18 +3269,18 @@
     });
 
     Typer.ui.addIcons('material', {
-        'formatting:bold': 'format_bold',
-        'formatting:italic': 'format_italic',
-        'formatting:underline': 'format_underlined',
-        'formatting:strikeThrough': 'strikethrough_s',
-        'formatting:unorderedList': 'format_list_bulleted',
-        'formatting:orderedList': 'format_list_numbered',
-        'formatting:indent': 'format_indent_increase',
-        'formatting:outdent': 'format_indent_decrease',
-        'formatting:justifyLeft': 'format_align_left',
-        'formatting:justifyCenter': 'format_align_center',
-        'formatting:justifyRight': 'format_align_right',
-        'formatting:justifyFull': 'format_align_justify'
+        'formatting:bold': '\ue238',          // format_bold
+        'formatting:italic': '\ue23f',        // format_italic
+        'formatting:underline': '\ue249',     // format_underlined
+        'formatting:strikeThrough': '\ue257', // strikethrough_s
+        'formatting:unorderedList': '\ue241', // format_list_bulleted
+        'formatting:orderedList': '\ue242',   // format_list_numbered
+        'formatting:indent': '\ue23e',        // format_indent_increase
+        'formatting:outdent': '\ue23d',       // format_indent_decrease
+        'formatting:justifyLeft': '\ue236',   // format_align_left
+        'formatting:justifyCenter': '\ue234', // format_align_center
+        'formatting:justifyRight': '\ue237',  // format_align_right
+        'formatting:justifyFull': '\ue235'    // format_align_justify
     });
 
     Typer.ui.setShortcut({
@@ -3137,6 +3316,7 @@
                 tx.insertHtml(element);
             } else {
                 tx.execCommand('createLink', value);
+                tx.selection.collapse('end');
             }
         },
         remove: 'keepText',
@@ -3155,26 +3335,37 @@
     $.extend(Typer.ui.controls, {
         'toolbar:link': Typer.ui.callout({
             controls: 'link:*',
+            after: 'toolbar:insert',
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
                 if (self.widget) {
                     return null;
                 }
-                var currentValue = self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(toolbar.typer.getSelection().getSelectedText()) ? RegExp.input : '';
+                var selectedText = self.widget || toolbar.typer.getSelection().getSelectedText();
+                var currentValue = {
+                    href: self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(selectedText) ? selectedText : '',
+                    text: self.widget ? $(self.widget.element).text() : selectedText
+                };
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.prompt('dialog:selectLink', currentValue);
+                return toolbar.spawn('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
                     return null;
                 }
+                var href = value.href || value;
+                var text = value.text || href;
                 if (self.widget) {
-                    tx.typer.invoke('setURL', value);
+                    $(self.element).text(text);
+                    tx.typer.invoke('setURL', href);
                 } else {
-                    tx.insertWidget('link', value);
+                    var textNode = Typer.createTextNode(text);
+                    tx.insertHtml(textNode);
+                    tx.selection.select(textNode);
+                    tx.insertWidget('link', href);
                 }
             },
             active: function (toolbar, self) {
@@ -3207,20 +3398,39 @@
             hiddenWhenDisabled: true,
             requireWidget: 'link',
             execute: 'unlink'
+        }),
+        'contextmenu:openLink': Typer.ui.button({
+            requireWidget: 'link',
+            hiddenWhenDisabled: true,
+            execute: function (toolbar, self) {
+                window.open(self.widget.element.href);
+            }
+        }),
+        'dialog-control:selectLink-text': Typer.ui.textbox(),
+        'dialog-control:selectLink-url': Typer.ui.textbox(),
+        'dialog:selectLink': Typer.ui.dialog({
+            controls: 'dialog-control:selectLink-text dialog-control:selectLink-url ui:prompt-buttonset',
+            valueMap: {
+                text: 'dialog-control:selectLink-text',
+                href: 'dialog-control:selectLink-url'
+            }
         })
     });
 
     Typer.ui.addLabels('en', {
-        'toolbar:link': 'Insert Link',
+        'toolbar:link': 'Insert hyperlink',
         'link:url': 'Link URL',
-        'link:blank': 'Open in New Window',
-        'link:unlink': 'Remove Link',
-        'dialog:selectLink': 'Enter URL'
+        'link:blank': 'Open in new window',
+        'link:unlink': 'Remove hyperlink',
+        'dialog:selectLink': 'Create hyperlink',
+        'dialog-control:selectLink-text': 'Text',
+        'dialog-control:selectLink-url': 'URL',
+        'contextmenu:openLink': 'Open hyperlink'
     });
 
     Typer.ui.addIcons('material', {
-        'toolbar:link': 'insert_link',
-        'link:url': 'insert_link'
+        'toolbar:link': '\ue250',  // insert_link
+        'link:url': '\ue250'       // insert_link
     });
 
     Typer.ui.addHook('space', function (typer) {
@@ -3313,14 +3523,14 @@
     Typer.ui.addLabels('en', {
         'insert:image': 'Image',
         'insert:video': 'Video',
-        'media:altText': 'Alternate Text',
-        'dialog:selectImage': 'Enter Image URL'
+        'media:altText': 'Alternate text',
+        'dialog:selectImage': 'Enter image URL'
     });
 
     Typer.ui.addIcons('material', {
-        'insert:image': 'insert_photo',
-        'insert:video': 'videocam',
-        'media:altText': 'comment'
+        'insert:image': '\ue251',  // insert_photo
+        'insert:video': '\ue04b',  // videocam
+        'media:altText': '\ue0b9'  // comment
     });
 
 } (jQuery, window.Typer));
@@ -3336,10 +3546,28 @@
         return new Array(count + 1).join(str);
     }
 
-    function moveToCell(tx, dx, dy) {
-        var cell = $('>tbody>tr', tx.widget.element).eq(Math.max(0, tx.widget.row + dx)).children()[Math.max(0, tx.widget.column + dy)];
-        tx.normalize(tx.widget.element);
-        tx.moveCaret(cell, -0);
+    function getSelectionInfo(selection) {
+        var rows = [];
+        var cols = [];
+        Typer.iterate(selection.createTreeWalker(Typer.NODE_EDITABLE | Typer.NODE_EDITABLE_PARAGRAPH), function (v) {
+            rows[rows.length] = $(v).parent().index();
+            cols[cols.length] = $(v).index();
+        });
+        return {
+            minRow: Math.min.apply(null, rows),
+            maxRow: Math.max.apply(null, rows),
+            minColumn: Math.min.apply(null, cols),
+            maxColumn: Math.max.apply(null, cols)
+        };
+    }
+
+    function tabNextCell(selection, dir, selector) {
+        if (selection.isSingleEditable) {
+            var nextCell = $(selection.focusNode.element)[dir]()[0] || $(selection.focusNode.element).parent()[dir]().children(selector)[0];
+            if (nextCell) {
+                selection.moveToText(nextCell, -0);
+            }
+        }
     }
 
     Typer.widgets.table = {
@@ -3352,109 +3580,78 @@
             }, options);
             tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns)), options.rows) + '</table>');
         },
-        beforeStateChange: function (e) {
-            var selection = e.typer.getSelection();
-            var selectedCells = selection.getEditableElements(e.widget);
-            var c = selectedCells.length > 1 ? -1 : $(selectedCells).index();
-            var r = selectedCells.length > 1 ? -1 : $(selectedCells).parent().index();
-            $.extend(e.widget, {
-                row: r,
-                rowCount: $('>tbody>tr', e.widget.element).length,
-                rowCells: $('>tbody>tr:nth-child(' + (r + 1) + ')>*', e.widget.element).get(),
-                column: c,
-                columnCount: $('>tbody>tr:first>*', e.widget.element).length,
-                columnCells: $('>tbody>tr>*:nth-child(' + (c + 1) + ')', e.widget.element).get()
-            });
-        },
         tab: function (e) {
-            var cells = $('>tbody>tr>*', e.widget.element).get();
-            var currentIndex = e.widget.row * e.widget.columnCount + e.widget.column;
-            if (currentIndex < cells.length - 1) {
-                e.typer.moveCaret(cells[currentIndex + 1]);
-            }
+            tabNextCell(e.typer.getSelection(), 'next', ':first-child');
         },
         shiftTab: function (e) {
-            var cells = $('>tbody>tr>*', e.widget.element).get();
-            var currentIndex = e.widget.row * e.widget.columnCount + e.widget.column;
-            if (currentIndex > 0) {
-                e.typer.moveCaret(cells[currentIndex - 1], -0);
-            }
+            tabNextCell(e.typer.getSelection(), 'prev', ':last-child');
         },
         ctrlEnter: function (e) {
-            if (e.widget.row === 0 && e.widget.column === 0) {
-                e.typer.invoke('insertSpaceBefore');
-            } else if (e.widget.row === e.widget.rowCount - 1 && e.widget.column === e.widget.columnCount - 1) {
-                e.typer.invoke('insertSpaceAfter');
-            }
+            e.typer.invoke(function (tx) {
+                tx.selection.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
+                tx.insertText('');
+            });
         },
         commands: {
-            justifyLeft: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'left');
-            },
-            justifyCenter: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'center');
-            },
-            justifyRight: function (tx) {
-                $(tx.selection.getEditableElements(tx.widget)).attr('align', 'right');
-            },
             addColumnBefore: function (tx) {
-                $(tx.widget.columnCells).filter('th').before(TH_HTML);
-                $(tx.widget.columnCells).filter('td').before(TD_HTML);
-                moveToCell(tx, 0, 0);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
+                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
             },
             addColumnAfter: function (tx) {
-                $(tx.widget.columnCells).filter('th').after(TH_HTML);
-                $(tx.widget.columnCells).filter('td').after(TD_HTML);
-                moveToCell(tx, 0, 1);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
+                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
             },
             addRowAbove: function (tx) {
-                $(tx.widget.rowCells).before(TR_HTML.replace('%', repeat(TD_HTML, tx.widget.columnCount)));
-                moveToCell(tx, 0, 0);
+                var info = getSelectionInfo(tx.selection);
+                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
+                $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
             },
             addRowBelow: function (tx) {
-                $(tx.widget.rowCells).after(TR_HTML.replace('%', repeat(TD_HTML, tx.widget.columnCount)));
-                moveToCell(tx, 1, 0);
+                var info = getSelectionInfo(tx.selection);
+                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
+                $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
             },
             removeColumn: function (tx) {
-                $(tx.widget.columnCells).remove();
-                moveToCell(tx, 0, -1);
+                var info = getSelectionInfo(tx.selection);
+                $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
+                    $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
+                });
             },
             removeRow: function (tx) {
-                $(tx.widget.rowCells).remove();
-                moveToCell(tx, -1, 0);
+                var info = getSelectionInfo(tx.selection);
+                $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
             },
             toggleTableHeader: function (tx) {
                 if ($(tx.widget.element).find('th')[0]) {
-                    $(tx.widget.element).find('tr:has(th)').remove();
-                    if (tx.widget.row === 0) {
-                        moveToCell(tx, 0, 0);
-                    }
+                    $(tx.widget.element).find('th').wrap('<td>').contents().unwrap();
                 } else {
-                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, tx.widget.columnCount)));
-                    moveToCell(tx, -tx.widget.row, -tx.widget.column);
+                    var columnCount = $(tx.widget.element).find('>tbody>tr')[0].childElementCount;
+                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, columnCount)));
                 }
-            },
-            insertSpaceBefore: function (tx) {
-                tx.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
-                tx.insertText('');
-            },
-            insertSpaceAfter: function (tx) {
-                tx.select(tx.widget.element, Typer.COLLAPSE_END_OUTSIDE);
-                tx.insertText('');
             }
         }
     };
 
     $.extend(Typer.ui.controls, {
-        'insert:table': Typer.ui.callout({
-            controls: 'table:*',
+        'insert:table': Typer.ui.button({
             requireWidgetEnabled: 'table',
             hiddenWhenDisabled: true,
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('table');
-            },
-            active: function (toolbar, self) {
-                return self.widget;
+            }
+        }),
+        'contextmenu:table': Typer.ui.callout({
+            controls: 'table:*',
+            requireWidget: 'table',
+            hiddenWhenDisabled: true
+        }),
+        'table:toggleTableHeader': Typer.ui.checkbox({
+            requireWidget: 'table',
+            execute: 'toggleTableHeader',
+            stateChange: function (toolbar, self) {
+                self.value = !!$(self.widget.element).find('th')[0];
             }
         }),
         'table:addColumnBefore': Typer.ui.button({
@@ -3485,16 +3682,14 @@
 
     Typer.ui.addLabels('en', {
         'insert:table': 'Table',
-        'table:addColumnBefore': 'Add Column Before',
-        'table:addColumnAfter': 'Add Column After',
-        'table:addRowAbove': 'Add Row Above',
-        'table:addRowBelow': 'Add Row Below',
-        'table:removeColumn': 'Remove Column',
-        'table:removeRow': 'Remove Row'
-    });
-
-    Typer.ui.addIcons('material', {
-        'insert:table': 'border_all'
+        'contextmenu:table': 'Modify table',
+        'table:toggleTableHeader': 'Toggle header',
+        'table:addColumnBefore': 'Add column before',
+        'table:addColumnAfter': 'Add column after',
+        'table:addRowAbove': 'Add row above',
+        'table:addRowBelow': 'Add row below',
+        'table:removeColumn': 'Remove column',
+        'table:removeRow': 'Remove row'
     });
 
 } (jQuery, window.Typer));
@@ -3503,6 +3698,7 @@
     'use strict';
 
     var activeToolbar;
+    var activeContextMenu;
     var timeout;
 
     function nativePrompt(message, value) {
@@ -3511,6 +3707,24 @@
             return $.when(value);
         }
         return $.Deferred().reject().promise();
+    }
+
+    function detectClipboardInaccessible(callback) {
+        if (detectClipboardInaccessible.value === false) {
+            callback();
+        } else if (!detectClipboardInaccessible.value) {
+            var handler = function () {
+                detectClipboardInaccessible.value = true;
+            };
+            $(document).one('paste', handler);
+            setTimeout(function () {
+                $(document).unbind('paste', handler);
+                if (!detectClipboardInaccessible.value) {
+                    detectClipboardInaccessible.value = false;
+                    callback();
+                }
+            });
+        }
     }
 
     function showToolbar(toolbar, position) {
@@ -3523,15 +3737,15 @@
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
-
             var height = $(toolbar.element).height();
             if (position) {
                 toolbar.position = 'fixed';
             } else if (toolbar.position !== 'fixed') {
                 var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
                 position = {
-                    left: rect.left + $(window).scrollLeft(),
-                    top: Math.max(0, rect.top - height - 10) + $(window).scrollTop()
+                    position: 'fixed',
+                    left: rect.left,
+                    top: Math.max(0, rect.top - height - 10)
                 };
             }
             if (position) {
@@ -3545,6 +3759,27 @@
                 $(toolbar.element).css(position);
             }
         }
+    }
+
+    function showContextMenu(contextMenu, x, y) {
+        contextMenu.update();
+        if (activeContextMenu !== contextMenu) {
+            hideContextMenu();
+            activeContextMenu = contextMenu;
+            $(contextMenu.element).appendTo(document.body);
+            Typer.ui.setZIndex(contextMenu.element, contextMenu.typer.element);
+        }
+        if (x + $(contextMenu.element).width() > $(window).width()) {
+            x -= $(contextMenu.element).width();
+        }
+        if (y + $(contextMenu.element).height() > $(window).height()) {
+            y -= $(contextMenu.element).height();
+        }
+        $(contextMenu.element).css({
+            position: 'fixed',
+            left: x,
+            top: y
+        });
     }
 
     function hideToolbar(force) {
@@ -3562,16 +3797,23 @@
         }
     }
 
-    function createToolbar(typer, options, widget) {
+    function hideContextMenu() {
+        if (activeContextMenu) {
+            $(activeContextMenu.element).detach();
+            activeContextMenu = null;
+        }
+    }
+
+    function createToolbar(typer, options, widget, type) {
         var toolbar = Typer.ui({
-            type: 'toolbar',
+            type: type || 'toolbar',
             typer: typer,
             widget: widget || null,
             theme: options.theme,
-            controls: widget ? 'toolbar:widget' : 'toolbar',
+            controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'toolbar:widget' : 'toolbar',
             options: options
         });
-        var $elm = $(toolbar.element).addClass('typer-ui-toolbar');
+        var $elm = $(toolbar.element);
         if (options.container) {
             $elm.appendTo(options.container);
         } else {
@@ -3590,6 +3832,24 @@
                         $(document.body).unbind('mousemove', handler);
                     });
                 }
+            });
+        }
+        if (type === 'contextmenu') {
+            var focusout;
+            $(typer.element).bind('contextmenu', function (e) {
+                e.preventDefault();
+                focusout = false;
+                showContextMenu(toolbar, e.clientX, e.clientY);
+            });
+            $elm.focusout(function (e) {
+                focusout = true;
+            });
+            $elm.mouseup(function (e) {
+                setTimeout(function () {
+                    if (focusout) {
+                        hideContextMenu();
+                    }
+                });
             });
         }
         return toolbar;
@@ -3611,10 +3871,12 @@
         },
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
-            e.widget.state = e.widget.toolbar.state = {};
+            e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
         },
         widgetInit: function (e) {
-            e.targetWidget.toolbar = createToolbar(e.typer, e.widget.options, e.targetWidget);
+            if (Typer.ui.controls['widget:' + e.targetWidget.id]) {
+                e.targetWidget.toolbar = createToolbar(e.typer, e.widget.options, e.targetWidget);
+            }
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
@@ -3623,7 +3885,7 @@
             timeout = setTimeout(hideToolbar);
         },
         widgetFocusin: function (e) {
-            if (e.targetWidget.toolbar.all['toolbar:widget'].controls[0]) {
+            if (e.targetWidget.toolbar) {
                 showToolbar(e.targetWidget.toolbar);
             }
         },
@@ -3648,14 +3910,24 @@
             showToolbar(activeToolbar);
         }
     });
+    $(function () {
+        $(document.body).mouseup(function (e) {
+            if (activeContextMenu && !$.contains(activeContextMenu.element, e.target)) {
+                hideContextMenu();
+            }
+        });
+    });
 
     /* ********************************
      * Built-in Controls
      * ********************************/
 
     $.extend(Typer.ui.controls, {
-        'toolbar': Typer.ui.group('toolbar:history toolbar:insert toolbar:* -toolbar:widget'),
-        'toolbar:history': Typer.ui.group('history:*'),
+        'contextmenu': Typer.ui.group('contextmenu:*'),
+        'contextmenu:history': Typer.ui.group('history:*'),
+        'contextmenu:selection': Typer.ui.group('selection:*'),
+        'contextmenu:clipboard': Typer.ui.group('clipboard:*'),
+        'toolbar': Typer.ui.group('toolbar:insert toolbar:* -toolbar:widget'),
         'toolbar:insert': Typer.ui.callout({
             controls: 'insert:*',
             enabled: function (toolbar) {
@@ -3669,6 +3941,7 @@
             }
         }),
         'history:undo': Typer.ui.button({
+            shortcut: 'ctrlZ',
             execute: function (toolbar) {
                 toolbar.typer.undo();
             },
@@ -3677,6 +3950,7 @@
             }
         }),
         'history:redo': Typer.ui.button({
+            shortcut: 'ctrlShiftZ',
             execute: function (toolbar) {
                 toolbar.typer.redo();
             },
@@ -3690,20 +3964,60 @@
                 toolbar.widget.remove();
             }
         }),
+        'selection:selectAll': Typer.ui.button({
+            shortcut: 'ctrlA',
+            execute: function (toolbar) {
+                toolbar.typer.getSelection().select(toolbar.typer.element, true);
+                toolbar.typer.getSelection().focus();
+            }
+        }),
+        'clipboard:cut': Typer.ui.button({
+            shortcut: 'ctrlX',
+            execute: function (toolbar) {
+                toolbar.typer.getSelection().focus();
+                document.execCommand('cut');
+            }
+        }),
+        'clipboard:copy': Typer.ui.button({
+            shortcut: 'ctrlC',
+            execute: function (toolbar) {
+                toolbar.typer.getSelection().focus();
+                document.execCommand('copy');
+            }
+        }),
+        'clipboard:paste': Typer.ui.button({
+            shortcut: 'ctrlV',
+            execute: function (toolbar) {
+                toolbar.typer.getSelection().focus();
+                document.execCommand('paste');
+                detectClipboardInaccessible(function () {
+                   toolbar.alert('clipboard:inaccessible');
+                });
+            }
+        })
     });
 
     Typer.ui.addLabels('en', {
-        'toolbar:insert': 'Insert Widget',
+        'toolbar:insert': 'Insert widget',
         'history:undo': 'Undo',
         'history:redo': 'Redo',
+        'selection:selectAll': 'Select all',
+        'clipboard:cut': 'Cut',
+        'clipboard:copy': 'Copy',
+        'clipboard:paste': 'Paste',
+        'clipboard:inaccessible': 'Unable to access clipboard due to browser security. Please use Ctrl+V or [Paste] from browser\'s menu.',
         'widget:delete': 'Delete'
     });
 
     Typer.ui.addIcons('material', {
-        'toolbar:insert': 'widgets',
-        'history:undo': 'undo',
-        'history:redo': 'redo',
-        'widget:delete': 'delete'
+        'toolbar:insert': '\ue1bd',      // widgets
+        'history:undo': '\ue166',        // undo
+        'history:redo': '\ue15a',        // redo
+        'selection:selectAll': '\ue162', // select_all
+        'clipboard:cut': '\ue14e',       // content_cut
+        'clipboard:copy': '\ue14d',      // content_copy
+        'clipboard:paste': '\ue14f',     // content_paste
+        'widget:delete': '\ue872'        // delete
     });
 
 } (jQuery, window.Typer));
@@ -4001,7 +4315,21 @@
 (function ($, Typer) {
     'use strict';
 
-    var $blockUI = $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.5) url(data:image/gif;,);z-index:999;">');
+    function setMenuPosition(thisMenu) {
+        var callout = $('.typer-ui-menupane', thisMenu)[0];
+        var nested = !!$(thisMenu).parents('.typer-ui-menupane')[0];
+        var rect = callout.getBoundingClientRect();
+        if (rect.bottom > $(window).height()) {
+            $(callout).css('bottom', nested ? '0' : '100%');
+        } else if (rect.top < 0) {
+            $(callout).css('bottom', 'auto');
+        }
+        if (rect.right > $(window).width()) {
+            $(callout).css('right', nested ? '100%' : '0');
+        } else if (rect.left < 0) {
+            $(callout).css('right', 'auto');
+        }
+    }
 
     Typer.ui.themes.material = {
         resources: [
@@ -4018,27 +4346,33 @@
         },
         labelIcon: function (ui, control) {
             var icon = Typer.ui.getIcon(control, 'material');
-            if ((control.parent || '').type === 'callout') {
+            if ((control.parent || '').type === 'callout' || ui.type === 'contextmenu') {
                 return control.type === 'checkbox' ? '' : icon.replace(/.*/, '<i class="material-icons">$&</i>');
             }
             return icon.replace(/.+/, '<i class="material-icons">$&</i>');
         },
-        group: '<div class="typer-ui-group" x:bind="(role:name)"><br x:t="children"/></div>',
+        toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
+        contextmenu: '<div class="typer-ui-contextmenu typer-ui-menupane"><br x:t="children"/></div>',
+        group: '<div class="typer-ui-group"><br x:t="children"/></div>',
+        groupStateChange: function (ui, control) {
+            $(control.element).toggleClass('visible-first', !$(control.element).prevAll(':not(.hidden)')[0]);
+            $(control.element).toggleClass('visible-last', !$(control.element).nextAll(':not(.hidden)')[0]);
+        },
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
-        button: '<button x:bind="(title:label,role:name)"><br x:t="label"/><span class="typer-ui-menu-annotation" x:bind="(_:annotation)"></span></button>',
+        button: '<button x:bind="(title:label)"><br x:t="label"/><span class="typer-ui-menu-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-menu-annotation" x:bind="(_:annotation)"></span></button>',
         buttonExecuteOn: 'click',
-        callout: '<div class="typer-ui-menu" x:bind="(role:name)"><button x:bind="(title:label)"><br x:t="label"/></button><div class="typer-ui-menupane"><br x:t="children"></div></div>',
+        callout: '<div class="typer-ui-menu"><button x:bind="(title:label)"><br x:t="label"/></button><div class="typer-ui-menupane"><br x:t="children"></div></div>',
         calloutExecuteOn: {
             on: 'click',
             of: '>button'
         },
-        dropdown: '<div class="typer-ui-dropdown typer-ui-menu" x:bind="(role:name)"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedValue)"></span></span></button><div class="typer-ui-menupane"><br x:t="children(t:button)"></div></div>',
-        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label,role:name)"><input type="checkbox" x:bind="(checked:value)"/><br x:t="label"/></label>',
+        dropdown: '<div class="typer-ui-dropdown typer-ui-menu"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedValue)"></span></span></button><div class="typer-ui-menupane"><br x:t="children(t:button)"></div></div>',
+        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><input type="checkbox" x:bind="(checked:value)"/><br x:t="label"/></label>',
         checkboxExecuteOn: {
             on: 'change',
             of: ':checkbox'
         },
-        textbox: '<label class="typer-ui-textbox" x:bind="(role:name,title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
+        textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
         textboxInit: function (ui, control) {
             var $editable = $('[contenteditable]', control.element);
             $editable.typer('textbox', {
@@ -4051,27 +4385,26 @@
             });
             $editable.bind('change', function () {
                 ui.setValue(control, this.value);
-                $(control.element).toggleClass('empty', !this.value);
+                $(control.element).toggleClass('has-value', !!this.value);
             });
             $editable.bind('focusin focusout', function (e) {
                 $(control.element).parents('.typer-ui-menu').toggleClass('open', e.type === 'focusin');
             });
         },
         textboxStateChange: function (toolbar, control) {
-            $(control.element).toggleClass('empty', !control.value);
+            $(control.element).toggleClass('has-value', !!control.value);
             $(control.element).find('[contenteditable]').prop('value', control.value || '');
         },
         dialog: '<div class="typer-ui-dialog"><h1><br x:t="label"/></h1><br x:t="children"></div>',
         dialogOpen: function (dialog, control) {
-            $blockUI.appendTo(document.body);
+            $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.5) url(data:image/gif;,);">').prependTo(dialog.element);
             $(dialog.element).appendTo(document.body);
             setTimeout(function () {
                 $(control.element).addClass('open');
-                $('[contenteditable]:first', dialog.all['ui:prompt-input'].element).focus();
+                $('[contenteditable]:first', dialog.element).focus();
             });
         },
         dialogClose: function (dialog, control) {
-            $blockUI.detach();
             $(control.element).removeClass('open').one('transitionend otransitionend webkitTransitionEnd', function () {
                 $(dialog.element).remove();
             });
@@ -4091,22 +4424,13 @@
                 if ($(thisMenu).find('>.typer-ui-menupane>:not(.disabled)')[0]) {
                     $(thisMenu).toggleClass('open');
                     setTimeout(function () {
-                        var callout = $('.typer-ui-menupane', thisMenu)[0];
-                        var nested = !!$(thisMenu).parents('.typer-ui-menu')[0];
-                        var rect = callout.getBoundingClientRect();
-                        if (rect.bottom > $(window).height()) {
-                            $(callout).css('bottom', nested ? '0' : '100%');
-                        } else if (rect.top < 0) {
-                            $(callout).css('bottom', 'auto');
-                        }
-                        if (rect.right > $(window).width()) {
-                            $(callout).css('right', nested ? '100%' : '0');
-                        } else if (rect.left < 0) {
-                            $(callout).css('right', 'auto');
-                        }
+                        setMenuPosition(thisMenu);
                     });
                 }
                 e.stopPropagation();
+            });
+            $(ui.element).on('mouseover', '.typer-ui-menu', function (e) {
+                setMenuPosition(e.currentTarget);
             });
         }
     };
