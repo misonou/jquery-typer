@@ -15,6 +15,10 @@
             }
         },
         remove: 'keepText',
+        click: function () { },
+        ctrlClick: function (e) {
+            window.open(e.widget.element.href);
+        },
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = value;
@@ -97,6 +101,7 @@
         'contextmenu:openLink': Typer.ui.button({
             requireWidget: 'link',
             hiddenWhenDisabled: true,
+            shortcut: 'ctrlClick',
             execute: function (toolbar, self) {
                 window.open(self.widget.element.href);
             }

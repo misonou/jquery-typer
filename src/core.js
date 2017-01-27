@@ -30,6 +30,7 @@
     var caretRangeFromPoint_ = document.caretRangeFromPoint;
     var clipboard = {};
     var userFocus;
+    var caretNotification;
     var windowFocusedOut;
 
     function TyperSelection(typer, range) {
@@ -79,6 +80,10 @@
     function TyperCaret(typer, selection) {
         this.typer = typer;
         this.selection = selection || null;
+    }
+
+    function TyperCaretNotification() {
+        this.weakMap = new WeakMap();
     }
 
     function transaction(finalize) {
@@ -474,9 +479,10 @@
             codeUpdate(function () {
                 $.each(widgets, function (i, v) {
                     var options = widgetOptions[v.id];
-                    if (isFunction(options[eventName])) {
+                    if (!v.destroyed && isFunction(options[eventName])) {
                         handlerCalled = true;
-                        return options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props)) !== false || eventMode !== EVENT_HANDLER;
+                        options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
+                        return eventMode !== EVENT_HANDLER;
                     }
                 });
             });
@@ -1058,6 +1064,10 @@
             var hasKeyEvent;
             var activeWidget;
 
+            function getEventName(e, suffix) {
+                return lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(suffix));
+            }
+
             function triggerWidgetFocusout() {
                 var widget = activeWidget;
                 if (activeWidget && !activeWidget.destroyed) {
@@ -1148,7 +1158,7 @@
                     modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
-                        var keyEventName = lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode)));
+                        var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
                         if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
@@ -1269,8 +1279,16 @@
                 }
             });
 
+            $self.bind('click', function (e) {
+                if (triggerEvent(EVENT_HANDLER, getEventName(e, 'click'))) {
+                    e.preventDefault();
+                }
+            });
+
             $self.bind('dblclick', function (e) {
-                currentSelection.select('word');
+                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
+                    currentSelection.select('word');
+                }
                 e.preventDefault();
             });
 
@@ -1414,6 +1432,8 @@
                         command.call(typer, tx, value);
                         if (timestamp === currentSelection.timestamp) {
                             currentSelection.select(originalSelection);
+                        } else if (!userFocus.has(typer)) {
+                            currentSelection.focus();
                         }
                     });
                 }
@@ -1431,6 +1451,20 @@
             },
             insertHtml: function (content) {
                 insertContents(currentSelection, createDocumentFragment(content));
+            },
+            replaceElement: function (oldElement, newElement) {
+                newElement = is(newElement, Node) || createElement(newElement);
+                $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
+                caretNotification.update(typer.getNode(oldElement), typer.getNode(newElement));
+                removeNode(oldElement);
+                return newElement;
+            },
+            removeElement: function (element) {
+                var nodes = iterateToArray(new TyperTreeWalker(typer.getNode(element), -1));
+                $.each(nodes, function (i, v) {
+                    caretNotification.update(v, nodes[0].parentNode);
+                });
+                removeNode(element);
             },
             insertWidget: function (name, options) {
                 if (widgetOptions[name] && isFunction(widgetOptions[name].insert)) {
@@ -1499,6 +1533,20 @@
         rangeEquals: rangeEquals,
         rectEquals: rectEquals,
         caretRangeFromPoint: caretRangeFromPoint,
+        innermost: function (elements) {
+            return $.grep(elements, function (v) {
+                return !any(elements, function (w) {
+                    return $.contains(v, w);
+                });
+            });
+        },
+        outermost: function (elements) {
+            return $.grep(elements, function (v) {
+                return !any(elements, function (w) {
+                    return $.contains(w, v);
+                });
+            });
+        },
         defaultOptions: {
             historyLevel: 100,
             disallowedWidgets: 'keepText',
@@ -1819,6 +1867,36 @@
         };
     });
 
+    definePrototype(TyperCaretNotification, {
+        listen: function (inst, node) {
+            var arr = this.weakMap.get(node) || (this.weakMap.set(node, []), this.weakMap.get(node));
+            if (arr.indexOf(inst.selection) < 0) {
+                arr.push(inst.selection);
+            }
+        },
+        unlisten: function (inst, node) {
+            var arr = this.weakMap.get(node);
+            if (arr && arr.indexOf(inst.selection) >= 0) {
+                arr.splice(arr.indexOf(inst.selection), 1);
+            }
+        },
+        update: function (oldNode, newNode) {
+            function replace(caret) {
+                var n1 = caret.node === oldNode ? newNode : caret.node;
+                var n2 = caret.element === oldNode.element ? newNode.element : caret.element;
+                if (n1 !== caret.node || n2 !== caret.element) {
+                    caretSetPositionRaw(caret, n1, n2, caret.textNode, caret.offset);
+                }
+            }
+            (this.weakMap.get(oldNode) || []).forEach(function (selection) {
+                typerSelectionAtomic(selection, function () {
+                    replace(selection.baseCaret);
+                    replace(selection.extendCaret);
+                });
+            });
+        }
+    });
+
     function caretTextNodeIterator(inst) {
         var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(inst.typer.getNode(inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
         iterator.currentNode = inst.textNode || inst.element;
@@ -1831,6 +1909,16 @@
 
     function caretSetPositionRaw(inst, node, element, textNode, offset) {
         caretAtomic(inst, function () {
+            if (inst.selection && inst.selection === inst.typer.getSelection()) {
+                if (node !== inst.node && node.element !== inst.element) {
+                    caretNotification.unlisten(inst, inst.node);
+                    caretNotification.listen(inst, node);
+                }
+                if (element !== inst.element && node !== inst.typer.getNode(element)) {
+                    caretNotification.unlisten(inst, inst.typer.getNode(inst.element));
+                    caretNotification.listen(inst, inst.typer.getNode(element));
+                }
+            }
             inst.node = node;
             inst.element = element;
             inst.textNode = textNode || null;
@@ -1986,7 +2074,7 @@
                 }
                 offset += direction;
                 var newRect = computeTextRects(createRange(iterator.currentNode, offset))[0];
-                if (newRect && !rectEquals(rect, newRect)) {
+                if (!rect || (newRect && !rectEquals(rect, newRect))) {
                     return this.moveToText(iterator.currentNode, offset);
                 }
             }
@@ -2052,6 +2140,7 @@
         });
     }
     userFocus = new WeakMap();
+    caretNotification = new TyperCaretNotification();
 
     // polyfill for document.caretRangeFromPoint
     if (typeof caretRangeFromPoint_ === 'undefined') {

@@ -522,7 +522,7 @@
     margin: 0 0 0.42em 0.25em;
     padding: 0.75em 0.25em 0.17em;
     min-width: 3em;
-    border-bottom: 1px solid transparent;
+    border-bottom: 1px none #aeb8c2;
     vertical-align: top;
     line-height: 1.33;
     cursor: text;
@@ -539,7 +539,7 @@
 
 .typer-ui-textbox [contenteditable]:hover,
 .typer-ui-textbox [contenteditable]:focus {
-    border-bottom-color: #aeb8c2;
+    border-bottom-style: solid;
 }
 
 .typer-ui-textbox [contenteditable]:focus {
@@ -576,14 +576,14 @@
     -moz-transition: 0.1s ease-in;
     -ms-transition: 0.1s ease-in;
     transition: 0.1s ease-in;
-    -webkit-transition-property: top, left, filter, transform, opacity;
-    -moz-transition-property: top, left, filter, transform, opacity;
-    -ms-transition-property: top, left, filter, transform, opacity;
-    transition-property: top, left, filter, transform, opacity;
-    -webkit-transform: translate(-50%, -50%) scale(0.9);
-    -moz-transform: translate(-50%, -50%) scale(0.9);
-    -ms-transform: translate(-50%, -50%) scale(0.9);
-    transform: translate(-50%, -50%) scale(0.9);
+    -webkit-transition-property: filter, transform, opacity;
+    -moz-transition-property: filter, transform, opacity;
+    -ms-transition-property: filter, transform, opacity;
+    transition-property: filter, transform, opacity;
+    -webkit-transform: translate(-50%, -50%) scale(1.25);
+    -moz-transform: translate(-50%, -50%) scale(1.25);
+    -ms-transform: translate(-50%, -50%) scale(1.25);
+    transform: translate(-50%, -50%) scale(1.25);
     -webkit-filter: blur(2px);
     -moz-filter: blur(2px);
     -ms-filter: blur(2px);
@@ -602,6 +602,18 @@
     -ms-filter: none;
     filter: none;
     opacity: 1;
+}
+
+.typer-ui-dialog.closing {
+    -webkit-transform: translate(-50%, -50%) scale(0.75);
+    -moz-transform: translate(-50%, -50%) scale(0.75);
+    -ms-transform: translate(-50%, -50%) scale(0.75);
+    transform: translate(-50%, -50%) scale(0.75);
+    -webkit-filter: blur(20px);
+    -moz-filter: blur(20px);
+    -ms-filter: blur(20px);
+    filter: blur(20px);
+    opacity: 0;
 }
 
 .typer-ui-dialog.busy:after {
@@ -639,7 +651,7 @@
     background-color: transparent;
     margin-left: -0.25em;
     margin-right: -0.25em;
-    border-bottom-color: #aeb8c2;
+    border-bottom-style: solid;
     -webkit-transition: padding 0.1s;
     -moz-transition: padding 0.1s;
     -ms-transition: padding 0.1s;
@@ -648,6 +660,7 @@
 
 .typer-ui-dialog .typer-ui-textbox [contenteditable]:after {
     display: inline-block;
+    text-transform: uppercase;
 }
 
 .typer-ui-dialog .typer-ui-textbox.has-value [contenteditable] {
@@ -659,6 +672,7 @@
     left: 0.25em;
     bottom: 100%;
     margin-bottom: -1.75em;
+    font-size: 95%;
 }
 
 .typer-ui-dialog .typer-ui-group[role*="buttonset"] {

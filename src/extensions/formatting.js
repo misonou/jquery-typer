@@ -64,42 +64,6 @@
         return element;
     }
 
-    function removeParagraph(element) {
-        if ($(element).is('li:only-child')) {
-            element = element.parentNode;
-        }
-        $(element).remove();
-    }
-
-    function indentParagraph(element) {
-        var list = $(element).parent('ul,ol')[0] || $(element).prev('ul,ol')[0] || $('<ul>').insertBefore(element)[0];
-        var newList = list;
-        if (newList === element.parentNode) {
-            var prevItem = $(element).prev('li')[0] || $('<li>').insertBefore(element)[0];
-            newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
-        }
-        $('<li>').append(element.childNodes).appendTo(newList);
-        removeParagraph(element);
-        if ($(newList).parent('li')[0] && !newList.previousSibling) {
-            $(Typer.createTextNode()).insertBefore(newList);
-        }
-    }
-
-    function outdentParagraph(element) {
-        var list = $(element).parent('ul,ol')[0];
-        var parentList = $(list).parent('li')[0];
-        if ($(element).next('li')[0]) {
-            if (parentList) {
-                $(list.cloneNode(false)).append($(element).nextAll()).appendTo(element);
-            } else {
-                $(list.cloneNode(false)).append($(element).nextAll()).insertAfter(list);
-                $(element).children('ul,ol').insertAfter(list);
-            }
-        }
-        $(createElementWithClassName(parentList ? 'li' : 'p')).append(element.childNodes).insertAfter(parentList || list);
-        removeParagraph(element);
-    }
-
     /* ********************************
      * Commands
      * ********************************/
@@ -133,13 +97,60 @@
         $.each(tx.selection.getParagraphElements(), function (i, v) {
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
-                $(v)[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list).wrap('<li>').contents().unwrap();
+                $(v)[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
+                tx.replaceElement(v.parentNode, 'li');
                 lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
-                $(v.parentNode).wrap(html).contents().unwrap();
+                tx.replaceElement(v.parentNode, $(html)[0]);
                 lists.push(v.parentNode);
             } else if (tx.selection.focusNode.widget.id === 'list' && $.inArray(v.parentNode, lists) < 0) {
-                outdentParagraph(v);
+                outdentCommand(tx, [v]);
+            }
+        });
+    }
+
+    function indentCommand(tx, elements) {
+        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        $.each(elements, function (i, v) {
+            var list = $(v).parent('ul,ol')[0] || $(v).prev('ul,ol')[0] || $('<ul>').insertBefore(v)[0];
+            var newList = list;
+            if (newList === v.parentNode) {
+                var prevItem = $(v).prev('li')[0] || $('<li>').insertBefore(v)[0];
+                newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
+            }
+            $(tx.replaceElement(v, 'li')).appendTo(newList);
+            if ($(newList).parent('li')[0]) {
+                $(Typer.createTextNode('\u00a0')).insertBefore(newList);
+            }
+            if (!list.children[0]) {
+                tx.removeElement(list);
+            }
+        });
+    }
+
+    function outdentCommand(tx, elements) {
+        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        $.each(elements, function (i, v) {
+            var list = $(v).parent('ul,ol')[0];
+            var parentList = $(list).parent('li')[0];
+            if ($(v).next('li')[0]) {
+                if (parentList) {
+                    $(list.cloneNode(false)).append($(v).nextAll()).appendTo(v);
+                } else {
+                    $(list.cloneNode(false)).append($(v).nextAll()).insertAfter(list);
+                    $(v).children('ul,ol').insertAfter(list);
+                }
+            }
+            if (parentList) {
+                $(v).insertAfter(parentList);
+                if (!Typer.trim(tx.typer.extractText(parentList))) {
+                    tx.removeElement(parentList);
+                }
+            } else {
+                $(tx.replaceElement(v, 'p')).insertAfter(list);
+            }
+            if (!list.children[0]) {
+                tx.removeElement(list);
             }
         });
     }
@@ -249,12 +260,8 @@
             }
         },
         commands: {
-            indent: function (tx) {
-                $.map(tx.selection.getParagraphElements(), indentParagraph);
-            },
-            outdent: function (tx) {
-                $.map(tx.selection.getParagraphElements(), outdentParagraph);
-            }
+            indent: indentCommand,
+            outdent: outdentCommand
         }
     };
 
@@ -435,9 +442,7 @@
 
     Typer.ui.addHook('tab', function (typer) {
         if (typer.widgetEnabled('list')) {
-            typer.invoke(function (tx) {
-                $.map(tx.selection.getParagraphElements(), indentParagraph);
-            });
+            typer.invoke(indentCommand);
             return true;
         }
     });

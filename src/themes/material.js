@@ -61,21 +61,26 @@
         textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
         textboxInit: function (ui, control) {
             var $editable = $('[contenteditable]', control.element);
+            var isInit = true;
             $editable.typer('textbox', {
                 enter: function () {
                     ui.execute('ui:button-ok');
                 },
                 escape: function () {
                     ui.execute('ui:button-cancel');
+                },
+                stateChange: function (e) {
+                    var execute = control.executeOnSetValue;
+                    control.executeOnSetValue &= !isInit;
+                    ui.setValue(control, e.typer.element.value);
+                    control.executeOnSetValue = execute;
+                    $(control.element).toggleClass('has-value', !!e.typer.element.value);
                 }
-            });
-            $editable.bind('change', function () {
-                ui.setValue(control, this.value);
-                $(control.element).toggleClass('has-value', !!this.value);
             });
             $editable.bind('focusin focusout', function (e) {
                 $(control.element).parents('.typer-ui-menu').toggleClass('open', e.type === 'focusin');
             });
+            isInit = false;
         },
         textboxStateChange: function (toolbar, control) {
             $(control.element).toggleClass('has-value', !!control.value);
@@ -91,7 +96,7 @@
             });
         },
         dialogClose: function (dialog, control) {
-            $(control.element).removeClass('open').one('transitionend otransitionend webkitTransitionEnd', function () {
+            $(control.element).addClass('closing').one('transitionend otransitionend webkitTransitionEnd', function () {
                 $(dialog.element).remove();
             });
         },
