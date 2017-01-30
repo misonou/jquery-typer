@@ -41,8 +41,8 @@
         contextmenu: '<div class="typer-ui-contextmenu typer-ui-menupane"><br x:t="children"/></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
-            $(control.element).toggleClass('visible-first', !$(control.element).prevAll(':not(.hidden)')[0]);
-            $(control.element).toggleClass('visible-last', !$(control.element).nextAll(':not(.hidden)')[0]);
+            $(control.element).toggleClass('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
+            $(control.element).toggleClass('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
         },
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         button: '<button x:bind="(title:label)"><br x:t="label"/><span class="typer-ui-menu-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-menu-annotation" x:bind="(_:annotation)"></span></button>',

@@ -115,7 +115,12 @@
             widget: widget || null,
             theme: options.theme,
             controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'toolbar:widget' : 'toolbar',
-            options: options
+            options: options,
+            controlExecuted: function (ui, self, control) {
+                if (/button|dropdown/.test(control.type)) {
+                    ui.typer.getSelection().focus();
+                }
+            }
         });
         var $elm = $(toolbar.element);
         if (options.container) {

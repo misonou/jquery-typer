@@ -54,23 +54,27 @@
         });
     }
 
-    function expandControls(str, controls) {
+    function expandControls(ui, str, controls) {
         controls = controls || definedControls;
 
-        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '');
+        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '') + ' @ ' + (ui.type || '');
         if (expandCache[cacheKey]) {
             return expandCache[cacheKey].slice(0);
         }
+
         var tokens = (str || '').split(/\s+/);
         var arr = [];
+        var allowed = function (name) {
+            return (!controls[name].context || controls[name].context.indexOf(ui.type) >= 0) && tokens.indexOf('-' + name) < 0 && arr.indexOf(name) < 0;
+        };
         $.each(tokens, function (i, v) {
             if (v.slice(-1) === '*') {
                 $.each(controls, function (i) {
-                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && tokens.indexOf('-' + i) < 0 && arr.indexOf(i) < 0) {
+                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && allowed(i)) {
                         arr[arr.length] = i;
                     }
                 });
-            } else if (v.charAt(0) !== '-' && controls[v] && tokens.indexOf('-' + v) < 0 && arr.indexOf(v) < 0) {
+            } else if (v.charAt(0) !== '-' && controls[v] && allowed(v)) {
                 arr[arr.length] = v;
             }
         });
@@ -104,7 +108,7 @@
     }
 
     function callFunction(ui, control, name, optArg) {
-        if (ui !== control && isFunction(control[name])) {
+        if (isFunction(control[name])) {
             return control[name](ui, control, optArg);
         }
     }
@@ -123,7 +127,7 @@
             control.controls = control.controls(ui, control);
         }
         if (typeof control.controls === 'string') {
-            control.controls = expandControls(control.controls);
+            control.controls = expandControls(ui, control.controls);
         }
 
         var defaultOrder = {};
@@ -269,13 +273,13 @@
         } else if (isFunction(control.execute)) {
             control.execute(ui, control, null, control.value);
         }
+        triggerEvent(ui, ui, 'controlExecuted', control);
     }
 
-    function foreachControl(ui, fn, optArg, control) {
+    function foreachControl(ui, fn, optArg) {
         $.each(Object.keys(ui.all).reverse(), function (i, v) {
             fn(ui, ui.all[v], optArg);
         });
-        fn(ui, ui, optArg);
     }
 
     Typer.ui = define('TyperUI', null, function (options, parentUI) {
@@ -301,6 +305,7 @@
         }
         callFunction(self, definedThemes[self.theme], 'init');
         foreachControl(self, triggerEvent, 'init');
+        triggerEvent(self, self, 'init');
     });
 
     $.extend(Typer.ui.prototype, {
@@ -317,7 +322,7 @@
             foreachControl(this, updateControl);
         },
         destroy: function () {
-            foreachControl(this, callFunction, 'destroy');
+            foreachControl(this, triggerEvent, 'destroy');
         },
         trigger: function (control, event) {
             if (typeof control === 'string') {
@@ -350,7 +355,7 @@
         },
         resolve: function (control) {
             var self = this;
-            return $.map(expandControls(control, self.all), function (v) {
+            return $.map(expandControls(this, control, self.all), function (v) {
                 return self.all[v];
             });
         },
@@ -537,7 +542,12 @@
         }),
         group: define('TyperUIGroup', {
             type: 'group',
-            hiddenWhenDisabled: true
+            hiddenWhenDisabled: true,
+            enabled: function (ui, self) {
+                return !!$.grep(self.controls, function (v) {
+                    return ui.enabled(v);
+                })[0];
+            }
         }, function (controls, params) {
             this.controls = controls;
             $.extend(this, params);

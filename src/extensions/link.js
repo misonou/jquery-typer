@@ -72,6 +72,7 @@
             }
         }),
         'link:url': Typer.ui.textbox({
+            context: 'toolbar',
             hiddenWhenDisabled: true,
             requireWidget: 'link',
             execute: 'setURL',
@@ -80,6 +81,7 @@
             }
         }),
         'link:blank': Typer.ui.checkbox({
+            context: 'toolbar',
             hiddenWhenDisabled: true,
             requireWidget: 'link',
             stateChange: function (toolbar, self) {
@@ -93,12 +95,8 @@
                 }
             }
         }),
-        'link:unlink': Typer.ui.button({
-            hiddenWhenDisabled: true,
-            requireWidget: 'link',
-            execute: 'unlink'
-        }),
-        'contextmenu:openLink': Typer.ui.button({
+        'link:open': Typer.ui.button({
+            context: 'contextmenu',
             requireWidget: 'link',
             hiddenWhenDisabled: true,
             shortcut: 'ctrlClick',
@@ -106,6 +104,12 @@
                 window.open(self.widget.element.href);
             }
         }),
+        'link:unlink': Typer.ui.button({
+            hiddenWhenDisabled: true,
+            requireWidget: 'link',
+            execute: 'unlink'
+        }),
+        'contextmenu:link': Typer.ui.group('link:*'),
         'dialog-control:selectLink-text': Typer.ui.textbox(),
         'dialog-control:selectLink-url': Typer.ui.textbox(),
         'dialog:selectLink': Typer.ui.dialog({
@@ -121,11 +125,11 @@
         'toolbar:link': 'Insert hyperlink',
         'link:url': 'Link URL',
         'link:blank': 'Open in new window',
+        'link:open': 'Open hyperlink',
         'link:unlink': 'Remove hyperlink',
         'dialog:selectLink': 'Create hyperlink',
         'dialog-control:selectLink-text': 'Text',
-        'dialog-control:selectLink-url': 'URL',
-        'contextmenu:openLink': 'Open hyperlink'
+        'dialog-control:selectLink-url': 'URL'
     });
 
     Typer.ui.addIcons('material', {

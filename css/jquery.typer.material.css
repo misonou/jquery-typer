@@ -424,18 +424,12 @@
     display: none;
 }
 
-.typer-ui-menupane .typer-ui-group:before,
-.typer-ui-menupane .typer-ui-group:after {
+.typer-ui-menupane .typer-ui-group.sep-before:before,
+.typer-ui-menupane .typer-ui-group.sep-after:after {
     content: '';
     display: block;
     margin: 0.25em 0;
     border-top: 1px solid rgba(128, 128, 128, 0.3);
-}
-
-.typer-ui-menupane .typer-ui-group.visible-first:before,
-.typer-ui-menupane .typer-ui-group.visible-last:after,
-.typer-ui-menupane .typer-ui-group + .typer-ui-group:before {
-    content: none;
 }
 
 .typer-ui-contextmenu {
