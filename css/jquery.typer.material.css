@@ -383,7 +383,7 @@
 
 .typer-ui-menu.open > .typer-ui-menupane,
 .typer-ui-menu.open > .typer-ui-menu:hover .typer-ui-menupane,
-.typer-ui-contextmenu .typer-ui-menu:hover .typer-ui-menupane {
+.typer-ui-contextmenu {
     display: block;
     display: -ms-flexbox;
     display: flex;
@@ -397,6 +397,16 @@
     box-sizing: border-box;
     align-items: stretch;
     flex-shrink: 0;
+}
+
+.typer-ui-menupane .typer-ui-group {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
 }
 
 .typer-ui-menupane label,
@@ -433,18 +443,8 @@
 }
 
 .typer-ui-contextmenu {
-    display: block;
     min-width: 0;
-}
-
-.typer-ui-contextmenu .typer-ui-group {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    width: 100%\9;
-    -ms-flex-direction: column;
-    flex-direction: column;
+    width: auto\9;
 }
 
 .typer-ui-dropdown {
@@ -516,7 +516,7 @@
     margin: 0 0 0.42em 0.25em;
     padding: 0.75em 0.25em 0.17em;
     min-width: 3em;
-    border-bottom: 1px none #aeb8c2;
+    border-bottom: 1px solid #aeb8c2;
     vertical-align: top;
     line-height: 1.33;
     cursor: text;
@@ -531,8 +531,12 @@
     min-width: 0;
 }
 
-.typer-ui-textbox [contenteditable]:hover,
-.typer-ui-textbox [contenteditable]:focus {
+.typer-ui-toolbar .typer-ui-textbox [contenteditable] {
+    border-bottom-style: hidden;
+}
+
+.typer-ui-toolbar .typer-ui-textbox [contenteditable]:hover,
+.typer-ui-toolbar .typer-ui-textbox [contenteditable]:focus {
     border-bottom-style: solid;
 }
 

@@ -345,6 +345,9 @@
                 (control.requireWidget && !control.widget && !this.widget)) {
                 return false;
             }
+            if (control.requireChildControls === true && !control.controls[0]) {
+                return false;
+            }
             return callFunction(this, control, 'enabled') !== false;
         },
         active: function (control) {
@@ -508,7 +511,7 @@
                 element.style.position = 'relative';
             }
             element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
-                return /absolute|fixed|relative/.test($(v).css('position'));
+                return /absolute|fixed|relative/.test($(v).css('position')) && $(v).css('z-index') !== 'auto';
             }).slice(-1).css('z-index') || 0) + 1;
         }
     });
@@ -523,6 +526,7 @@
         }),
         dropdown: define('TyperUIDropdown', {
             type: 'dropdown',
+            requireChildControls: true,
             stateChange: function (ui, self) {
                 $.each(self.controls, function (i, v) {
                     if (ui.active(v)) {
@@ -535,14 +539,12 @@
             },
             execute: function (ui, self) {
                 ui.execute(self.controls[self.selectedIndex]);
-            },
-            enabled: function (ui, self) {
-                return self.controls.length > 0;
             }
         }),
         group: define('TyperUIGroup', {
             type: 'group',
             hiddenWhenDisabled: true,
+            requireChildControls: true,
             enabled: function (ui, self) {
                 return !!$.grep(self.controls, function (v) {
                     return ui.enabled(v);
@@ -557,7 +559,8 @@
         }),
         textbox: define('TyperUITextbox', {
             type: 'textbox',
-            executeOnSetValue: true
+            preset: 'textbox',
+            executeOnSetValue: true,
         }),
         checkbox: define('TyperUICheckbox', {
             type: 'checkbox',

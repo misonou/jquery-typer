@@ -221,7 +221,9 @@
                 if (m[1] === 'ol' || m[1] === 'ul') {
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
-                    $(tx.selection.getParagraphElements()).not('li').wrap(createElementWithClassName(m[1] || 'p', m[2])).contents().unwrap();
+                    $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
+                       Typer.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
+                    });
                 }
             },
             insertLine: function (tx) {
@@ -258,6 +260,11 @@
             $(e.widget.element).filter('ol').attr('type-css-value', LIST_STYLE_TYPE[$(e.widget.element).attr('type')] || 'decimal');
             if ($(e.widget.element).parent('li')[0] && !e.widget.element.previousSibling) {
                 $(Typer.createTextNode()).insertBefore(e.widget.element);
+            }
+        },
+        contentChange: function (e) {
+            if (!$(e.widget.element).children('li')[0]) {
+                Typer.removeElement(e.widget.element);
             }
         },
         commands: {

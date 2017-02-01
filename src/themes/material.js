@@ -60,31 +60,31 @@
         },
         textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
         textboxInit: function (ui, control) {
-            var $editable = $('[contenteditable]', control.element);
+            var editable = $('[contenteditable]', control.element)[0];
             var isInit = true;
-            $editable.typer('textbox', {
+            control.preset = Typer.preset(editable, control.preset, {
                 enter: function () {
                     ui.execute('ui:button-ok');
                 },
                 escape: function () {
                     ui.execute('ui:button-cancel');
                 },
-                stateChange: function (e) {
-                    var execute = control.executeOnSetValue;
-                    control.executeOnSetValue &= !isInit;
-                    ui.setValue(control, e.typer.element.value);
-                    control.executeOnSetValue = execute;
-                    $(control.element).toggleClass('has-value', !!e.typer.element.value);
+                stateChange: function () {
+                    if (!isInit) {
+                        var value = control.preset.getValue();
+                        ui.setValue(control, value);
+                        $(control.element).toggleClass('has-value', !!value);
+                    }
                 }
             });
-            $editable.bind('focusin focusout', function (e) {
+            $(editable).bind('focusin focusout', function (e) {
                 $(control.element).parents('.typer-ui-menu').toggleClass('open', e.type === 'focusin');
             });
             isInit = false;
         },
         textboxStateChange: function (toolbar, control) {
             $(control.element).toggleClass('has-value', !!control.value);
-            $(control.element).find('[contenteditable]').prop('value', control.value || '');
+            control.preset.setValue(control.value || '');
         },
         dialog: '<div class="typer-ui-dialog"><h1><br x:t="label"/></h1><br x:t="children"></div>',
         dialogOpen: function (dialog, control) {

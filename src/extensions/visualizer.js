@@ -269,9 +269,11 @@
             $(container).children().detach();
         },
         widgetFocusin: function (e) {
-            activeWidget = e.targetWidget;
-            if (supported) {
-                updateSelection(e.widget.options);
+            if (e.targetWidget.typer === activeTyper) {
+                activeWidget = e.targetWidget;
+                if (supported) {
+                    updateSelection(e.widget.options);
+                }
             }
         },
         widgetFocusout: function (e) {
