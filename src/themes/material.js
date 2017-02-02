@@ -86,7 +86,7 @@
             $(control.element).toggleClass('has-value', !!control.value);
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog"><h1><br x:t="label"/></h1><br x:t="children"></div>',
+        dialog: '<div class="typer-ui-dialog"><br x:t="children"></div>',
         dialogOpen: function (dialog, control) {
             $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.5) url(data:image/gif;,);">').prependTo(dialog.element);
             $(dialog.element).appendTo(document.body);

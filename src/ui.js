@@ -424,17 +424,17 @@
         },
         alert: function (message) {
             var dialog = Typer.ui('ui:alert', this);
-            dialog.all['ui:alert'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             return dialog.execute();
         },
         confirm: function (message) {
             var dialog = Typer.ui('ui:confirm', this);
-            dialog.all['ui:confirm'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             return dialog.execute();
         },
         prompt: function (message, value) {
             var dialog = Typer.ui('ui:prompt', this);
-            dialog.all['ui:prompt'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             dialog.all['ui:prompt'].value = value;
             return dialog.execute();
         }
@@ -608,13 +608,16 @@
     $.extend(definedControls, {
         'ui:button-ok': Typer.ui.button(),
         'ui:button-cancel': Typer.ui.button(),
+        'ui:prompt-message': {
+            type: 'label'
+        },
         'ui:prompt-input': Typer.ui.textbox({
             label: '',
             executeOnSetValue: false
         }),
         'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
         'ui:prompt': Typer.ui.dialog({
-            controls: 'ui:prompt-input ui:prompt-buttonset',
+            controls: 'ui:prompt-message ui:prompt-input ui:prompt-buttonset',
             resolveValue: 'ui:prompt-input',
             setup: function (ui, self) {
                 ui.setValue('ui:prompt-input', self.value);
@@ -622,11 +625,11 @@
         }),
         'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
         'ui:confirm': Typer.ui.dialog({
-            controls: 'ui:confirm-buttonset'
+            controls: 'ui:prompt-message ui:confirm-buttonset'
         }),
         'ui:alert-buttonset': Typer.ui.group('ui:button-ok'),
         'ui:alert': Typer.ui.dialog({
-            controls: 'ui:alert-buttonset'
+            controls: 'ui:prompt-message ui:alert-buttonset'
         }),
     });
 

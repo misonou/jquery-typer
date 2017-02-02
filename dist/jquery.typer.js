@@ -1230,6 +1230,7 @@
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
+                e.preventDefault();
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
@@ -2082,6 +2083,15 @@
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
             }
+            if (IS_IE && this.textNode && this.offset === this.textNode.length && this.textNode.nextSibling && this.textNode.nextSibling.nodeType === 1 && !/inline/.test($(this.textNode.nextSibling).css('display'))) {
+                // IE fails to visually position caret when it is at the end of text line
+                // and there is a next sibling element which its display mode is not inline
+                if (this.textNode.nodeValue.slice(-1) === ZWSP) {
+                    this.offset--;
+                } else {
+                    this.textNode.nodeValue += ZWSP;
+                }
+            }
             return createRange(this.textNode || this.element, this.offset);
         },
         clone: function () {
@@ -2833,17 +2843,17 @@
         },
         alert: function (message) {
             var dialog = Typer.ui('ui:alert', this);
-            dialog.all['ui:alert'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             return dialog.execute();
         },
         confirm: function (message) {
             var dialog = Typer.ui('ui:confirm', this);
-            dialog.all['ui:confirm'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             return dialog.execute();
         },
         prompt: function (message, value) {
             var dialog = Typer.ui('ui:prompt', this);
-            dialog.all['ui:prompt'].label = message;
+            dialog.all['ui:prompt-message'].label = message;
             dialog.all['ui:prompt'].value = value;
             return dialog.execute();
         }
@@ -3017,13 +3027,16 @@
     $.extend(definedControls, {
         'ui:button-ok': Typer.ui.button(),
         'ui:button-cancel': Typer.ui.button(),
+        'ui:prompt-message': {
+            type: 'label'
+        },
         'ui:prompt-input': Typer.ui.textbox({
             label: '',
             executeOnSetValue: false
         }),
         'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
         'ui:prompt': Typer.ui.dialog({
-            controls: 'ui:prompt-input ui:prompt-buttonset',
+            controls: 'ui:prompt-message ui:prompt-input ui:prompt-buttonset',
             resolveValue: 'ui:prompt-input',
             setup: function (ui, self) {
                 ui.setValue('ui:prompt-input', self.value);
@@ -3031,11 +3044,11 @@
         }),
         'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
         'ui:confirm': Typer.ui.dialog({
-            controls: 'ui:confirm-buttonset'
+            controls: 'ui:prompt-message ui:confirm-buttonset'
         }),
         'ui:alert-buttonset': Typer.ui.group('ui:button-ok'),
         'ui:alert': Typer.ui.dialog({
-            controls: 'ui:alert-buttonset'
+            controls: 'ui:prompt-message ui:alert-buttonset'
         }),
     });
 
@@ -3542,11 +3555,22 @@
 (function ($, Typer) {
     'use strict';
 
+    function normalizeUrl(url) {
+        var anchor = document.createElement('A');
+        anchor.href = url || '';
+        if (location.protocol === anchor.protocol && location.hostname === anchor.hostname && (location.port === anchor.port || (location.port === '' && anchor.port === (location.protocol === 'https:' ? '443' : '80')))) {
+            // for browsers incorrectly report URL components with a relative path
+            // the supplied value must be at least an absolute path on the origin
+            return anchor.pathname.replace(/^(?!\/)/, '/') + anchor.search + anchor.hash;
+        }
+        return url;
+    }
+
     Typer.widgets.link = {
         element: 'a[href]',
         inline: true,
         insert: function (tx, value) {
-            value = value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input) || '#';
+            value = normalizeUrl(value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input));
             if (tx.selection.isCaret) {
                 var element = $('<a>').text(value).attr('href', value)[0];
                 tx.insertHtml(element);
@@ -3556,13 +3580,12 @@
             }
         },
         remove: 'keepText',
-        click: function () { },
         ctrlClick: function (e) {
             window.open(e.widget.element.href);
         },
         commands: {
             setURL: function (tx, value) {
-                tx.widget.element.href = value;
+                tx.widget.element.href = normalizeUrl(value);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -3573,19 +3596,16 @@
     Typer.defaultOptions.link = true;
 
     $.extend(Typer.ui.controls, {
-        'toolbar:link': Typer.ui.callout({
-            controls: 'link:*',
+        'toolbar:link': Typer.ui.button({
             after: 'toolbar:insert',
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
-                if (self.widget) {
-                    return null;
-                }
                 var selectedText = self.widget || toolbar.typer.getSelection().getSelectedText();
                 var currentValue = {
                     href: self.widget ? $(self.widget.element).attr('href') : /^[a-z]+:\/\//g.test(selectedText) ? selectedText : '',
-                    text: self.widget ? $(self.widget.element).text() : selectedText
+                    text: self.widget ? $(self.widget.element).text() : selectedText,
+                    blank: self.widget ? $(self.widget.element).attr('target') === '_blank' : false
                 };
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
@@ -3599,41 +3619,29 @@
                 var href = value.href || value;
                 var text = value.text || href;
                 if (self.widget) {
-                    $(self.element).text(text);
+                    $(self.widget.element).text(text);
                     tx.typer.invoke('setURL', href);
+                    if (value.blank) {
+                        $(self.widget.element).attr('target', '_blank');
+                    } else {
+                        $(self.widget.element).removeAttr('target');
+                    }
                 } else {
                     var textNode = Typer.createTextNode(text);
                     tx.insertHtml(textNode);
                     tx.selection.select(textNode);
                     tx.insertWidget('link', href);
+                    if (tx.selection.focusNode.widget.id === 'link') {
+                        if (value.blank) {
+                            $(tx.selection.focusNode.widget.element).attr('target', '_blank');
+                        } else {
+                            $(tx.selection.focusNode.widget.element).removeAttr('target');
+                        }
+                    }
                 }
             },
             active: function (toolbar, self) {
                 return self.widget;
-            }
-        }),
-        'link:url': Typer.ui.textbox({
-            context: 'toolbar',
-            hiddenWhenDisabled: true,
-            requireWidget: 'link',
-            execute: 'setURL',
-            stateChange: function (toolbar, self) {
-                self.value = $(self.widget.element).attr('href');
-            }
-        }),
-        'link:blank': Typer.ui.checkbox({
-            context: 'toolbar',
-            hiddenWhenDisabled: true,
-            requireWidget: 'link',
-            stateChange: function (toolbar, self) {
-                self.value = $(self.widget.element).attr('target') === '_blank';
-            },
-            execute: function (toolbar, self) {
-                if (self.value) {
-                    $(self.widget.element).attr('target', '_blank');
-                } else {
-                    $(self.widget.element).removeAttr('target');
-                }
             }
         }),
         'link:open': Typer.ui.button({
@@ -3651,13 +3659,15 @@
             execute: 'unlink'
         }),
         'contextmenu:link': Typer.ui.group('link:*'),
-        'dialog-control:selectLink-text': Typer.ui.textbox(),
-        'dialog-control:selectLink-url': Typer.ui.textbox(),
+        'dialog:selectLink:text': Typer.ui.textbox(),
+        'dialog:selectLink:url': Typer.ui.textbox(),
+        'dialog:selectLink:blank': Typer.ui.checkbox(),
         'dialog:selectLink': Typer.ui.dialog({
-            controls: 'dialog-control:selectLink-text dialog-control:selectLink-url ui:prompt-buttonset',
+            controls: 'dialog:selectLink:* ui:prompt-buttonset',
             valueMap: {
-                text: 'dialog-control:selectLink-text',
-                href: 'dialog-control:selectLink-url'
+                text: 'dialog:selectLink:text',
+                href: 'dialog:selectLink:url',
+                blank: 'dialog:selectLink:blank'
             }
         })
     });
@@ -3669,8 +3679,9 @@
         'link:open': 'Open hyperlink',
         'link:unlink': 'Remove hyperlink',
         'dialog:selectLink': 'Create hyperlink',
-        'dialog-control:selectLink-text': 'Text',
-        'dialog-control:selectLink-url': 'URL'
+        'dialog:selectLink:text': 'Text',
+        'dialog:selectLink:url': 'URL',
+        'dialog:selectLink:blank': 'Open in new window',
     });
 
     Typer.ui.addIcons('material', {
@@ -4652,7 +4663,7 @@
             $(control.element).toggleClass('has-value', !!control.value);
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog"><h1><br x:t="label"/></h1><br x:t="children"></div>',
+        dialog: '<div class="typer-ui-dialog"><br x:t="children"></div>',
         dialogOpen: function (dialog, control) {
             $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.5) url(data:image/gif;,);">').prependTo(dialog.element);
             $(dialog.element).appendTo(document.body);

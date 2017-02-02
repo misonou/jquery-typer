@@ -1204,6 +1204,7 @@
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
+                e.preventDefault();
             });
 
             $self.bind('compositionstart compositionupdate compositionend', function (e) {
@@ -2055,6 +2056,15 @@
                 // use calculated text offset from paragraph node in case anchored text node is detached from DOM
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
+            }
+            if (IS_IE && this.textNode && this.offset === this.textNode.length && this.textNode.nextSibling && this.textNode.nextSibling.nodeType === 1 && !/inline/.test($(this.textNode.nextSibling).css('display'))) {
+                // IE fails to visually position caret when it is at the end of text line
+                // and there is a next sibling element which its display mode is not inline
+                if (this.textNode.nodeValue.slice(-1) === ZWSP) {
+                    this.offset--;
+                } else {
+                    this.textNode.nodeValue += ZWSP;
+                }
             }
             return createRange(this.textNode || this.element, this.offset);
         },
