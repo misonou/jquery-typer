@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.2
+ * jQuery Typer Plugin v0.9.3
  *
  * The MIT License (MIT)
  *
@@ -125,11 +125,6 @@
                 }
             }
         };
-    }
-
-    function replaceTimeout(source, fn, milliseconds) {
-        clearTimeout(replaceTimeout[source.name]);
-        replaceTimeout[source.name] = fn && setTimeout(fn, milliseconds);
     }
 
     function defineProperty(obj, name, value, enumerable) {
@@ -403,6 +398,9 @@
             try {
                 while (comparePosition(element, range.commonAncestorContainer, true)) {
                     var target = $(range.commonAncestorContainer).parentsUntil(getCommonAncestor(element, range.commonAncestorContainer)).slice(-1)[0] || range.commonAncestorContainer;
+                    if (target === elm[elm.length - 1]) {
+                        return null;
+                    }
                     target.style.pointerEvents = 'none';
                     elm[elm.length] = target;
                     range = caretRangeFromPoint_.call(document, x, y);
@@ -479,7 +477,7 @@
             // IE fires textinput event on the parent element when the text node's value is modified
             // even if modification is done through JavaScript rather than user action
             codeUpdate.suppressTextEvent = true;
-            setTimeout(function () {
+            setImmediate(function () {
                 codeUpdate.suppressTextEvent = false;
             });
         });
@@ -495,7 +493,7 @@
                 case EVENT_HANDLER:
                     return currentSelection.getWidgets().reverse().concat(widgets);
                 case EVENT_CURRENT:
-                    return currentSelection.getWidgets().slice(-1);
+                    return currentSelection.focusNode.widget;
             }
         }
 
@@ -664,7 +662,8 @@
                 if (observer) {
                     handleMutations(observer.takeRecords());
                 } else {
-                    replaceTimeout(ensureState, function () {
+                    clearImmediate(ensureState.handle);
+                    ensureState.handle = setImmediate(function () {
                         dirtyElements.push(null);
                     });
                 }
@@ -713,22 +712,6 @@
             var caret = new TyperCaret(typer);
             caret.moveToText(node, offset);
             return caret.getRange();
-        }
-
-        function updateState(fireEvent) {
-            var activeRange = getActiveRange(topElement);
-            if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
-                try {
-                    typer.snapshot = $.noop;
-                    currentSelection.select(activeRange);
-                } finally {
-                    typer.snapshot = undoable.snapshot;
-                }
-            }
-            if (fireEvent !== false) {
-                triggerEvent(EVENT_ALL, 'beforeStateChange');
-                triggerEvent(EVENT_ALL, 'stateChange');
-            }
         }
 
         function checkEditable(range) {
@@ -1069,9 +1052,17 @@
             var lastValue = topElement.outerHTML;
             var snapshots = [lastValue];
             var currentIndex = 0;
+            var snapshotTimeout;
+
+            function triggerStateChange() {
+                setTimeout(function () {
+                    triggerEvent(EVENT_ALL, 'beforeStateChange');
+                    triggerEvent(EVENT_ALL, 'stateChange');
+                });
+            }
 
             function checkActualChange() {
-                var value = trim(topElement.innerHTML.replace(/\s+x-typer-(start|end)(="\d+")?|(?!>)\u200b(?!<\/)/g, ''));
+                var value = trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
                 if (value !== lastValue) {
                     lastValue = value;
                     return true;
@@ -1097,7 +1088,7 @@
             }
 
             function takeSnapshot() {
-                updateState();
+                triggerStateChange();
                 setMarker(currentSelection.startTextNode || currentSelection.startElement, currentSelection.startOffset, true);
                 if (!currentSelection.isCaret) {
                     setMarker(currentSelection.endTextNode || currentSelection.endElement, currentSelection.endOffset, false);
@@ -1116,11 +1107,14 @@
                 var content = $.parseHTML(value)[0];
                 $self.empty().append(content.childNodes).attr(attrs(content));
                 currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
-                updateState();
+                triggerStateChange();
                 checkActualChange();
             }
 
             $.extend(undoable, {
+                getValue: function () {
+                    return lastValue;
+                },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
                 },
@@ -1138,15 +1132,15 @@
                     }
                 },
                 snapshot: function (delay) {
-                    replaceTimeout('snapshot');
+                    clearTimeout(snapshotTimeout);
                     if (+delay === delay || !currentSelection) {
-                        replaceTimeout('snapshot', takeSnapshot, delay);
+                        snapshotTimeout = setTimeout(takeSnapshot, delay);
                     } else if (delay === true || !codeUpdate.executing) {
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     } else {
                         codeUpdate.needSnapshot = true;
-                        updateState(false);
+                        triggerStateChange();
                     }
                 }
             });
@@ -1174,11 +1168,19 @@
                 }
             }
 
-            function sparseSnapshot(e) {
-                setTimeout(function () {
-                    undoable.snapshot(e.timeStamp - lastInputTime < 200 ? 200 : 0);
-                    lastInputTime = e.timeStamp;
-                });
+            function updateFromNativeInput() {
+                var activeRange = getActiveRange(topElement);
+                if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+                    currentSelection.select(activeRange);
+                    if (currentSelection.focusNode.widget !== activeWidget) {
+                        triggerWidgetFocusout();
+                    }
+                    var timeStamp = +new Date();
+                    setTimeout(function () {
+                        undoable.snapshot(timeStamp - lastInputTime < 200 ? 200 : 0);
+                        lastInputTime = timeStamp;
+                    });
+                }
             }
 
             function deleteNextContent(e) {
@@ -1200,9 +1202,9 @@
                     insertContents(currentSelection, inputText);
                     return true;
                 }
-                var focusWidget = currentSelection.focusNode.widget;
-                setTimeout(function () {
-                    triggerEvent(focusWidget, 'contentChange');
+                setImmediate(function () {
+                    updateFromNativeInput();
+                    triggerEvent(EVENT_CURRENT, 'contentChange');
                     triggerEvent(EVENT_STATIC, 'contentChange');
                 });
             }
@@ -1215,7 +1217,7 @@
                             return;
                         }
                         currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
-                        setTimeout(function () {
+                        setImmediate(function () {
                             currentSelection.focus();
                         });
                         e.preventDefault();
@@ -1239,7 +1241,7 @@
                 if (!composition) {
                     var range = getActiveRange(topElement);
                     createRange(range.startContainer, range.startOffset - e.originalEvent.data.length, range.startContainer, range.startOffset).deleteContents();
-                    updateState(false);
+                    updateFromNativeInput();
                     handleTextInput(e.originalEvent.data, true);
                 } else {
                     handleTextInput('');
@@ -1252,7 +1254,7 @@
                     return;
                 }
                 hasKeyEvent = true;
-                setTimeout(function () {
+                setImmediate(function () {
                     hasKeyEvent = false;
                 });
                 var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
@@ -1271,12 +1273,9 @@
                         }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
-                    replaceTimeout(normalizeInputEvent, function () {
+                    setImmediate(function () {
                         if (!composition && !keyDefaultPrevented) {
-                            updateState();
-                            if (currentSelection.focusNode.widget !== activeWidget) {
-                                triggerWidgetFocusout();
-                            }
+                            updateFromNativeInput();
                         }
                     });
                 } else if (e.type === 'keypress') {
@@ -1288,8 +1287,7 @@
                         e.stopImmediatePropagation();
                     }
                     if (!keyDefaultPrevented && !isModifierKey && !composition) {
-                        updateState();
-                        sparseSnapshot(e);
+                        updateFromNativeInput();
                     }
                 }
             });
@@ -1299,7 +1297,6 @@
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
-                    sparseSnapshot(e);
                 }
             });
 
@@ -1346,7 +1343,7 @@
                     // IE put the caret in the wrong position after user code
                     // need to reposition the caret
                     var selection = currentSelection.clone();
-                    setTimeout(function () {
+                    setImmediate(function () {
                         currentSelection.select(selection);
                     });
                 }
@@ -1360,7 +1357,7 @@
                 if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     // disable resize handle on image element on IE and Firefox
                     // also select the whole widget when clicking on uneditable elements
-                    setTimeout(function () {
+                    setImmediate(function () {
                         currentSelection.focus();
                     });
                     currentSelection.select(node.widget.element);
@@ -1397,7 +1394,7 @@
 
             $self.bind('focusin', function () {
                 var mousedown1 = mousedown;
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!userFocus.has(typer)) {
                         triggerEvent(EVENT_ALL, 'focusin');
                         if (!mousedown1) {
@@ -1410,7 +1407,7 @@
             });
 
             $self.bind('focusout', function () {
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!windowFocusedOut && !userFocus.has(typer)) {
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
@@ -1482,7 +1479,7 @@
             },
             focusout: function (e) {
                 var focusoutTarget = e.currentTarget;
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!containsOrEquals(focusoutTarget, e.relatedTarget) && userFocus.get(typer) === focusoutTarget && !getActiveRange(topElement)) {
                         userFocus.delete(typer);
                         $self.trigger('focusout');
@@ -1864,7 +1861,7 @@
 
     definePrototype(TyperSelection, {
         get isSingleEditable() {
-            return !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
+            return this.isCaret || !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
         },
         get focusNode() {
             var node = this.typer.getEditableNode(getCommonAncestor(this.baseCaret.element, this.extendCaret.element));
@@ -1893,7 +1890,7 @@
         },
         getEditableRanges: function () {
             var range = createRange(this);
-            if (is(this.focusNode, NODE_ANY_INLINE)) {
+            if (this.isCaret || is(this.focusNode, NODE_ANY_INLINE)) {
                 return [range];
             }
             return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
@@ -1909,18 +1906,27 @@
             return nodes;
         },
         getParagraphElements: function () {
+            if (this.isCaret) {
+                return [this.startNode.element];
+            }
             var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
             var nodes = iterateToArray(iterator, null, this.startNode);
             nodes.splice(nodes.indexOf(this.endNode) + 1);
             return $.map(nodes, mapFn('element'));
         },
         getSelectedElements: function () {
+            if (this.isCaret) {
+                return [this.startElement];
+            }
             return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET), mapFn('element'));
         },
         getSelectedText: function () {
             return this.typer.extractText(this);
         },
         getSelectedTextNodes: function () {
+            if (this.isCaret) {
+                return [];
+            }
             typerSelectionSplitText(this);
             var range = createRange(this);
             var iterator = new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT), 4, function (v) {
@@ -2360,14 +2366,16 @@
             inline: true,
             defaultOptions: false,
             disallowedElement: '*',
-            prototype: {
+            overrides: {
                 getValue: function () {
-                    return Typer.trim(this.typer.element.textContent);
+                    return Typer.trim(this.element.textContent);
                 },
                 setValue: function (value) {
-                    if (value !== Typer.trim(this.typer.element.textContent)) {
-                        this.typer.element.textContent = value;
-                        this.typer.getSelection().moveToText(this.typer.element, -0);
+                    if (value !== Typer.trim(this.element.textContent)) {
+                        this.invoke(function (tx) {
+                            tx.selection.select(this.element, 'contents');
+                            tx.insertText(value);
+                        });
                     }
                 }
             },
@@ -2379,7 +2387,6 @@
 
     Typer.preset = function (element, name, options) {
         var preset = Typer.presets[name];
-        var presetObject = Object.create(preset.prototype || {});
         var presetDefinition = {};
         options = {
             __preset__: options || {},
@@ -2397,16 +2404,14 @@
 
         var originalInit = options.init;
         options.init = function (e) {
-            presetObject.typer = e.typer;
-            e.typer.preset = presetObject;
+            $.extend(e.typer, preset.overrides);
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }
         };
         options.widgets.__preset__ = presetDefinition;
         presetDefinition.inline = true;
-        new Typer(element, options);
-        return presetObject;
+        return new Typer(element, options);
     };
 
     $.fn.typer = function (options) {
@@ -2651,8 +2656,8 @@
 
     function updateControl(ui, control) {
         var suppressStateChange;
-        if (typeof (control.requireWidget || control.requireWidgetEnabled) === 'string') {
-            control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || null;
+        if (control.requireWidget || control.requireWidgetEnabled) {
+            control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange) {
@@ -2761,7 +2766,7 @@
                 return false;
             }
             if ((control.requireWidget === true && !Object.getOwnPropertyNames(this._widgets)[0]) ||
-                (control.requireWidget && !control.widget && !this.widget)) {
+                (control.requireWidget && !control.widget)) {
                 return false;
             }
             if (control.requireChildControls === true && !control.controls[0]) {
@@ -3135,9 +3140,9 @@
         }
     }
 
-    function computePropertyValue(state, property) {
+    function computePropertyValue(elements, property) {
         var value;
-        $(state.getSelectedElements()).each(function (i, v) {
+        $(elements).each(function (i, v) {
             var my;
             if (property === 'textAlign') {
                 my = getTextAlign(v);
@@ -3254,14 +3259,15 @@
         inline: true,
         beforeStateChange: function (e) {
             var selection = e.typer.getSelection();
+            var elements = selection.getSelectedElements();
             $.extend(e.widget, {
-                bold: /bold|700/.test(computePropertyValue(selection, 'fontWeight')),
-                italic: computePropertyValue(selection, 'fontStyle') === 'italic',
-                underline: computePropertyValue(selection, 'textDecoration') === 'underline',
-                strikeThrough: computePropertyValue(selection, 'textDecoration') === 'line-through',
-                superscript: !!$(selection.getSelectedElements()).filter('sup')[0],
-                subscript: !!$(selection.getSelectedElements()).filter('sub')[0],
-                inlineClass: computePropertyValue(selection, 'inlineClass')
+                bold: /bold|700/.test(computePropertyValue(elements, 'fontWeight')),
+                italic: computePropertyValue(elements, 'fontStyle') === 'italic',
+                underline: computePropertyValue(elements, 'textDecoration') === 'underline',
+                strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
+                superscript: !!$(elements).filter('sup')[0],
+                subscript: !!$(elements).filter('sub')[0],
+                inlineClass: computePropertyValue(elements, 'inlineClass')
             });
         },
         commands: {
@@ -3293,7 +3299,7 @@
             }
             var tagName = element && element.tagName.toLowerCase();
             var tagNameWithClasses = tagName + ($(element).attr('class') || '').replace(/^(.)/, '.$1');
-            var textAlign = computePropertyValue(selection, 'textAlign');
+            var textAlign = computePropertyValue(selection.getSelectedElements(), 'textAlign');
             $.extend(e.widget, {
                 justifyLeft: textAlign === 'left',
                 justifyCenter: textAlign === 'center',
@@ -4133,10 +4139,13 @@
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
+            e.widget.widgetbars = {};
         },
         widgetInit: function (e) {
             if (Typer.ui.controls['widget:' + e.targetWidget.id]) {
-                e.targetWidget.toolbar = createToolbar(e.typer, e.widget.options, e.targetWidget);
+                if (!e.widget.widgetbars[e.targetWidget.id]) {
+                    e.widget.widgetbars[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
+                }
             }
         },
         focusin: function (e) {
@@ -4146,21 +4155,21 @@
             timeout = setTimeout(hideToolbar);
         },
         widgetFocusin: function (e) {
-            if (e.targetWidget.toolbar) {
-                showToolbar(e.targetWidget.toolbar);
+            if (e.widget.widgetbars[e.targetWidget.id]) {
+                e.widget.widgetbars[e.targetWidget.id].widget = e.targetWidget;
+                showToolbar(e.widget.widgetbars[e.targetWidget.id]);
             }
         },
         widgetFocusout: function (e) {
             showToolbar(e.widget.toolbar);
         },
         widgetDestroy: function (e) {
-            if (e.targetWidget.toolbar) {
-                e.targetWidget.toolbar.destroy();
+            if (activeToolbar && activeToolbar.typer === e.typer) {
                 showToolbar(e.widget.toolbar);
             }
         },
-        stateChange: function () {
-            if (activeToolbar) {
+        stateChange: function (e) {
+            if (activeToolbar && activeToolbar.typer === e.typer) {
                 showToolbar(activeToolbar);
             }
         }
@@ -4637,6 +4646,7 @@
         },
         textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
         textboxInit: function (ui, control) {
+            var $parent = $(control.element).parents('.typer-ui-menu');
             var editable = $('[contenteditable]', control.element)[0];
             var isInit = true;
             control.preset = Typer.preset(editable, control.preset, {
@@ -4646,6 +4656,12 @@
                 escape: function () {
                     ui.execute('ui:button-cancel');
                 },
+                focusin: function () {
+                    $parent.addClass('open');
+                },
+                focusout: function () {
+                    $parent.removeClass('open');
+                },
                 stateChange: function () {
                     if (!isInit) {
                         var value = control.preset.getValue();
@@ -4653,9 +4669,6 @@
                         $(control.element).toggleClass('has-value', !!value);
                     }
                 }
-            });
-            $(editable).bind('focusin focusout', function (e) {
-                $(control.element).parents('.typer-ui-menu').toggleClass('open', e.type === 'focusin');
             });
             isInit = false;
         },
@@ -4704,3 +4717,190 @@
     };
 
 } (jQuery, window.Typer));
+
+(function (global, undefined) {
+    "use strict";
+
+    if (global.setImmediate) {
+        return;
+    }
+
+    var nextHandle = 1; // Spec says greater than zero
+    var tasksByHandle = {};
+    var currentlyRunningATask = false;
+    var doc = global.document;
+    var registerImmediate;
+
+    function setImmediate(callback) {
+      // Callback can either be a function or a string
+      if (typeof callback !== "function") {
+        callback = new Function("" + callback);
+      }
+      // Copy function arguments
+      var args = new Array(arguments.length - 1);
+      for (var i = 0; i < args.length; i++) {
+          args[i] = arguments[i + 1];
+      }
+      // Store and register the task
+      var task = { callback: callback, args: args };
+      tasksByHandle[nextHandle] = task;
+      registerImmediate(nextHandle);
+      return nextHandle++;
+    }
+
+    function clearImmediate(handle) {
+        delete tasksByHandle[handle];
+    }
+
+    function run(task) {
+        var callback = task.callback;
+        var args = task.args;
+        switch (args.length) {
+        case 0:
+            callback();
+            break;
+        case 1:
+            callback(args[0]);
+            break;
+        case 2:
+            callback(args[0], args[1]);
+            break;
+        case 3:
+            callback(args[0], args[1], args[2]);
+            break;
+        default:
+            callback.apply(undefined, args);
+            break;
+        }
+    }
+
+    function runIfPresent(handle) {
+        // From the spec: "Wait until any invocations of this algorithm started before this one have completed."
+        // So if we're currently running a task, we'll need to delay this invocation.
+        if (currentlyRunningATask) {
+            // Delay by doing a setTimeout. setImmediate was tried instead, but in Firefox 7 it generated a
+            // "too much recursion" error.
+            setTimeout(runIfPresent, 0, handle);
+        } else {
+            var task = tasksByHandle[handle];
+            if (task) {
+                currentlyRunningATask = true;
+                try {
+                    run(task);
+                } finally {
+                    clearImmediate(handle);
+                    currentlyRunningATask = false;
+                }
+            }
+        }
+    }
+
+    function installNextTickImplementation() {
+        registerImmediate = function(handle) {
+            process.nextTick(function () { runIfPresent(handle); });
+        };
+    }
+
+    function canUsePostMessage() {
+        // The test against `importScripts` prevents this implementation from being installed inside a web worker,
+        // where `global.postMessage` means something completely different and can't be used for this purpose.
+        if (global.postMessage && !global.importScripts) {
+            var postMessageIsAsynchronous = true;
+            var oldOnMessage = global.onmessage;
+            global.onmessage = function() {
+                postMessageIsAsynchronous = false;
+            };
+            global.postMessage("", "*");
+            global.onmessage = oldOnMessage;
+            return postMessageIsAsynchronous;
+        }
+    }
+
+    function installPostMessageImplementation() {
+        // Installs an event handler on `global` for the `message` event: see
+        // * https://developer.mozilla.org/en/DOM/window.postMessage
+        // * http://www.whatwg.org/specs/web-apps/current-work/multipage/comms.html#crossDocumentMessages
+
+        var messagePrefix = "setImmediate$" + Math.random() + "$";
+        var onGlobalMessage = function(event) {
+            if (event.source === global &&
+                typeof event.data === "string" &&
+                event.data.indexOf(messagePrefix) === 0) {
+                runIfPresent(+event.data.slice(messagePrefix.length));
+            }
+        };
+
+        if (global.addEventListener) {
+            global.addEventListener("message", onGlobalMessage, false);
+        } else {
+            global.attachEvent("onmessage", onGlobalMessage);
+        }
+
+        registerImmediate = function(handle) {
+            global.postMessage(messagePrefix + handle, "*");
+        };
+    }
+
+    function installMessageChannelImplementation() {
+        var channel = new MessageChannel();
+        channel.port1.onmessage = function(event) {
+            var handle = event.data;
+            runIfPresent(handle);
+        };
+
+        registerImmediate = function(handle) {
+            channel.port2.postMessage(handle);
+        };
+    }
+
+    function installReadyStateChangeImplementation() {
+        var html = doc.documentElement;
+        registerImmediate = function(handle) {
+            // Create a <script> element; its readystatechange event will be fired asynchronously once it is inserted
+            // into the document. Do so, thus queuing up the task. Remember to clean up once it's been called.
+            var script = doc.createElement("script");
+            script.onreadystatechange = function () {
+                runIfPresent(handle);
+                script.onreadystatechange = null;
+                html.removeChild(script);
+                script = null;
+            };
+            html.appendChild(script);
+        };
+    }
+
+    function installSetTimeoutImplementation() {
+        registerImmediate = function(handle) {
+            setTimeout(runIfPresent, 0, handle);
+        };
+    }
+
+    // If supported, we should attach to the prototype of global, since that is where setTimeout et al. live.
+    var attachTo = Object.getPrototypeOf && Object.getPrototypeOf(global);
+    attachTo = attachTo && attachTo.setTimeout ? attachTo : global;
+
+    // Don't get fooled by e.g. browserify environments.
+    if ({}.toString.call(global.process) === "[object process]") {
+        // For Node.js before 0.9
+        installNextTickImplementation();
+
+    } else if (canUsePostMessage()) {
+        // For non-IE10 modern browsers
+        installPostMessageImplementation();
+
+    } else if (global.MessageChannel) {
+        // For web workers, where supported
+        installMessageChannelImplementation();
+
+    } else if (doc && "onreadystatechange" in doc.createElement("script")) {
+        // For IE 6–8
+        installReadyStateChangeImplementation();
+
+    } else {
+        // For older browsers
+        installSetTimeoutImplementation();
+    }
+
+    attachTo.setImmediate = setImmediate;
+    attachTo.clearImmediate = clearImmediate;
+}(typeof self === "undefined" ? typeof global === "undefined" ? this : global : self));

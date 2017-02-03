@@ -1,6 +1,6 @@
 {
   "name": "jquery-typer",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "devDependencies": {
     "grunt": "^1.0.1",
     "grunt-contrib-concat": "^1.0.1",
@@ -12,5 +12,8 @@
     "type": "git",
     "url": "git+https://github.com/misonou/jquery-typer.git"
   },
-  "homepage": "https://github.com/misonou/jquery-typer"
+  "homepage": "https://github.com/misonou/jquery-typer",
+  "dependencies": {
+    "setimmediate": "^1.0.5"
+  }
 }

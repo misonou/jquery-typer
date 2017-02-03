@@ -40,9 +40,9 @@
         }
     }
 
-    function computePropertyValue(state, property) {
+    function computePropertyValue(elements, property) {
         var value;
-        $(state.getSelectedElements()).each(function (i, v) {
+        $(elements).each(function (i, v) {
             var my;
             if (property === 'textAlign') {
                 my = getTextAlign(v);
@@ -159,14 +159,15 @@
         inline: true,
         beforeStateChange: function (e) {
             var selection = e.typer.getSelection();
+            var elements = selection.getSelectedElements();
             $.extend(e.widget, {
-                bold: /bold|700/.test(computePropertyValue(selection, 'fontWeight')),
-                italic: computePropertyValue(selection, 'fontStyle') === 'italic',
-                underline: computePropertyValue(selection, 'textDecoration') === 'underline',
-                strikeThrough: computePropertyValue(selection, 'textDecoration') === 'line-through',
-                superscript: !!$(selection.getSelectedElements()).filter('sup')[0],
-                subscript: !!$(selection.getSelectedElements()).filter('sub')[0],
-                inlineClass: computePropertyValue(selection, 'inlineClass')
+                bold: /bold|700/.test(computePropertyValue(elements, 'fontWeight')),
+                italic: computePropertyValue(elements, 'fontStyle') === 'italic',
+                underline: computePropertyValue(elements, 'textDecoration') === 'underline',
+                strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
+                superscript: !!$(elements).filter('sup')[0],
+                subscript: !!$(elements).filter('sub')[0],
+                inlineClass: computePropertyValue(elements, 'inlineClass')
             });
         },
         commands: {
@@ -198,7 +199,7 @@
             }
             var tagName = element && element.tagName.toLowerCase();
             var tagNameWithClasses = tagName + ($(element).attr('class') || '').replace(/^(.)/, '.$1');
-            var textAlign = computePropertyValue(selection, 'textAlign');
+            var textAlign = computePropertyValue(selection.getSelectedElements(), 'textAlign');
             $.extend(e.widget, {
                 justifyLeft: textAlign === 'left',
                 justifyCenter: textAlign === 'center',

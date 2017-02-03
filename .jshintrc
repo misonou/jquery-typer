@@ -3,5 +3,9 @@
     "browser": true,
     "jquery": true,
     "loopfunc": true,
-    "multistr": true
+    "multistr": true,
+    "globals": {
+        "setImmediate": true,
+        "clearImmediate": true
+    }
 }

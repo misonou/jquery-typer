@@ -1,3 +1,4 @@
+// jshint ignore: start
 module.exports = function (grunt) {
 
     // Project configuration.
@@ -8,7 +9,7 @@ module.exports = function (grunt) {
                 process: true,
             },
             build: {
-                src: ['src/license.js', 'src/{core,presets,ui}.js', 'src/{themes,extensions}/*'],
+                src: ['src/license.js', 'src/{core,presets,ui}.js', 'src/{themes,extensions}/*', 'node_modules/setimmediate/setimmediate.js'],
                 dest: 'dist/jquery.typer.js'
             }
         },

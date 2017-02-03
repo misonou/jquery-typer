@@ -60,6 +60,7 @@
         },
         textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
         textboxInit: function (ui, control) {
+            var $parent = $(control.element).parents('.typer-ui-menu');
             var editable = $('[contenteditable]', control.element)[0];
             var isInit = true;
             control.preset = Typer.preset(editable, control.preset, {
@@ -69,6 +70,12 @@
                 escape: function () {
                     ui.execute('ui:button-cancel');
                 },
+                focusin: function () {
+                    $parent.addClass('open');
+                },
+                focusout: function () {
+                    $parent.removeClass('open');
+                },
                 stateChange: function () {
                     if (!isInit) {
                         var value = control.preset.getValue();
@@ -76,9 +83,6 @@
                         $(control.element).toggleClass('has-value', !!value);
                     }
                 }
-            });
-            $(editable).bind('focusin focusout', function (e) {
-                $(control.element).parents('.typer-ui-menu').toggleClass('open', e.type === 'focusin');
             });
             isInit = false;
         },

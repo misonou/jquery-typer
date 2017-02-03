@@ -101,11 +101,6 @@
         };
     }
 
-    function replaceTimeout(source, fn, milliseconds) {
-        clearTimeout(replaceTimeout[source.name]);
-        replaceTimeout[source.name] = fn && setTimeout(fn, milliseconds);
-    }
-
     function defineProperty(obj, name, value, enumerable) {
         Object.defineProperty(obj, name, {
             enumerable: enumerable !== false,
@@ -377,6 +372,9 @@
             try {
                 while (comparePosition(element, range.commonAncestorContainer, true)) {
                     var target = $(range.commonAncestorContainer).parentsUntil(getCommonAncestor(element, range.commonAncestorContainer)).slice(-1)[0] || range.commonAncestorContainer;
+                    if (target === elm[elm.length - 1]) {
+                        return null;
+                    }
                     target.style.pointerEvents = 'none';
                     elm[elm.length] = target;
                     range = caretRangeFromPoint_.call(document, x, y);
@@ -453,7 +451,7 @@
             // IE fires textinput event on the parent element when the text node's value is modified
             // even if modification is done through JavaScript rather than user action
             codeUpdate.suppressTextEvent = true;
-            setTimeout(function () {
+            setImmediate(function () {
                 codeUpdate.suppressTextEvent = false;
             });
         });
@@ -469,7 +467,7 @@
                 case EVENT_HANDLER:
                     return currentSelection.getWidgets().reverse().concat(widgets);
                 case EVENT_CURRENT:
-                    return currentSelection.getWidgets().slice(-1);
+                    return currentSelection.focusNode.widget;
             }
         }
 
@@ -638,7 +636,8 @@
                 if (observer) {
                     handleMutations(observer.takeRecords());
                 } else {
-                    replaceTimeout(ensureState, function () {
+                    clearImmediate(ensureState.handle);
+                    ensureState.handle = setImmediate(function () {
                         dirtyElements.push(null);
                     });
                 }
@@ -687,22 +686,6 @@
             var caret = new TyperCaret(typer);
             caret.moveToText(node, offset);
             return caret.getRange();
-        }
-
-        function updateState(fireEvent) {
-            var activeRange = getActiveRange(topElement);
-            if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
-                try {
-                    typer.snapshot = $.noop;
-                    currentSelection.select(activeRange);
-                } finally {
-                    typer.snapshot = undoable.snapshot;
-                }
-            }
-            if (fireEvent !== false) {
-                triggerEvent(EVENT_ALL, 'beforeStateChange');
-                triggerEvent(EVENT_ALL, 'stateChange');
-            }
         }
 
         function checkEditable(range) {
@@ -1043,9 +1026,17 @@
             var lastValue = topElement.outerHTML;
             var snapshots = [lastValue];
             var currentIndex = 0;
+            var snapshotTimeout;
+
+            function triggerStateChange() {
+                setTimeout(function () {
+                    triggerEvent(EVENT_ALL, 'beforeStateChange');
+                    triggerEvent(EVENT_ALL, 'stateChange');
+                });
+            }
 
             function checkActualChange() {
-                var value = trim(topElement.innerHTML.replace(/\s+x-typer-(start|end)(="\d+")?|(?!>)\u200b(?!<\/)/g, ''));
+                var value = trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
                 if (value !== lastValue) {
                     lastValue = value;
                     return true;
@@ -1071,7 +1062,7 @@
             }
 
             function takeSnapshot() {
-                updateState();
+                triggerStateChange();
                 setMarker(currentSelection.startTextNode || currentSelection.startElement, currentSelection.startOffset, true);
                 if (!currentSelection.isCaret) {
                     setMarker(currentSelection.endTextNode || currentSelection.endElement, currentSelection.endOffset, false);
@@ -1090,11 +1081,14 @@
                 var content = $.parseHTML(value)[0];
                 $self.empty().append(content.childNodes).attr(attrs(content));
                 currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
-                updateState();
+                triggerStateChange();
                 checkActualChange();
             }
 
             $.extend(undoable, {
+                getValue: function () {
+                    return lastValue;
+                },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
                 },
@@ -1112,15 +1106,15 @@
                     }
                 },
                 snapshot: function (delay) {
-                    replaceTimeout('snapshot');
+                    clearTimeout(snapshotTimeout);
                     if (+delay === delay || !currentSelection) {
-                        replaceTimeout('snapshot', takeSnapshot, delay);
+                        snapshotTimeout = setTimeout(takeSnapshot, delay);
                     } else if (delay === true || !codeUpdate.executing) {
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     } else {
                         codeUpdate.needSnapshot = true;
-                        updateState(false);
+                        triggerStateChange();
                     }
                 }
             });
@@ -1148,11 +1142,19 @@
                 }
             }
 
-            function sparseSnapshot(e) {
-                setTimeout(function () {
-                    undoable.snapshot(e.timeStamp - lastInputTime < 200 ? 200 : 0);
-                    lastInputTime = e.timeStamp;
-                });
+            function updateFromNativeInput() {
+                var activeRange = getActiveRange(topElement);
+                if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+                    currentSelection.select(activeRange);
+                    if (currentSelection.focusNode.widget !== activeWidget) {
+                        triggerWidgetFocusout();
+                    }
+                    var timeStamp = +new Date();
+                    setTimeout(function () {
+                        undoable.snapshot(timeStamp - lastInputTime < 200 ? 200 : 0);
+                        lastInputTime = timeStamp;
+                    });
+                }
             }
 
             function deleteNextContent(e) {
@@ -1174,9 +1176,9 @@
                     insertContents(currentSelection, inputText);
                     return true;
                 }
-                var focusWidget = currentSelection.focusNode.widget;
-                setTimeout(function () {
-                    triggerEvent(focusWidget, 'contentChange');
+                setImmediate(function () {
+                    updateFromNativeInput();
+                    triggerEvent(EVENT_CURRENT, 'contentChange');
                     triggerEvent(EVENT_STATIC, 'contentChange');
                 });
             }
@@ -1189,7 +1191,7 @@
                             return;
                         }
                         currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
-                        setTimeout(function () {
+                        setImmediate(function () {
                             currentSelection.focus();
                         });
                         e.preventDefault();
@@ -1213,7 +1215,7 @@
                 if (!composition) {
                     var range = getActiveRange(topElement);
                     createRange(range.startContainer, range.startOffset - e.originalEvent.data.length, range.startContainer, range.startOffset).deleteContents();
-                    updateState(false);
+                    updateFromNativeInput();
                     handleTextInput(e.originalEvent.data, true);
                 } else {
                     handleTextInput('');
@@ -1226,7 +1228,7 @@
                     return;
                 }
                 hasKeyEvent = true;
-                setTimeout(function () {
+                setImmediate(function () {
                     hasKeyEvent = false;
                 });
                 var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
@@ -1245,12 +1247,9 @@
                         }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
-                    replaceTimeout(normalizeInputEvent, function () {
+                    setImmediate(function () {
                         if (!composition && !keyDefaultPrevented) {
-                            updateState();
-                            if (currentSelection.focusNode.widget !== activeWidget) {
-                                triggerWidgetFocusout();
-                            }
+                            updateFromNativeInput();
                         }
                     });
                 } else if (e.type === 'keypress') {
@@ -1262,8 +1261,7 @@
                         e.stopImmediatePropagation();
                     }
                     if (!keyDefaultPrevented && !isModifierKey && !composition) {
-                        updateState();
-                        sparseSnapshot(e);
+                        updateFromNativeInput();
                     }
                 }
             });
@@ -1273,7 +1271,6 @@
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
-                    sparseSnapshot(e);
                 }
             });
 
@@ -1320,7 +1317,7 @@
                     // IE put the caret in the wrong position after user code
                     // need to reposition the caret
                     var selection = currentSelection.clone();
-                    setTimeout(function () {
+                    setImmediate(function () {
                         currentSelection.select(selection);
                     });
                 }
@@ -1334,7 +1331,7 @@
                 if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     // disable resize handle on image element on IE and Firefox
                     // also select the whole widget when clicking on uneditable elements
-                    setTimeout(function () {
+                    setImmediate(function () {
                         currentSelection.focus();
                     });
                     currentSelection.select(node.widget.element);
@@ -1371,7 +1368,7 @@
 
             $self.bind('focusin', function () {
                 var mousedown1 = mousedown;
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!userFocus.has(typer)) {
                         triggerEvent(EVENT_ALL, 'focusin');
                         if (!mousedown1) {
@@ -1384,7 +1381,7 @@
             });
 
             $self.bind('focusout', function () {
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!windowFocusedOut && !userFocus.has(typer)) {
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
@@ -1456,7 +1453,7 @@
             },
             focusout: function (e) {
                 var focusoutTarget = e.currentTarget;
-                setTimeout(function () {
+                setImmediate(function () {
                     if (!containsOrEquals(focusoutTarget, e.relatedTarget) && userFocus.get(typer) === focusoutTarget && !getActiveRange(topElement)) {
                         userFocus.delete(typer);
                         $self.trigger('focusout');
@@ -1838,7 +1835,7 @@
 
     definePrototype(TyperSelection, {
         get isSingleEditable() {
-            return !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
+            return this.isCaret || !typerSelectionDeepIterator(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
         },
         get focusNode() {
             var node = this.typer.getEditableNode(getCommonAncestor(this.baseCaret.element, this.extendCaret.element));
@@ -1867,7 +1864,7 @@
         },
         getEditableRanges: function () {
             var range = createRange(this);
-            if (is(this.focusNode, NODE_ANY_INLINE)) {
+            if (this.isCaret || is(this.focusNode, NODE_ANY_INLINE)) {
                 return [range];
             }
             return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
@@ -1883,18 +1880,27 @@
             return nodes;
         },
         getParagraphElements: function () {
+            if (this.isCaret) {
+                return [this.startNode.element];
+            }
             var iterator = new TyperTreeWalker(this.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE);
             var nodes = iterateToArray(iterator, null, this.startNode);
             nodes.splice(nodes.indexOf(this.endNode) + 1);
             return $.map(nodes, mapFn('element'));
         },
         getSelectedElements: function () {
+            if (this.isCaret) {
+                return [this.startElement];
+            }
             return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET), mapFn('element'));
         },
         getSelectedText: function () {
             return this.typer.extractText(this);
         },
         getSelectedTextNodes: function () {
+            if (this.isCaret) {
+                return [];
+            }
             typerSelectionSplitText(this);
             var range = createRange(this);
             var iterator = new TyperDOMNodeIterator(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT), 4, function (v) {

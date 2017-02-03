@@ -1,3 +1,14 @@
+## 0.9.3 / 2017-02-04
+
+- Add Typer events for mouse clicks
+- Improved handling of subtree modification that affect caret anchors
+- Use `setImmediate` from [https://github.com/yuzujs/setImmediate]
+- Fix unindented effects when normalization
+- Fix issues in IE polyfill of caretRangeFromPoint
+- Fix IE quirks on caret position
+- Fix events fired even after widget is destroyed
+- Various improvements and bug fixing on extensions
+
 ## 0.9.2 / 2017-01-26
 
 - (Breaking) Parameter change for `Typer.createRange`

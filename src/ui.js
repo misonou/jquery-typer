@@ -232,8 +232,8 @@
 
     function updateControl(ui, control) {
         var suppressStateChange;
-        if (typeof (control.requireWidget || control.requireWidgetEnabled) === 'string') {
-            control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || null;
+        if (control.requireWidget || control.requireWidgetEnabled) {
+            control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange) {
@@ -342,7 +342,7 @@
                 return false;
             }
             if ((control.requireWidget === true && !Object.getOwnPropertyNames(this._widgets)[0]) ||
-                (control.requireWidget && !control.widget && !this.widget)) {
+                (control.requireWidget && !control.widget)) {
                 return false;
             }
             if (control.requireChildControls === true && !control.controls[0]) {

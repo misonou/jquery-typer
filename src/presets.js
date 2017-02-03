@@ -6,14 +6,16 @@
             inline: true,
             defaultOptions: false,
             disallowedElement: '*',
-            prototype: {
+            overrides: {
                 getValue: function () {
-                    return Typer.trim(this.typer.element.textContent);
+                    return Typer.trim(this.element.textContent);
                 },
                 setValue: function (value) {
-                    if (value !== Typer.trim(this.typer.element.textContent)) {
-                        this.typer.element.textContent = value;
-                        this.typer.getSelection().moveToText(this.typer.element, -0);
+                    if (value !== Typer.trim(this.element.textContent)) {
+                        this.invoke(function (tx) {
+                            tx.selection.select(this.element, 'contents');
+                            tx.insertText(value);
+                        });
                     }
                 }
             },
@@ -25,7 +27,6 @@
 
     Typer.preset = function (element, name, options) {
         var preset = Typer.presets[name];
-        var presetObject = Object.create(preset.prototype || {});
         var presetDefinition = {};
         options = {
             __preset__: options || {},
@@ -43,16 +44,14 @@
 
         var originalInit = options.init;
         options.init = function (e) {
-            presetObject.typer = e.typer;
-            e.typer.preset = presetObject;
+            $.extend(e.typer, preset.overrides);
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }
         };
         options.widgets.__preset__ = presetDefinition;
         presetDefinition.inline = true;
-        new Typer(element, options);
-        return presetObject;
+        return new Typer(element, options);
     };
 
     $.fn.typer = function (options) {
