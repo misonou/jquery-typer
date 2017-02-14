@@ -8,7 +8,7 @@
             disallowedElement: '*',
             overrides: {
                 getValue: function () {
-                    return Typer.trim(this.element.textContent);
+                    return this.extractText();
                 },
                 setValue: function (value) {
                     if (value !== this.getValue()) {

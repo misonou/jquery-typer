@@ -320,41 +320,44 @@
             requireTyper: true
         }),
         'formatting:paragraph': Typer.ui.dropdown({
+            requireWidget: 'formatting',
             requireCommand: 'formatting',
             hiddenWhenDisabled: true,
             controls: function (toolbar) {
                 return $.map(Object.keys(toolbar.options.formattings || {}), function (v) {
                     return Typer.ui.button({
-                        requireWidget: 'formatting',
-                        execute: 'formatting',
                         value: v,
-                        label: toolbar.options.formattings[v],
-                        active: function (toolbar, self) {
-                            return self.widget.formattingWithClassName === v || self.widget.formatting === v;
-                        }
+                        label: toolbar.options.formattings[v]
                     });
                 });
             },
+            execute: 'formatting',
             enabled: function (toolbar) {
                 return isEnabled(toolbar, false);
+            },
+            stateChange: function (toolbar, self) {
+                for (var i = 0, length = self.controls.length; i < length; i++) {
+                    if (self.controls[i].value === self.widget.formattingWithClassName) {
+                        self.value = self.widget.formattingWithClassName;
+                        return;
+                    }
+                }
+                self.value = self.widget.formatting;
             }
         }),
         'formatting:inlineStyle': Typer.ui.dropdown({
+            requireWidget: 'inlineStyle',
             requireCommand: 'applyClass',
             hiddenWhenDisabled: true,
             controls: function (toolbar) {
                 return $.map(Object.keys(toolbar.options.inlineClass || {}), function (v) {
                     return Typer.ui.button({
-                        requireWidget: 'inlineStyle',
-                        execute: 'applyClass',
                         value: v,
-                        label: toolbar.options.inlineClass[v],
-                        active: function (toolbar, self) {
-                            return self.widget.inlineClass === v;
-                        }
+                        label: toolbar.options.inlineClass[v]
                     });
                 });
             },
+            execute: 'applyClass',
             enabled: function (toolbar) {
                 return isEnabled(toolbar, true);
             }

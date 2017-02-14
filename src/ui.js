@@ -11,6 +11,8 @@
     var definedShortcuts = {};
     var bindTransforms = {};
     var expandCache = {};
+    var executionContext = [];
+    var currentDialog;
 
     function define(name, base, ctor) {
         /* jshint -W054 */
@@ -30,6 +32,17 @@
                 delete this._super;
             }
         });
+        if (isFunction(base)) {
+            fn.prototype = new base();
+        } else if (base) {
+            fn.prototype = base;
+            Object.defineProperty(base, 'constructor', {
+                enumerable: false,
+                configurable: true,
+                writable: true,
+                value: fn
+            });
+        }
         fn.prototype = isFunction(base) ? new base() : $.extend(fn.prototype, base);
         fn.extend = function (ctor) {
             return define(null, fn, ctor);
@@ -133,6 +146,7 @@
         var defaultOrder = {};
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
+            inst.ui = ui;
             inst.parent = control;
             inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
             if (inst.label === undefined) {
@@ -207,8 +221,9 @@
 
         function executeFromEvent(e) {
             if ($(e.target).is(':checkbox')) {
-                setTimeout(function () {
+                setImmediate(function () {
                     ui.setValue(control, !!e.target.checked);
+                    ui.execute(control);
                 });
             } else {
                 ui.execute(control);
@@ -324,11 +339,11 @@
         destroy: function () {
             foreachControl(this, triggerEvent, 'destroy');
         },
-        trigger: function (control, event) {
+        trigger: function (control, event, optArg) {
             if (typeof control === 'string') {
                 control = this.all[control] || {};
             }
-            triggerEvent(this, control, event);
+            triggerEvent(this, control, event, optArg);
         },
         enabled: function (control) {
             if (typeof control === 'string') {
@@ -391,8 +406,13 @@
                 return;
             }
             control.value = value;
-            if (control.executeOnSetValue && self.enabled(control)) {
-                executeControl(self, control);
+            updateControl(self, control);
+        },
+        getExecutingControl: function () {
+            for (var i = 0, length = executionContext.length; i < length; i++) {
+                if (executionContext[i].ui === this) {
+                    return executionContext[i];
+                }
             }
         },
         execute: function (control) {
@@ -402,18 +422,23 @@
             } else if (!control) {
                 control = self.controls[0];
             }
-            if (self.enabled(control)) {
+            if (executionContext.indexOf(control) < 0 && self.enabled(control)) {
+                executionContext.unshift(control);
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
-                        if (value !== undefined) {
-                            self.setValue(control, value);
-                        }
+                        self.setValue(control, value);
                         executeControl(self, control);
                     });
+                    promise.always(function () {
+                        executionContext.pop(control);
+                    });
                     return promise;
-                } else {
+                }
+                try {
                     executeControl(self, control);
+                } finally {
+                    executionContext.pop(control);
                 }
             }
         },
@@ -507,12 +532,26 @@
             });
         },
         setZIndex: function (element, over) {
+            var maxZIndex = -1;
+            var iterator = document.createTreeWalker(document.body, 1, function (v) {
+                if (Typer.comparePosition(v, over, true)) {
+                    return 2;
+                }
+                if (/absolute|fixed|relative/.test($(v).css('position')) && $(v).css('z-index') !== 'auto') {
+                    maxZIndex = Math.max(maxZIndex, parseInt($(v).css('z-index')));
+                    return 2;
+                }
+            }, false);
+            Typer.iterate(iterator);
+            element.style.zIndex = maxZIndex + 1;
             if ($(element).css('position') === 'static') {
                 element.style.position = 'relative';
             }
-            element.style.zIndex = (+$(over).parentsUntil(element.parentNode).filter(function (i, v) {
-                return /absolute|fixed|relative/.test($(v).css('position')) && $(v).css('z-index') !== 'auto';
-            }).slice(-1).css('z-index') || 0) + 1;
+        },
+        focus: function (element) {
+            if (!$.contains(element, document.activeElement)) {
+                $(':input, [contenteditable], a[href], area[href], iframe', element).not(':disabled, :hidden').andSelf().eq(0).focus();
+            }
         }
     });
 
@@ -524,21 +563,39 @@
         button: define('TyperUIButton', {
             type: 'button'
         }),
+        file: define('TyperUIFile', {
+            type: 'file'
+        }),
         dropdown: define('TyperUIDropdown', {
             type: 'dropdown',
             requireChildControls: true,
-            stateChange: function (ui, self) {
+            get value() {
+                return this.selectedValue;
+            },
+            set value(value) {
+                var self = this;
                 $.each(self.controls, function (i, v) {
-                    if (ui.active(v)) {
-                        $('select', self.element).prop('selectedIndex', i);
+                    if (v.value === value) {
                         self.selectedIndex = i;
-                        self.selectedValue = v.label || v.name;
+                        self.selectedText = v.label || v.name;
+                        self.selectedValue = v.value;
                         return false;
                     }
                 });
+                $.each(self.controls, function (i, v) {
+                    updateControl(self.ui, v);
+                });
             },
-            execute: function (ui, self) {
-                ui.execute(self.controls[self.selectedIndex]);
+            init: function (ui, self) {
+                $.each(self.controls, function (i, v) {
+                    v.active = function () {
+                        return self.selectedIndex === i;
+                    };
+                    v.execute = function () {
+                        self.value = v.value;
+                        ui.execute(self);
+                    };
+                });
             }
         }),
         group: define('TyperUIGroup', {
@@ -559,43 +616,69 @@
         }),
         textbox: define('TyperUITextbox', {
             type: 'textbox',
-            preset: 'textbox',
-            executeOnSetValue: true,
+            preset: 'textbox'
         }),
         checkbox: define('TyperUICheckbox', {
-            type: 'checkbox',
-            executeOnSetValue: true
+            type: 'checkbox'
         }),
         dialog: define('TyperUIDialog', {
             type: 'dialog',
+            keyboardResolve: false,
+            keyboardReject: false,
             resolve: 'ui:button-ok',
             reject: 'ui:button-cancel'
         }, function (options) {
             $.extend(this, options);
             this.dialog = function (ui, self) {
                 var deferred = $.Deferred();
+                var previousDialog = currentDialog;
+                var previousActiveElement = document.activeElement;
+                var execute = function (value) {
+                    var promise = $.when(isFunction(self.submit) && self.submit(ui, self));
+                    if (promise.state() === 'pending') {
+                        ui.trigger(self, 'submit');
+                        promise.fail(function (err) {
+                            ui.trigger(self, 'error', err);
+                        });
+                    }
+                    promise.done(function () {
+                        deferred.resolve(value);
+                    });
+                };
+                var defaultResolve = function () {
+                    execute(ui.getValue(self.resolveValue || self));
+                };
+                var defaultReject = function () {
+                    deferred.reject();
+                };
                 $.each(ui.resolve(self.resolve), function (i, v) {
-                    v.execute = function () {
-                        deferred.resolve(ui.getValue(self.resolveValue || self));
-                    };
+                    v.execute = defaultResolve;
                 });
                 $.each(ui.resolve(self.reject), function (i, v) {
-                    v.execute = function () {
-                        deferred.reject();
-                    };
+                    v.execute = defaultReject;
                 });
                 if (isFunction(self.setup)) {
-                    self.setup(ui, self, deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+                    self.setup(ui, self, execute, defaultReject);
                 }
                 ui.update();
                 ui.trigger(self, 'open');
+                setImmediate(Typer.ui.focus, self.element);
                 deferred.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
+                    currentDialog = previousDialog;
+                    if (previousActiveElement) {
+                        previousActiveElement.focus();
+                    }
                 });
                 if (ui.parentUI) {
                     Typer.ui.setZIndex(ui.element, ui.parentUI.element);
                 }
+                currentDialog = {
+                    element: self.element,
+                    keyboardResolve: self.keyboardResolve && defaultResolve,
+                    keyboardReject: self.keyboardReject && defaultReject
+                };
                 return deferred.promise();
             };
         })
@@ -615,20 +698,26 @@
             label: '',
             executeOnSetValue: false
         }),
-        'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
+        'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
         'ui:prompt': Typer.ui.dialog({
+            keyboardResolve: true,
+            keyboardReject: true,
             controls: 'ui:prompt-message ui:prompt-input ui:prompt-buttonset',
             resolveValue: 'ui:prompt-input',
             setup: function (ui, self) {
                 ui.setValue('ui:prompt-input', self.value);
             }
         }),
-        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel'),
+        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
         'ui:confirm': Typer.ui.dialog({
+            keyboardResolve: true,
+            keyboardReject: true,
             controls: 'ui:prompt-message ui:confirm-buttonset'
         }),
-        'ui:alert-buttonset': Typer.ui.group('ui:button-ok'),
+        'ui:alert-buttonset': Typer.ui.group('ui:button-ok', { type: 'buttonset' }),
         'ui:alert': Typer.ui.dialog({
+            keyboardResolve: true,
+            keyboardReject: true,
             controls: 'ui:prompt-message ui:alert-buttonset'
         }),
     });
@@ -671,5 +760,16 @@
             return v.charAt(0).toUpperCase() + v.slice(1) + '+';
         });
     };
+
+    $(window).keydown(function (e) {
+        if (currentDialog && (e.which === 13 || e.which === 27)) {
+            (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
+        }
+    });
+    $(window).focusout(function (e) {
+        if (currentDialog && !e.relatedTarget && $.contains(currentDialog.element, e.target)) {
+            Typer.ui.focus(currentDialog.element);
+        }
+    });
 
 } (jQuery, window.Typer));

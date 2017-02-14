@@ -126,7 +126,7 @@
         if (options.container) {
             $elm.appendTo(options.container);
         } else {
-            $elm.addClass('typer-ui-toolbar-floating');
+            $elm.addClass('typer-ui-float');
             $elm.mousedown(function (e) {
                 var pos = $elm.position();
                 if (e.target === toolbar.element) {
@@ -279,7 +279,7 @@
         'selection:selectAll': Typer.ui.button({
             shortcut: 'ctrlA',
             execute: function (toolbar) {
-                toolbar.typer.getSelection().select(toolbar.typer.element, true);
+                toolbar.typer.getSelection().select(toolbar.typer.element, 'contents');
                 toolbar.typer.getSelection().focus();
             }
         }),

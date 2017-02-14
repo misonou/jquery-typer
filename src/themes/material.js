@@ -2,8 +2,8 @@
     'use strict';
 
     function setMenuPosition(thisMenu) {
-        var callout = $('.typer-ui-menupane', thisMenu)[0];
-        var nested = !!$(thisMenu).parents('.typer-ui-menupane')[0];
+        var callout = $('.typer-ui-float', thisMenu)[0];
+        var nested = !!$(thisMenu).parents('.typer-ui-float')[0];
         var rect = callout.getBoundingClientRect();
         if (rect.bottom > $(window).height()) {
             $(callout).css('bottom', nested ? '0' : '100%');
@@ -17,6 +17,22 @@
         }
     }
 
+    function pinDialogPosition(dialog) {
+        var rect = dialog.parentControl.element.getBoundingClientRect();
+
+        function updatePosition() {
+            var w = $(dialog.element).outerWidth();
+            var h = $(dialog.element).outerHeight();
+            $(dialog.element).addClass('pinned pinned-top').css({
+                top: rect.bottom + h / 2,
+                left: Math.max(10, rect.left + rect.width / 2 - w / 2) + w / 2
+            });
+        }
+
+        $(dialog.element).bind('transitionend otransitionend webkitTransitionEnd', updatePosition);
+        updatePosition();
+    }
+
     Typer.ui.themes.material = {
         resources: [
             'https://fonts.googleapis.com/css?family=Roboto:400,500,700',
@@ -28,80 +44,107 @@
         controlHiddenClass: 'hidden',
         labelText: function (ui, control) {
             var hasIcon = !!Typer.ui.getIcon(control, 'material');
-            return hasIcon && ui.type === 'toolbar' && (control.type === 'textbox' || (control.parent || '').type !== 'callout') ? '' : '<span x:bind="(_:label)"></span>';
+            return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
         },
         labelIcon: function (ui, control) {
             var icon = Typer.ui.getIcon(control, 'material');
-            if ((control.parent || '').type === 'callout' || ui.type === 'contextmenu') {
+            if ((control.parent || ui).type === 'dropdown') {
+                return '';
+            }
+            if ((control.parent || ui).type === 'callout' || ui.type === 'contextmenu') {
                 return control.type === 'checkbox' ? '' : icon.replace(/.*/, '<i class="material-icons">$&</i>');
             }
             return icon.replace(/.+/, '<i class="material-icons">$&</i>');
         },
-        toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-contextmenu typer-ui-menupane"><br x:t="children"/></div>',
+        buttonset: '<div class="typer-ui-buttonset"><br x:t="children"/></div>',
+        buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
+        menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
+        toolbar: '<div class="typer-ui-toolbar"><div class="typer-ui-buttonset"><br x:t="children"/></div></div>',
+        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
-            $(control.element).toggleClass('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
-            $(control.element).toggleClass('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
+            setImmediate(function () {
+                $(control.element).toggleClass('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
+                $(control.element).toggleClass('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
+            });
         },
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
-        button: '<button x:bind="(title:label)"><br x:t="label"/><span class="typer-ui-menu-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-menu-annotation" x:bind="(_:annotation)"></span></button>',
+        button: '<button x:bind="(title:label)"><br x:t="label"/><span class="typer-ui-label-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-label-annotation" x:bind="(_:annotation)"></span></button>',
         buttonExecuteOn: 'click',
-        callout: '<div class="typer-ui-menu"><button x:bind="(title:label)"><br x:t="label"/></button><div class="typer-ui-menupane"><br x:t="children"></div></div>',
+        file: '<label class="has-clickeffect" x:bind="(title:label)"><input type="file"/><br x:t="label"/></label>',
+        fileInit: function (ui, control) {
+            $(control.element).find(':file').change(function (e) {
+                control.value = e.target.dataTransfer;
+                ui.execute(control);
+                setImmediate(function () {
+                    var form = document.createElement('form');
+                    form.appendChild(e.target);
+                    form.reset();
+                    $(e.target).prependTo(control.element);
+                });
+            });
+        },
+        callout: '<div class="typer-ui-menu"><button x:bind="(title:label)"><br x:t="label"/></button><br x:t="menupane"/></div>',
         calloutExecuteOn: {
             on: 'click',
             of: '>button'
         },
-        dropdown: '<div class="typer-ui-dropdown typer-ui-menu"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedValue)"></span></span></button><div class="typer-ui-menupane"><br x:t="children(t:button)"></div></div>',
+        dropdown: '<div class="typer-ui-dropdown typer-ui-menu"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span></button><br x:t="menupane"/></div>',
         checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><input type="checkbox" x:bind="(checked:value)"/><br x:t="label"/></label>',
         checkboxExecuteOn: {
             on: 'change',
             of: ':checkbox'
         },
-        textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div contenteditable spellcheck="false" x:bind="(data-placeholder:label)"></div></label>',
+        textbox: '<label x:bind="(title:label)"><div class="typer-ui-textbox"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div></div></div></label>',
         textboxInit: function (ui, control) {
             var $parent = $(control.element).parents('.typer-ui-menu');
             var editable = $('[contenteditable]', control.element)[0];
-            var isInit = true;
-            control.preset = Typer.preset(editable, control.preset, {
-                enter: function () {
-                    ui.execute('ui:button-ok');
-                },
-                escape: function () {
-                    ui.execute('ui:button-cancel');
-                },
+            control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
                 focusin: function () {
                     $parent.addClass('open');
                 },
                 focusout: function () {
                     $parent.removeClass('open');
                 },
-                stateChange: function () {
-                    if (!isInit) {
-                        var value = control.preset.getValue();
-                        ui.setValue(control, value);
-                        $(control.element).toggleClass('has-value', !!value);
+                contentChange: function (e) {
+                    if (e.typer.focused()) {
+                        control.value = control.preset.getValue();
+                        ui.execute(control);
                     }
                 }
-            });
-            isInit = false;
+            }));
         },
         textboxStateChange: function (toolbar, control) {
-            $(control.element).toggleClass('has-value', !!control.value);
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog"><br x:t="children"></div>',
+        dialog: '<div class="typer-ui-dialog"><div class="typer-ui-dialog-pin"></div><br x:t="children"></div>',
         dialogOpen: function (dialog, control) {
-            $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.5) url(data:image/gif;,);">').prependTo(dialog.element);
+            $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:url(data:image/gif;,);">').prependTo(dialog.element).click(function () {
+                $(control.element).addClass('pop');
+            });
             $(dialog.element).appendTo(document.body);
-            setTimeout(function () {
+            $(control.element).bind('animationend oanimationend webkitAnimationEnd', function () {
+                $(control.element).removeClass('pop');
+            });
+            var resolveButton = dialog.resolve(control.resolve)[0];
+            if (resolveButton) {
+                $(resolveButton.element).addClass('pin-active');
+            }
+            control.parentControl = dialog.parentUI && dialog.parentUI.getExecutingControl();
+            setImmediate(function () {
                 $(control.element).addClass('open');
-                $('[contenteditable]:first', dialog.element).focus();
+                if (control.pinToParent && control.parentControl) {
+                    pinDialogPosition(control);
+                    $(control.parentControl.element).addClass('pin-active');
+                }
             });
         },
         dialogClose: function (dialog, control) {
             $(control.element).addClass('closing').one('transitionend otransitionend webkitTransitionEnd', function () {
                 $(dialog.element).remove();
+                if (control.parentControl) {
+                    $(control.parentControl.element).removeClass('pin-active');
+                }
             });
         },
         init: function (ui) {
@@ -113,19 +156,43 @@
                     $('.typer-ui-menu.open', ui.element).removeClass('open');
                 }
             });
-            $(ui.element).on('click', '.typer-ui-menu>:not(.typer-ui-menupane)', function (e) {
+            $(ui.element).on('click', '.typer-ui-dropdown .typer-ui-float', function (e) {
+                $(e.currentTarget).parents('.typer-ui-dropdown').removeClass('open');
+            });
+            $(ui.element).on('click', '.typer-ui-menu > button', function (e) {
                 var thisMenu = e.currentTarget.parentNode;
                 $('.typer-ui-menu.open', ui.element).not(thisMenu).removeClass('open');
-                if ($(thisMenu).find('>.typer-ui-menupane>:not(.disabled)')[0]) {
+                if ($(thisMenu).find('>.typer-ui-float>:not(.disabled)')[0]) {
                     $(thisMenu).toggleClass('open');
-                    setTimeout(function () {
+                    setImmediate(function () {
                         setMenuPosition(thisMenu);
                     });
                 }
-                e.stopPropagation();
             });
             $(ui.element).on('mouseover', '.typer-ui-menu', function (e) {
                 setMenuPosition(e.currentTarget);
+            });
+            $(ui.element).on('mousedown', 'button, .has-clickeffect', function (e) {
+                var pos = e.currentTarget.getBoundingClientRect();
+                var $overlay = $('<div class="typer-ui-clickeffect">').appendTo(e.currentTarget).css({
+                    top: e.clientY - pos.top,
+                    left: e.clientX - pos.left
+                });
+                var p1 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.left, 2);
+                var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
+                var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
+                var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
+                var scalePercent = 0.5 + 2 * Math.sqrt(Math.max.call(null, p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
+                setImmediate(function () {
+                    $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
+                });
+            });
+            $(ui.element).on('mouseup mouseleave', 'button, .has-clickeffect', function (e) {
+                var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
+                $overlay.addClass('animate-out');
+                $overlay.bind('transitionend otransitionend webkitTransitionEnd', function () {
+                    $overlay.remove();
+                });
             });
         }
     };

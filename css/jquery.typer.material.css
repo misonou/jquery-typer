@@ -38,11 +38,16 @@
     cursor: default !important;
 }
 
+.typer-ui [role="shortcut"] {
+    display: none;
+}
+
 
 /* Material Icons */
 
 .typer-ui-label {
     display: inline-block;
+    position: relative;
     vertical-align: top;
 }
 
@@ -63,12 +68,19 @@
     margin-left: 0.5em;
 }
 
-.typer-ui-label .material-icons + span:empty {
-    display: none;
+.typer-ui-label span:empty {
+    display: none !important;
 }
 
-.active > .typer-ui-label .material-icons:empty:before {
-    content: '\00e876';
+.typer-ui-label-annotation {
+    position: relative;
+    padding-left: 4em;
+    color: #aeb8c2;
+    font-weight: normal;
+}
+
+.typer-ui-label-annotation:empty {
+    display: none !important;
 }
 
 
@@ -76,11 +88,11 @@
 
 .typer-ui label,
 .typer-ui button {
-    display: inline-block;
+    display: block;
     position: relative;
     margin: 0;
     padding: 0 0.75em;
-    height: 2.67em;
+    min-height: 2.67em;
     border-style: none;
     background-color: transparent;
     background-image: none;
@@ -93,36 +105,44 @@
     text-transform: inherit;
     white-space: nowrap;
     overflow: hidden;
+    border-radius: 2px;
     box-sizing: border-box;
+    -webkit-transition: color 0.1s ease-in;
+    -moz-transition: color 0.1s ease-in;
+    -ms-transition: color 0.1s ease-in;
+    transition: color 0.1s ease-in;
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
-}
-
-.typer-ui button > * {
-    position: relative;
 }
 
 .typer-ui label.disabled,
 .typer-ui button.disabled,
 .typer-ui .disabled > button {
     background-color: transparent;
+    color: #999;
 }
 
 .typer-ui-toolbar label:hover,
-.typer-ui-toolbar label:focus,
 .typer-ui-toolbar label.active,
-.typer-ui-menupane label:hover,
-.typer-ui-menupane label:focus,
-.typer-ui-menupane label.active,
+.typer-ui-float label:hover,
+.typer-ui-float label.active,
 .typer-ui-menu:hover > button,
-.typer-ui-menu.focus > button,
 .typer-ui-menu.active > button,
+.typer-ui label.has-clickeffect:hover,
+.typer-ui label.has-clickeffect.active,
 .typer-ui button:hover,
-.typer-ui button:focus,
 .typer-ui button.active {
-    background-color: rgba(211, 211, 211, 0.4);
-    color: #212121;
+    background-color: rgba(238, 238, 238, 0.5);
+}
+
+.typer-ui-toolbar label.pin-active,
+.typer-ui-float label.pin-active,
+.typer-ui-menu.pin-active > button,
+.typer-ui label.has-clickeffectpin-.active,
+.typer-ui button.pin-active {
+    background-color: rgba(16, 52, 146, 0.7);
+    color: white;
 }
 
 .typer-ui input[type="color"] {
@@ -136,6 +156,11 @@
 
 .typer-ui input[type="color"]::-webkit-color-swatch {
     border-style: none;
+}
+
+.typer-ui input[type="file"] {
+    position: absolute;
+    left: -1000px;
 }
 
 .typer-ui input[type="checkbox"],
@@ -266,7 +291,7 @@
 .typer-ui input[type="date"],
 .typer-ui input[type="month"],
 .typer-ui input[type="password"],
-.typer-ui input[type="number"]  {
+.typer-ui input[type="number"] {
     padding: 0.5em;
 }
 
@@ -296,7 +321,7 @@
 .typer-ui input[type="password"]:focus,
 .typer-ui input[type="number"]:focus {
     box-shadow: inset 0 0 2px rgba(128, 128, 128, 0.5), 0 0 4px #103492;
-    border-color: #8696b8;
+    border-color: #103492;
 }
 
 .typer-ui input[type="text"]:focus,
@@ -310,25 +335,96 @@
 
 /* Composite Control */
 
+.typer-ui-contextmenu {
+    display: block;
+    min-width: 7em;
+}
+
 .typer-ui-toolbar {
-    white-space: nowrap;
+    display: block;
 }
 
-.typer-ui-toolbar-floating {
-    position: fixed;
+.typer-ui-float {
+    position: absolute;
     background-color: white;
-    box-shadow: 0 0 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+    z-index: 1;
 }
 
-.typer-ui-toolbar .typer-ui-group,
-.typer-ui-toolbar .typer-ui-group > * {
+.typer-ui-float label,
+.typer-ui-float button {
+    border-radius: 0;
+}
+
+.typer-ui-buttonset > *,
+.typer-ui-buttonset .typer-ui-group > *,
+.typer-ui-buttonset label,
+.typer-ui-buttonset button {
     display: inline-block;
     position: relative;
     vertical-align: top;
 }
 
-.typer-ui-toolbar [role="shortcut"] {
-    display: none;
+.typer-ui-buttonset .typer-ui-label-annotation {
+}
+
+.typer-ui-buttonlist {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: auto\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
+}
+
+.typer-ui-buttonlist > * {
+    display: block;
+    box-sizing: border-box;
+    align-items: stretch;
+    flex-shrink: 0;
+}
+
+.typer-ui-buttonlist label,
+.typer-ui-buttonlist button {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%;
+    align-items: center;
+}
+
+.typer-ui-buttonlist .typer-ui-group {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
+}
+
+.typer-ui-buttonlist .typer-ui-group.sep-before:before,
+.typer-ui-buttonlist .typer-ui-group.sep-after:after {
+    content: '';
+    display: block;
+    margin: 0.25em 0;
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.typer-ui-buttonlist .typer-ui-label {
+    width: 100%;
+}
+
+.typer-ui-buttonlist .typer-ui-label span:first-child {
+    display: inline-block;
+    padding-left: 16px;
+    text-indent: 0.5em;
+}
+
+.typer-ui-buttonlist [role="shortcut"] {
+    display: inline-block;
 }
 
 .typer-ui-menu {
@@ -344,18 +440,7 @@
     z-index: 1;
 }
 
-.typer-ui-menu:after {
-    content: '\00e5d3';
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    font-family: 'Material Icons';
-    line-height: 1;
-    vertical-align: top;
-    pointer-events: none;
-}
-
-.typer-ui-menupane .typer-ui-menu:after {
+.typer-ui-buttonlist .typer-ui-menu:after {
     content: '';
     display: block;
     position: absolute;
@@ -369,82 +454,18 @@
     pointer-events: none;
 }
 
-.typer-ui-menupane {
-    display: none;
-    position: absolute;
-    min-width: 100%;
-    background-color: white;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
-}
-
-.typer-ui-menupane .typer-ui-menupane {
-    left: 100%;
-}
-
-.typer-ui-menu.open > .typer-ui-menupane,
-.typer-ui-menu.open > .typer-ui-menu:hover .typer-ui-menupane,
-.typer-ui-contextmenu {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    -ms-flex-direction: column;
-    flex-direction: column;
-}
-
-.typer-ui-menupane > * {
-    display: block;
-    box-sizing: border-box;
-    align-items: stretch;
-    flex-shrink: 0;
-}
-
-.typer-ui-menupane .typer-ui-group {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    width: 100%\9;
-    -ms-flex-direction: column;
-    flex-direction: column;
-}
-
-.typer-ui-menupane label,
-.typer-ui-menupane button {
-    display: block;
-    display: -ms-inline-flexbox;
-    display: inline-flex;
-    display: block\9;
-    width: 100%\9;
-    -ms-flex-wrap: nowrap;
-    align-items: center;
-}
-
-.typer-ui-menupane button .typer-ui-label {
-    width: 100%;
-}
-
-.typer-ui-menupane button .typer-ui-menu-annotation {
-    padding-left: 4em;
-    color: #aeb8c2;
-    font-weight: normal;
-}
-
-.typer-ui-menupane button .typer-ui-menu-annotation:empty {
+.typer-ui-menu .typer-ui-float {
     display: none;
 }
 
-.typer-ui-menupane .typer-ui-group.sep-before:before,
-.typer-ui-menupane .typer-ui-group.sep-after:after {
-    content: '';
+.typer-ui-menu.open > .typer-ui-float,
+.typer-ui-menu.open > .typer-ui-menu:hover .typer-ui-float {
     display: block;
-    margin: 0.25em 0;
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
 }
 
-.typer-ui-contextmenu {
-    min-width: 0;
-    width: auto\9;
+.typer-ui-float label,
+.typer-ui-float button {
+    border-radius: 0;
 }
 
 .typer-ui-dropdown {
@@ -478,10 +499,6 @@
     pointer-events: none;
 }
 
-.typer-ui-dropdown:hover:after {
-    border-top-color: #212121;
-}
-
 .typer-ui-dropdown.disabled:after {
     border-top-color: #999;
 }
@@ -490,15 +507,12 @@
     padding-right: 2em !important;
 }
 
-.typer-ui-dropdown .typer-ui-menupane button {
-    padding-left: calc(1.25em + 16px);
+.typer-ui-dropdown .typer-ui-float {
+    top: 100%;
+    min-width: 100%;
 }
 
-.typer-ui-dropdown .typer-ui-menupane button.active {
-    background-color: #eee;
-}
-
-.typer-ui-dropdown .typer-ui-menupane button.active:before {
+.typer-ui-dropdown .typer-ui-float button.active:before {
     position: absolute;
     content: '\00e876';
     font-family: 'Material Icons';
@@ -513,12 +527,16 @@
 .typer-ui-textbox [contenteditable] {
     display: inline-block;
     position: relative;
-    margin: 0 0 0.42em 0.25em;
+    margin: 0 -0.25em 0.42em;
     padding: 0.75em 0.25em 0.17em;
     min-width: 3em;
+    width: 100%;
     border-bottom: 1px solid #aeb8c2;
     vertical-align: top;
+    color: #212121;
     line-height: 1.33;
+    white-space: normal;
+    word-break: break-all;
     cursor: text;
     flex: 1 0 auto;
     -ms-flex: 1 0 auto;
@@ -527,44 +545,63 @@
     -ms-user-select: text;
 }
 
-.typer-ui-textbox.has-value [contenteditable] {
+.typer-ui-buttonset .typer-ui-textbox [contenteditable],
+.typer-ui-buttonlist .typer-ui-textbox [contenteditable] {
+    white-space: nowrap;
+}
+
+.typer-ui-textbox [contenteditable].has-value {
     min-width: 0;
 }
 
-.typer-ui-toolbar .typer-ui-textbox [contenteditable] {
+.typer-ui-textbox [contenteditable]:focus {
+    border-bottom-color: #103492;
+}
+
+.typer-ui-buttonset .typer-ui-textbox {
+    display: inline-block;
+    height: 100%;
+}
+
+.typer-ui-buttonset .typer-ui-textbox [contenteditable] {
     border-bottom-style: hidden;
 }
 
-.typer-ui-toolbar .typer-ui-textbox [contenteditable]:hover,
-.typer-ui-toolbar .typer-ui-textbox [contenteditable]:focus {
+.typer-ui-buttonset .typer-ui-textbox [contenteditable]:hover,
+.typer-ui-buttonset .typer-ui-textbox [contenteditable]:focus {
     border-bottom-style: solid;
 }
 
-.typer-ui-textbox [contenteditable]:focus {
-    border-bottom-color: #8696b8;
+.typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: inline-block;
 }
 
-.typer-ui-textbox [contenteditable]:after {
-    content: 'Enter text';
+.typer-ui-textbox .typer-ui-textbox-placeholder {
     display: inline-block;
+    position: relative;
+    left: -100%;
     color: #aeb8c2;
-    white-space: nowrap;
+    line-height: 1.33;
     pointer-events: none;
 }
 
-.typer-ui-textbox [contenteditable][data-placeholder]:after {
-    content: attr(data-placeholder);
+.typer-ui-textbox .typer-ui-textbox-placeholder:empty:after {
+    content: 'Enter text';
 }
 
-.typer-ui-textbox.has-value [contenteditable]:after {
+.typer-ui-textbox [contenteditable].has-value + .typer-ui-textbox-placeholder {
     display: none;
+}
+
+.typer-ui-textbox .typer-ui-label {
+    margin-right: 0.25em;
 }
 
 .typer-ui-dialog {
     position: fixed;
     top: 50%;
     left: 50%;
-    padding: 0.5em;
+    padding: 2em 0.5em 1em;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
     min-width: 350px;
     max-width: calc(100% - 0.4em - 10px);
@@ -578,10 +615,10 @@
     -moz-transition-property: filter, transform, opacity;
     -ms-transition-property: filter, transform, opacity;
     transition-property: filter, transform, opacity;
-    -webkit-transform: translate(-50%, -50%) scale(1.25);
-    -moz-transform: translate(-50%, -50%) scale(1.25);
-    -ms-transform: translate(-50%, -50%) scale(1.25);
-    transform: translate(-50%, -50%) scale(1.25);
+    -webkit-transform: translate(-50%, -50%);
+    -moz-transform: translate(-50%, -50%);
+    -ms-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
     -webkit-filter: blur(2px);
     -moz-filter: blur(2px);
     -ms-filter: blur(2px);
@@ -591,10 +628,6 @@
 }
 
 .typer-ui-dialog.open {
-    -webkit-transform: translate(-50%, -50%);
-    -moz-transform: translate(-50%, -50%);
-    -ms-transform: translate(-50%, -50%);
-    transform: translate(-50%, -50%);
     -webkit-filter: none;
     -moz-filter: none;
     -ms-filter: none;
@@ -614,30 +647,33 @@
     opacity: 0;
 }
 
-.typer-ui-dialog.busy:after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    right: 0;
-    background: rgba(255, 255, 255, 0.5) url('data:image/gif;,');
-    cursor: progress;
-    z-index: 1000;
+.typer-ui-dialog.pop {
+    -webkit-animation: dialog-pop 0.1s linear;
+    -moz-animation: dialog-pop 0.1s linear;
+    animation: dialog-pop 0.1s linear;
 }
 
-.typer-ui-dialog > .typer-ui-label {
-    margin: 2em 0.75em 0;
-    font-size: 100%;
-    font-weight: normal;
-    color: #555;
+@-webkit-keyframes dialog-pop {
+    0% {
+        -webkit-transform: translate(-50%, -50%) scale(1.05);
+    }
+}
+
+@-moz-keyframes dialog-pop {
+    0% {
+        -moz-transform: translate(-50%, -50%) scale(1.05);
+    }
+}
+
+@keyframes dialog-pop {
+    0% {
+        transform: translate(-50%, -50%) scale(1.05);
+    }
 }
 
 .typer-ui-dialog .typer-ui-textbox {
     display: block !important;
     height: auto;
-    white-space: normal;
-    word-break: break-all;
 }
 
 .typer-ui-dialog .typer-ui-textbox .typer-ui-label {
@@ -645,39 +681,103 @@
 }
 
 .typer-ui-dialog .typer-ui-textbox [contenteditable] {
-    display: block;
+    width: 100%;
     background-color: transparent;
-    margin-left: -0.25em;
-    margin-right: -0.25em;
     border-bottom-style: solid;
+    white-space: normal;
+    word-break: break-all;
     -webkit-transition: padding 0.1s;
     -moz-transition: padding 0.1s;
     -ms-transition: padding 0.1s;
     transition: padding 0.1s;
 }
 
-.typer-ui-dialog .typer-ui-textbox [contenteditable]:after {
-    display: inline-block;
+.typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: block;
+}
+
+.typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-placeholder {
     text-transform: uppercase;
 }
 
-.typer-ui-dialog .typer-ui-textbox.has-value [contenteditable] {
+.typer-ui-dialog .typer-ui-textbox [contenteditable].has-value {
     padding-top: 1.75em;
 }
 
-.typer-ui-dialog .typer-ui-textbox.has-value [contenteditable]:after {
+.typer-ui-dialog .typer-ui-textbox [contenteditable].has-value + .typer-ui-textbox-placeholder {
+    display: block;
     position: absolute;
-    left: 0.25em;
+    left: auto;
     bottom: 100%;
     margin-bottom: -1.75em;
     font-size: 95%;
 }
 
-.typer-ui-dialog .typer-ui-group[role*="buttonset"] {
+.typer-ui-dialog .typer-ui-textbox [contenteditable].has-value:focus + .typer-ui-textbox-placeholder {
+    color: #103492;
+}
+
+.typer-ui-dialog [role="ui:prompt-message"] {
     display: block;
-    margin-top: 0.5em;
+    margin: 1em;
+}
+
+.typer-ui-dialog > .typer-ui-buttonset {
+    display: block;
+    margin: 1.5em 0 -0.5em;
     text-align: right;
     text-transform: uppercase;
     font-weight: bold;
     font-size: 80%;
+}
+
+.typer-ui-dialog-pin {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    margin-left: -0.6em;
+    margin-bottom: -1px;
+    border-bottom: 0.6em solid white;
+    border-left: 0.6em solid transparent;
+    border-right: 0.6em solid transparent;
+}
+
+.pinned .typer-ui-dialog-pin {
+    display: block;
+}
+
+
+/* Animated Effects */
+
+.typer-ui-clickeffect {
+    position: absolute !important;
+    background-color: #fafafa;
+    width: 1em;
+    height: 1em;
+    border-radius: 1em;
+    opacity: 0.3;
+    -webkit-transform: translate(-50%, -50%);
+    -moz-transform: translate(-50%, -50%);
+    -ms-transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%);
+    -webkit-transition: transform ease-out, background-color cubic-bezier(0, 0, 0, 1), opacity cubic-bezier(1, 0, 1, 1);
+    -moz-transition: transform ease-out, background-color cubic-bezier(0, 0, 0, 1), opacity cubic-bezier(1, 0, 1, 1);
+    -ms-transition: transform ease-out, background-color cubic-bezier(0, 0, 0, 1), opacity cubic-bezier(1, 0, 1, 1);
+    transition: transform ease-out, background-color cubic-bezier(0, 0, 0, 1), opacity cubic-bezier(1, 0, 1, 1);
+    -webkit-transition-duration: 0.2s;
+    -moz-transition-duration: 0.2s;
+    -ms-transition-duration: 0.2s;
+    transition-duration: 0.2s;
+    pointer-events: none;
+    z-index: -1;
+}
+
+.typer-ui-clickeffect.animate-in {
+    background-color: #999;
+    opacity: 0.5;
+}
+
+.typer-ui-clickeffect.animate-out {
+    opacity: 0;
 }

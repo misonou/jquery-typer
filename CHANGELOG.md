@@ -1,3 +1,11 @@
+## 0.9.4 / 2017-02-14
+
+- Improved UI dialog handling
+- Fix: `focusin` and `focusout` events fired twice
+- Fix: event handlers from options are fired twice for some events
+- Fix: stack overflow when the editable element is detached
+- Fix: incorrect selection after `execCommand`
+
 ## 0.9.3 / 2017-02-04
 
 - Add Typer events for mouse clicks
