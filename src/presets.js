@@ -11,7 +11,7 @@
                     return Typer.trim(this.element.textContent);
                 },
                 setValue: function (value) {
-                    if (value !== Typer.trim(this.element.textContent)) {
+                    if (value !== this.getValue()) {
                         this.invoke(function (tx) {
                             tx.selection.select(this.element, 'contents');
                             tx.insertText(value);
@@ -21,6 +21,9 @@
             },
             init: function (e) {
                 e.typer.getSelection().moveToText(e.typer.element, -0);
+            },
+            contentChange: function (e) {
+                $(e.typer.element).toggleClass('has-value', !!e.typer.getValue());
             }
         }
     };

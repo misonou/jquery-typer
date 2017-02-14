@@ -442,6 +442,7 @@
         var undoable = {};
         var currentSelection;
         var typerDocument;
+        var typerFocused = false;
         var $self = $(topElement);
 
         var codeUpdate = transaction(function () {
@@ -461,7 +462,7 @@
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
                 case EVENT_ALL:
-                    return widgets.concat(currentSelection.getWidgets());
+                    return widgets.concat(currentSelection.getWidgets().slice(0, -1));
                 case EVENT_STATIC:
                     return widgets;
                 case EVENT_HANDLER:
@@ -963,10 +964,11 @@
                     } else if (insertAsInline && paragraphAsInline) {
                         nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
                     }
-                    var lastNode = nodeToInsert.lastChild;
+                    var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
+                            caretPoint = createRange(lastNode, -0);
                         }
                         paragraphAsInline = false;
                     } else {
@@ -977,10 +979,11 @@
                             createRange(caretNode.element, true).insertNode(nodeToInsert);
                         }
                         insertAsInline = is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
+                        caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
+                        paragraphAsInline = !insertAsInline;
                         hasInsertedBlock = true;
                     }
                     contentEvent.addTarget(caretPoint.startContainer);
-                    caretPoint = (lastNode && createRange(lastNode, -0)) || caretPoint;
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     createRange(state.startNode.element, -0).insertNode(createRange(state.endNode.element, 'contents').extractContents());
@@ -1013,12 +1016,12 @@
                     });
                     text += text && '\n\n';
                     iterate(new TyperDOMNodeIterator(it, 5), function (v) {
-                        text += v.nodeType === 3 ? v.nodeValue.replace(/\u200b/g, '').replace(/\s+|\u00a0/g, ' ') : tagName(v) === 'br' ? '\n' : '';
+                        text += v.nodeType === 3 ? v.nodeValue : tagName(v) === 'br' ? '\n' : '';
                     });
                     return 2;
                 }
             }));
-            return text;
+            return text.replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
         }
 
         function initUndoable() {
@@ -1071,7 +1074,7 @@
                 if (newValue !== snapshots[0]) {
                     var hasChange = checkActualChange();
                     snapshots.splice(0, currentIndex + !hasChange, newValue);
-                    snapshots.splice(options.historyLevel);
+                    snapshots.splice(Typer.historyLevel);
                     currentIndex = 0;
                 }
                 $self.find('[x-typer-start], [x-typer-end]').andSelf().removeAttr('x-typer-start x-typer-end');
@@ -1162,7 +1165,7 @@
                     insertContents(currentSelection, '');
                 } else {
                     var selection = currentSelection.clone();
-                    if (selection.extendCaret.moveByCharacter(e.eventName === 'backspace' ? -1 : 1)) {
+                    if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
                         insertContents(selection, '');
                     }
                 }
@@ -1242,7 +1245,7 @@
                         if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
-                        if (triggerDefaultPreventableEvent(EVENT_HANDLER, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
                             e.preventDefault();
                         }
                     }
@@ -1253,7 +1256,7 @@
                         }
                     });
                 } else if (e.type === 'keypress') {
-                    if (modifierCount || !e.charCode) {
+                    if (!e.charCode) {
                         e.stopImmediatePropagation();
                     }
                 } else {
@@ -1267,7 +1270,7 @@
             });
 
             $self.bind('keypress textInput textinput', function (e) {
-                if (!codeUpdate.executing && !codeUpdate.suppressTextEvent) {
+                if (!codeUpdate.executing && (e.type === 'keypress' || !codeUpdate.suppressTextEvent)) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
@@ -1366,10 +1369,11 @@
                 e.preventDefault();
             });
 
-            $self.bind('focusin', function () {
+            $self.bind('focus', function () {
                 var mousedown1 = mousedown;
                 setImmediate(function () {
                     if (!userFocus.has(typer)) {
+                        typerFocused = true;
                         triggerEvent(EVENT_ALL, 'focusin');
                         if (!mousedown1) {
                             currentSelection.focus();
@@ -1380,9 +1384,10 @@
                 });
             });
 
-            $self.bind('focusout', function () {
+            $self.bind('blur', function () {
                 setImmediate(function () {
                     if (!windowFocusedOut && !userFocus.has(typer)) {
+                        typerFocused = false;
                         triggerWidgetFocusout();
                         triggerEvent(EVENT_ALL, 'focusout');
                     }
@@ -1390,24 +1395,7 @@
                 });
             });
 
-            $.each({
-                moveByLine: 'upArrow downArrow shiftUpArrow shiftDownArrow',
-                moveByWord: 'ctrlLeftArrow ctrlRightArrow ctrlShiftLeftArrow ctrlShiftRightArrow',
-                moveToLineEnd: 'home end shiftHome shiftEnd',
-                moveByCharacter: 'leftArrow rightArrow shiftLeftArrow shiftRightArrow'
-            }, function (i, v) {
-                $.each(v.split(' '), function (j, v) {
-                    var direction = (j & 1) ? 1 : -1, extend = !!(j & 2);
-                    widgetOptions.__core__[v] = function () {
-                        if (!extend && !currentSelection.isCaret) {
-                            currentSelection.collapse(direction < 0 ? 'start' : 'end');
-                        } else {
-                            (extend ? currentSelection.extendCaret : currentSelection)[i](direction);
-                        }
-                    };
-                });
-            });
-            $.extend(widgetOptions.__core__, {
+            var defaultKeystroke = {
                 ctrlZ: undoable.undo,
                 ctrlY: undoable.redo,
                 ctrlShiftZ: undoable.redo,
@@ -1419,7 +1407,30 @@
                         selection.removeAllRanges();
                     }
                 }
+            };
+            $.each({
+                moveByLine: 'upArrow downArrow shiftUpArrow shiftDownArrow',
+                moveByWord: 'ctrlLeftArrow ctrlRightArrow ctrlShiftLeftArrow ctrlShiftRightArrow',
+                moveToLineEnd: 'home end shiftHome shiftEnd',
+                moveByCharacter: 'leftArrow rightArrow shiftLeftArrow shiftRightArrow'
+            }, function (i, v) {
+                $.each(v.split(' '), function (j, v) {
+                    var direction = (j & 1) ? 1 : -1, extend = !!(j & 2);
+                    defaultKeystroke[v] = function () {
+                        if (!extend && !currentSelection.isCaret) {
+                            currentSelection.collapse(direction < 0 ? 'start' : 'end');
+                        } else {
+                            (extend ? currentSelection.extendCaret : currentSelection)[i](direction);
+                        }
+                    };
+                });
             });
+            widgetOptions.__core__.keystroke = function (e) {
+                if (!e.isDefaultPrevented() && (e.data in defaultKeystroke)) {
+                    e.preventDefault();
+                    defaultKeystroke[e.data](e);
+                }
+            };
         }
 
         function activateWidget(name, settings) {
@@ -1433,10 +1444,10 @@
         }
 
         function initWidgets() {
-            widgets[0] = new TyperWidget(typer, '__core__');
-            widgets[1] = new TyperWidget(typer, '__root__');
+            widgets[0] = new TyperWidget(typer, '__root__');
             $.each(options.widgets || {}, activateWidget);
             $.each(Typer.widgets, activateWidget);
+            widgets[widgets.length] = new TyperWidget(typer, '__core__');
 
             widgetOptions.__root__ = options;
             widgetOptions.__core__ = {};
@@ -1473,17 +1484,25 @@
             hasCommand: function (command) {
                 return !!findWidgetWithCommand(command);
             },
+            focused: function () {
+                return typerFocused;
+            },
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
             },
+            getStaticWidget: function (id) {
+                return any(widgets.slice(1, -1), function (v) {
+                    return v.id === id;
+                });
+            },
             getStaticWidgets: function () {
-                return widgets.slice(2);
+                return widgets.slice(1, -1);
             },
             getSelection: function () {
                 return currentSelection;
             },
             extractText: function (selection) {
-                var content = extractContents(selection, 'copy');
+                var content = extractContents(selection || topElement, 'copy');
                 return extractText(content);
             },
             nodeFromPoint: function (x, y) {
@@ -1540,20 +1559,14 @@
                 }
             },
             execCommand: function (commandName, value) {
-                var r1 = currentSelection.baseCaret.getRange();
-                var r2 = currentSelection.extendCaret.getRange();
-                var s1 = createElement('span');
-                var s2 = createElement('span');
-                r1.insertNode(s1);
-                r2.insertNode(s2);
-                currentSelection.select(createRange(s1, false), createRange(s2, true));
+                var r1, r2;
                 $.each(currentSelection.getEditableRanges(), function (i, v) {
                     applyRange(v);
                     document.execCommand(commandName, false, value || '');
+                    r1 = r1 || selection.getRangeAt(0);
+                    r2 = selection.getRangeAt(0);
                 });
-                currentSelection.select(createRange(s1, false), createRange(s2, true));
-                removeNode(s1);
-                removeNode(s2);
+                currentSelection.select(createRange(r1, true), createRange(r2, false));
             }
         });
 
@@ -1615,8 +1628,8 @@
         removeElement: function (element) {
             removeNode(element);
         },
+        historyLevel: 100,
         defaultOptions: {
-            historyLevel: 100,
             disallowedWidgets: 'keepText',
             widgets: {}
         },
@@ -2058,7 +2071,7 @@
 
     definePrototype(TyperCaret, {
         getRange: function () {
-            if ((this.element && !this.element.parentNode) || (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length))) {
+            if ((this.element && this.element !== this.typer.element && !this.element.parentNode) || (this.textNode && (!this.textNode.parentNode || this.offset > this.textNode.length))) {
                 // use calculated text offset from paragraph node in case anchored text node is detached from DOM
                 // assuming that there is no unmanaged edit after the previous selection
                 this.moveToText(this.node.element, this.wholeTextOffset);
@@ -2092,7 +2105,7 @@
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
-                var iterator = new TyperDOMNodeIterator(this.typer.getNode(node), 4);
+                var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
                 if (offset) {
                     for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
                 } else if (1 / offset < 0) {
@@ -2200,7 +2213,9 @@
     }
 
     $(window).bind('focusin focusout', function (e) {
-        if (e.target === window || e.target === document.body || !e.relatedTarget) {
+        // IE raise event on the current active element instead of window object when browser loses focus
+        // need to check if there is related target instead
+        if (IS_IE ? !e.relatedTarget : e.target === window) {
             windowFocusedOut = e.type === 'focusout';
         }
     });
