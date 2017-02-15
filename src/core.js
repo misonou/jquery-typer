@@ -554,7 +554,7 @@
             function updateNode(node) {
                 var context = node.parentNode || nodeMap.get(rootElement);
                 if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
-                    if (fireEvent && node.widget) {
+                    if (fireEvent && node.widget && node.widget.element === node.element) {
                         node.widget.destroyed = true;
                         triggerEvent(node.widget, 'destroy');
                     }
