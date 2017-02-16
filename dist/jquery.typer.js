@@ -580,7 +580,7 @@
             function updateNode(node) {
                 var context = node.parentNode || nodeMap.get(rootElement);
                 if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
-                    if (fireEvent && node.widget) {
+                    if (fireEvent && node.widget && node.widget.element === node.element) {
                         node.widget.destroyed = true;
                         triggerEvent(node.widget, 'destroy');
                     }
@@ -2570,14 +2570,15 @@
 
     function triggerEvent(ui, control, name, optArg) {
         callFunction(ui, control, name, optArg);
-        var themeEvent = control.type + name.charAt(0).toUpperCase() + name.slice(1);
+        var themeEvent = ui === control ? name : control.type + name.charAt(0).toUpperCase() + name.slice(1);
         if (isFunction(definedThemes[ui.theme][themeEvent])) {
             definedThemes[ui.theme][themeEvent](ui, control, optArg);
         }
     }
 
-    function resolveControls(ui, control) {
+    function resolveControls(ui, control, contextualParent) {
         control = control || ui;
+        contextualParent = control.type !== 'group' ? control : contextualParent || ui;
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
@@ -2590,13 +2591,14 @@
             var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
             inst.ui = ui;
             inst.parent = control;
+            inst.contextualParent = contextualParent;
             inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
             if (inst.label === undefined) {
                 inst.label = inst.name;
             }
             defaultOrder[inst.name] = i;
             ui.all[inst.name] = inst;
-            resolveControls(ui, inst);
+            resolveControls(ui, inst, contextualParent);
             return inst;
         });
         control.controls.sort(function (a, b) {
@@ -2740,27 +2742,33 @@
     }
 
     Typer.ui = define('TyperUI', null, function (options, parentUI) {
-        if (parentUI) {
+        if (typeof options === 'string') {
             options = {
+                controls: options
+            };
+        }
+        if (parentUI) {
+            $.extend(options, {
                 theme: parentUI.theme,
                 typer: parentUI.typer,
                 widget: parentUI.widget,
-                controls: options,
                 parentUI: parentUI
-            };
+            });
         }
         var self = $.extend(this, options);
         self.all = {};
         Object.defineProperty(self.all, 'expandedFrom', {
             value: self.controls
         });
+        if (!self.theme) {
+            self.theme = Object.getOwnPropertyNames(definedThemes)[0];
+        }
         self.controls = resolveControls(self);
         self.element = renderControl(self);
-        $(self.element).addClass('typer-ui typer-ui-' + options.theme);
+        $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
-        callFunction(self, definedThemes[self.theme], 'init');
         foreachControl(self, triggerEvent, 'init');
         triggerEvent(self, self, 'init');
     });
@@ -2884,26 +2892,30 @@
                 }
             }
         },
-        spawn: function (control, value) {
+        openDialog: function (control, value, pin) {
             var ui = Typer.ui(control, this);
             ui.setValue(control, value);
+            ui.pinToParent = pin;
             return ui.execute();
         },
-        alert: function (message) {
-            var dialog = Typer.ui('ui:alert', this);
-            dialog.all['ui:prompt-message'].label = message;
-            return dialog.execute();
+        alert: function (message, pin) {
+            var ui = Typer.ui('ui:alert', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
         },
-        confirm: function (message) {
-            var dialog = Typer.ui('ui:confirm', this);
-            dialog.all['ui:prompt-message'].label = message;
-            return dialog.execute();
+        confirm: function (message, pin) {
+            var ui = Typer.ui('ui:confirm', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
         },
-        prompt: function (message, value) {
-            var dialog = Typer.ui('ui:prompt', this);
-            dialog.all['ui:prompt-message'].label = message;
-            dialog.all['ui:prompt'].value = value;
-            return dialog.execute();
+        prompt: function (message, value, pin) {
+            var ui = Typer.ui('ui:prompt', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.all['ui:prompt'].value = value;
+            ui.pinToParent = pin;
+            return ui.execute();
         }
     });
 
@@ -2994,6 +3006,31 @@
             if (!$.contains(element, document.activeElement)) {
                 $(':input, [contenteditable], a[href], area[href], iframe', element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
+        },
+        openDialog: function (control, value, pin) {
+            var ui = Typer.ui(control);
+            ui.setValue(control, value);
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        alert: function (message, pin) {
+            var ui = Typer.ui('ui:alert');
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        confirm: function (message, pin) {
+            var ui = Typer.ui('ui:confirm');
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        prompt: function (message, value, pin) {
+            var ui = Typer.ui('ui:prompt');
+            ui.all['ui:prompt-message'].label = message;
+            ui.all['ui:prompt'].value = value;
+            ui.pinToParent = pin;
+            return ui.execute();
         }
     });
 
@@ -3065,8 +3102,8 @@
         }),
         dialog: define('TyperUIDialog', {
             type: 'dialog',
-            keyboardResolve: false,
-            keyboardReject: false,
+            keyboardResolve: true,
+            keyboardReject: true,
             resolve: 'ui:button-ok',
             reject: 'ui:button-cancel'
         }, function (options) {
@@ -3737,7 +3774,7 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.spawn('dialog:selectLink', currentValue);
+                return toolbar.openDialog('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
@@ -3845,7 +3882,7 @@
         insert: function (tx, options) {
             var element = Typer.createElement(reMediaType.exec(options.src || options) && (RegExp.$1 ? 'img' : RegExp.$2 ? 'video' : 'audio'));
             element.src = options.src || options;
-            if (element.tagName === 'video') {
+            if (element.tagName.toLowerCase() === 'video') {
                 $(element).attr('controls', '');
             }
             tx.insertHtml(element);
@@ -3898,7 +3935,7 @@
                 self.value = $(self.widget.element).attr('alt');
             },
             execute: function (toolbar, self) {
-                $(self.widget.element).attr('alt', self.value);
+                $(self.widget.element).attr('alt', self.value).attr('title', self.value);
             }
         })
     });
@@ -4081,7 +4118,6 @@
     'use strict';
 
     var activeToolbar;
-    var activeContextMenu;
     var timeout;
 
     function nativePrompt(message, value) {
@@ -4115,7 +4151,7 @@
         if (toolbar.widget || !toolbar.options.container) {
             clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
-                hideToolbar(true);
+                hideToolbar();
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
@@ -4144,46 +4180,11 @@
         }
     }
 
-    function showContextMenu(contextMenu, x, y) {
-        contextMenu.update();
-        if (activeContextMenu !== contextMenu) {
-            hideContextMenu();
-            activeContextMenu = contextMenu;
-            $(contextMenu.element).appendTo(document.body);
-            Typer.ui.setZIndex(contextMenu.element, contextMenu.typer.element);
-        }
-        if (x + $(contextMenu.element).width() > $(window).width()) {
-            x -= $(contextMenu.element).width();
-        }
-        if (y + $(contextMenu.element).height() > $(window).height()) {
-            y -= $(contextMenu.element).height();
-        }
-        $(contextMenu.element).css({
-            position: 'fixed',
-            left: x,
-            top: y
-        });
-    }
-
-    function hideToolbar(force) {
-        clearTimeout(timeout);
-        if (force) {
-            if (activeToolbar) {
-                $(activeToolbar.element).detach();
-                activeToolbar.position = '';
-                activeToolbar = null;
-            }
-        } else {
-            timeout = setTimeout(function () {
-                hideToolbar(true);
-            }, 100);
-        }
-    }
-
-    function hideContextMenu() {
-        if (activeContextMenu) {
-            $(activeContextMenu.element).detach();
-            activeContextMenu = null;
+    function hideToolbar(toolbar) {
+        if (activeToolbar && (!toolbar || activeToolbar === toolbar)) {
+            $(activeToolbar.element).detach();
+            activeToolbar.position = '';
+            activeToolbar = null;
         }
     }
 
@@ -4223,20 +4224,12 @@
             });
         }
         if (type === 'contextmenu') {
-            var focusout;
             $(typer.element).bind('contextmenu', function (e) {
                 e.preventDefault();
-                focusout = false;
-                showContextMenu(toolbar, e.clientX, e.clientY);
-            });
-            $elm.focusout(function (e) {
-                focusout = true;
-            });
-            $elm.mouseup(function (e) {
-                setTimeout(function () {
-                    if (focusout) {
-                        hideContextMenu();
-                    }
+                toolbar.update();
+                toolbar.trigger(toolbar, 'show', {
+                    x: e.clientX,
+                    y: e.clientY
                 });
             });
         }
@@ -4273,7 +4266,7 @@
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            timeout = setTimeout(hideToolbar);
+            hideToolbar(e.widget.toolbar);
         },
         widgetFocusin: function (e) {
             if (e.widget.widgetbars[e.targetWidget.id]) {
@@ -4300,13 +4293,6 @@
         if (activeToolbar) {
             showToolbar(activeToolbar);
         }
-    });
-    $(function () {
-        $(document.body).mouseup(function (e) {
-            if (activeContextMenu && !$.contains(activeContextMenu.element, e.target)) {
-                hideContextMenu();
-            }
-        });
     });
 
     /* ********************************
@@ -4708,6 +4694,40 @@
 (function ($, Typer) {
     'use strict';
 
+    var currentMenu;
+    var currentDialogPositions = [];
+
+    function showContextMenu(element, pos) {
+        if (currentMenu !== element) {
+            hideContextMenu();
+            currentMenu = element;
+            $(element).appendTo(document.body).css('position', 'fixed');
+            Typer.ui.setZIndex(element, document.body);
+        }
+        if (pos.getBoundingClientRect) {
+            var rect = pos.getBoundingClientRect();
+            pos = {
+                x: rect.left,
+                y: rect.bottom
+            };
+        }
+        if (pos.x + $(element).width() > $(window).width()) {
+            pos.x -= $(element).width();
+        }
+        if (pos.y + $(element).height() > $(window).height()) {
+            pos.y -= $(element).height();
+        }
+        $(element).css({
+            left: pos.x,
+            top: pos.y
+        });
+    }
+
+    function hideContextMenu() {
+        $(currentMenu).detach();
+        currentMenu = null;
+    }
+
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
         var nested = !!$(thisMenu).parents('.typer-ui-float')[0];
@@ -4724,20 +4744,16 @@
         }
     }
 
-    function pinDialogPosition(dialog) {
-        var rect = dialog.parentControl.element.getBoundingClientRect();
-
-        function updatePosition() {
-            var w = $(dialog.element).outerWidth();
-            var h = $(dialog.element).outerHeight();
-            $(dialog.element).addClass('pinned pinned-top').css({
-                top: rect.bottom + h / 2,
-                left: Math.max(10, rect.left + rect.width / 2 - w / 2) + w / 2
+    function updateDialogPositions() {
+        $.each(currentDialogPositions, function (i, v) {
+            var rect = v.reference.getBoundingClientRect();
+            $(v.target).css({
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height
             });
-        }
-
-        $(dialog.element).bind('transitionend otransitionend webkitTransitionEnd', updatePosition);
-        updatePosition();
+        });
     }
 
     Typer.ui.themes.material = {
@@ -4749,6 +4765,7 @@
         controlActiveClass: 'active',
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
+        label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
             var hasIcon = !!Typer.ui.getIcon(control, 'material');
             return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
@@ -4775,7 +4792,6 @@
                 $(control.element).toggleClass('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
             });
         },
-        label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         button: '<button x:bind="(title:label)"><br x:t="label"/><span class="typer-ui-label-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-label-annotation" x:bind="(_:annotation)"></span></button>',
         buttonExecuteOn: 'click',
         file: '<label class="has-clickeffect" x:bind="(title:label)"><input type="file"/><br x:t="label"/></label>',
@@ -4821,88 +4837,114 @@
                 }
             }));
         },
-        textboxStateChange: function (toolbar, control) {
+        textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog"><div class="typer-ui-dialog-pin"></div><br x:t="children"></div>',
-        dialogOpen: function (dialog, control) {
-            $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:url(data:image/gif;,);">').prependTo(dialog.element).click(function () {
-                $(control.element).addClass('pop');
+        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',
+        dialogOpen: function (ui, control) {
+            var resolveButton = ui.resolve(control.resolve)[0];
+            var parentControl = ui.parentUI && ui.parentUI.getExecutingControl();
+            var $wrapper = $(ui.element).find('.typer-ui-dialog-wrapper');
+            var $content = $(ui.element).find('.typer-ui-dialog-content');
+            var $blocker = $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:url(data:image/gif;,);">');
+
+            $(ui.element).appendTo(document.body);
+            $blocker.prependTo(ui.element).click(function () {
+                $content.addClass('pop');
             });
-            $(dialog.element).appendTo(document.body);
-            $(control.element).bind('animationend oanimationend webkitAnimationEnd', function () {
-                $(control.element).removeClass('pop');
+            $content.bind('animationend oanimationend webkitAnimationEnd', function () {
+                $content.removeClass('pop');
             });
-            var resolveButton = dialog.resolve(control.resolve)[0];
             if (resolveButton) {
                 $(resolveButton.element).addClass('pin-active');
             }
-            control.parentControl = dialog.parentUI && dialog.parentUI.getExecutingControl();
             setImmediate(function () {
                 $(control.element).addClass('open');
-                if (control.pinToParent && control.parentControl) {
-                    pinDialogPosition(control);
-                    $(control.parentControl.element).addClass('pin-active');
+                if (/top|bottom|left|right/.test(ui.pinToParent) && document.activeElement !== document.body) {
+                    var pinElement = parentControl ? parentControl.element : document.activeElement;
+                    $wrapper.addClass('pinned pinned-' + ui.pinToParent);
+                    $(pinElement).addClass('pin-active');
+                    currentDialogPositions.push({
+                        dialog: ui,
+                        reference: pinElement,
+                        target: $wrapper[0]
+                    });
+                    updateDialogPositions();
                 }
             });
         },
-        dialogClose: function (dialog, control) {
+        dialogClose: function (ui, control) {
             $(control.element).addClass('closing').one('transitionend otransitionend webkitTransitionEnd', function () {
-                $(dialog.element).remove();
-                if (control.parentControl) {
-                    $(control.parentControl.element).removeClass('pin-active');
-                }
+                $(ui.element).remove();
+                $.each(currentDialogPositions, function (i, v) {
+                    if (v.dialog === ui) {
+                        $(v.reference).removeClass('pin-active');
+                        currentDialogPositions.splice(i, 1);
+                        return false;
+                    }
+                });
             });
         },
         init: function (ui) {
-            $(ui.element).click(function (e) {
-                $('.typer-ui-menu.open', ui.element).not($(e.target).parentsUntil(ui.element)).removeClass('open');
+            $(ui.element).on('mouseover', '.typer-ui-menu:has(>.typer-ui-float)', function (e) {
+                setMenuPosition(e.currentTarget);
             });
-            $(ui.element).focusout(function (e) {
-                if (!$.contains(ui.element, e.relatedTarget)) {
-                    $('.typer-ui-menu.open', ui.element).removeClass('open');
-                }
-            });
-            $(ui.element).on('click', '.typer-ui-dropdown .typer-ui-float', function (e) {
-                $(e.currentTarget).parents('.typer-ui-dropdown').removeClass('open');
-            });
-            $(ui.element).on('click', '.typer-ui-menu > button', function (e) {
-                var thisMenu = e.currentTarget.parentNode;
-                $('.typer-ui-menu.open', ui.element).not(thisMenu).removeClass('open');
-                if ($(thisMenu).find('>.typer-ui-float>:not(.disabled)')[0]) {
-                    $(thisMenu).toggleClass('open');
-                    setImmediate(function () {
-                        setMenuPosition(thisMenu);
+            $.each(ui.all, function (i, v) {
+                if (/callout|dropdown/.test(v.type) && v.contextualParent.type !== 'callout' && v.contextualParent.type !== 'contextmenu') {
+                    var callout = $('<div class="typer-ui typer-ui-material">').append($(v.element).children('.typer-ui-float').addClass('parent-is-' + v.type))[0];
+                    if (ui.typer) {
+                        ui.typer.retainFocus(callout);
+                    }
+                    $(v.element).click(function (e) {
+                        showContextMenu(callout, v.element);
                     });
                 }
             });
-            $(ui.element).on('mouseover', '.typer-ui-menu', function (e) {
-                setMenuPosition(e.currentTarget);
-            });
-            $(ui.element).on('mousedown', 'button, .has-clickeffect', function (e) {
-                var pos = e.currentTarget.getBoundingClientRect();
-                var $overlay = $('<div class="typer-ui-clickeffect">').appendTo(e.currentTarget).css({
-                    top: e.clientY - pos.top,
-                    left: e.clientX - pos.left
-                });
-                var p1 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.left, 2);
-                var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
-                var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
-                var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
-                var scalePercent = 0.5 + 2 * Math.sqrt(Math.max.call(null, p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
-                setImmediate(function () {
-                    $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
-                });
-            });
-            $(ui.element).on('mouseup mouseleave', 'button, .has-clickeffect', function (e) {
-                var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
-                $overlay.addClass('animate-out');
-                $overlay.bind('transitionend otransitionend webkitTransitionEnd', function () {
-                    $overlay.remove();
-                });
-            });
+        },
+        show: function (ui, control, pos) {
+            if (ui.type === 'contextmenu') {
+                showContextMenu(ui.element, pos);
+            }
+        },
+        controlExecuted: function (ui, control, executed) {
+            if (/callout|dropdown|contextmenu/.test(executed.contextualParent.type)) {
+                hideContextMenu();
+            }
         }
     };
+
+    $(function () {
+        $(document.body).on('mousedown', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+            var pos = e.currentTarget.getBoundingClientRect();
+            var $overlay = $('<div class="typer-ui-clickeffect">').appendTo(e.currentTarget).css({
+                top: e.clientY - pos.top,
+                left: e.clientX - pos.left
+            });
+            var p1 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.left, 2);
+            var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
+            var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
+            var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
+            var scalePercent = 0.5 + 2 * Math.sqrt(Math.max.call(null, p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
+            setImmediate(function () {
+                $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
+            });
+        });
+        $(document.body).on('mouseup mouseleave', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+            var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
+            $overlay.addClass('animate-out');
+            $overlay.bind('transitionend otransitionend webkitTransitionEnd', function () {
+                $overlay.remove();
+            });
+        });
+        $(document.body).mousedown(function (e) {
+            if (currentMenu && !Typer.containsOrEquals(currentMenu, e.target)) {
+                hideContextMenu();
+            }
+        });
+        $(window).bind('resize scroll orientationchange', function (e) {
+            updateDialogPositions();
+        });
+    });
 
 } (jQuery, window.Typer));
 

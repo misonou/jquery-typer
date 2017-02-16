@@ -2,7 +2,6 @@
     'use strict';
 
     var activeToolbar;
-    var activeContextMenu;
     var timeout;
 
     function nativePrompt(message, value) {
@@ -36,7 +35,7 @@
         if (toolbar.widget || !toolbar.options.container) {
             clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
-                hideToolbar(true);
+                hideToolbar();
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
@@ -65,46 +64,11 @@
         }
     }
 
-    function showContextMenu(contextMenu, x, y) {
-        contextMenu.update();
-        if (activeContextMenu !== contextMenu) {
-            hideContextMenu();
-            activeContextMenu = contextMenu;
-            $(contextMenu.element).appendTo(document.body);
-            Typer.ui.setZIndex(contextMenu.element, contextMenu.typer.element);
-        }
-        if (x + $(contextMenu.element).width() > $(window).width()) {
-            x -= $(contextMenu.element).width();
-        }
-        if (y + $(contextMenu.element).height() > $(window).height()) {
-            y -= $(contextMenu.element).height();
-        }
-        $(contextMenu.element).css({
-            position: 'fixed',
-            left: x,
-            top: y
-        });
-    }
-
-    function hideToolbar(force) {
-        clearTimeout(timeout);
-        if (force) {
-            if (activeToolbar) {
-                $(activeToolbar.element).detach();
-                activeToolbar.position = '';
-                activeToolbar = null;
-            }
-        } else {
-            timeout = setTimeout(function () {
-                hideToolbar(true);
-            }, 100);
-        }
-    }
-
-    function hideContextMenu() {
-        if (activeContextMenu) {
-            $(activeContextMenu.element).detach();
-            activeContextMenu = null;
+    function hideToolbar(toolbar) {
+        if (activeToolbar && (!toolbar || activeToolbar === toolbar)) {
+            $(activeToolbar.element).detach();
+            activeToolbar.position = '';
+            activeToolbar = null;
         }
     }
 
@@ -144,20 +108,12 @@
             });
         }
         if (type === 'contextmenu') {
-            var focusout;
             $(typer.element).bind('contextmenu', function (e) {
                 e.preventDefault();
-                focusout = false;
-                showContextMenu(toolbar, e.clientX, e.clientY);
-            });
-            $elm.focusout(function (e) {
-                focusout = true;
-            });
-            $elm.mouseup(function (e) {
-                setTimeout(function () {
-                    if (focusout) {
-                        hideContextMenu();
-                    }
+                toolbar.update();
+                toolbar.trigger(toolbar, 'show', {
+                    x: e.clientX,
+                    y: e.clientY
                 });
             });
         }
@@ -194,7 +150,7 @@
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            timeout = setTimeout(hideToolbar);
+            hideToolbar(e.widget.toolbar);
         },
         widgetFocusin: function (e) {
             if (e.widget.widgetbars[e.targetWidget.id]) {
@@ -221,13 +177,6 @@
         if (activeToolbar) {
             showToolbar(activeToolbar);
         }
-    });
-    $(function () {
-        $(document.body).mouseup(function (e) {
-            if (activeContextMenu && !$.contains(activeContextMenu.element, e.target)) {
-                hideContextMenu();
-            }
-        });
     });
 
     /* ********************************

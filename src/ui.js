@@ -128,14 +128,15 @@
 
     function triggerEvent(ui, control, name, optArg) {
         callFunction(ui, control, name, optArg);
-        var themeEvent = control.type + name.charAt(0).toUpperCase() + name.slice(1);
+        var themeEvent = ui === control ? name : control.type + name.charAt(0).toUpperCase() + name.slice(1);
         if (isFunction(definedThemes[ui.theme][themeEvent])) {
             definedThemes[ui.theme][themeEvent](ui, control, optArg);
         }
     }
 
-    function resolveControls(ui, control) {
+    function resolveControls(ui, control, contextualParent) {
         control = control || ui;
+        contextualParent = control.type !== 'group' ? control : contextualParent || ui;
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
@@ -148,13 +149,14 @@
             var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
             inst.ui = ui;
             inst.parent = control;
+            inst.contextualParent = contextualParent;
             inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
             if (inst.label === undefined) {
                 inst.label = inst.name;
             }
             defaultOrder[inst.name] = i;
             ui.all[inst.name] = inst;
-            resolveControls(ui, inst);
+            resolveControls(ui, inst, contextualParent);
             return inst;
         });
         control.controls.sort(function (a, b) {
@@ -298,27 +300,33 @@
     }
 
     Typer.ui = define('TyperUI', null, function (options, parentUI) {
-        if (parentUI) {
+        if (typeof options === 'string') {
             options = {
+                controls: options
+            };
+        }
+        if (parentUI) {
+            $.extend(options, {
                 theme: parentUI.theme,
                 typer: parentUI.typer,
                 widget: parentUI.widget,
-                controls: options,
                 parentUI: parentUI
-            };
+            });
         }
         var self = $.extend(this, options);
         self.all = {};
         Object.defineProperty(self.all, 'expandedFrom', {
             value: self.controls
         });
+        if (!self.theme) {
+            self.theme = Object.getOwnPropertyNames(definedThemes)[0];
+        }
         self.controls = resolveControls(self);
         self.element = renderControl(self);
-        $(self.element).addClass('typer-ui typer-ui-' + options.theme);
+        $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
-        callFunction(self, definedThemes[self.theme], 'init');
         foreachControl(self, triggerEvent, 'init');
         triggerEvent(self, self, 'init');
     });
@@ -442,26 +450,30 @@
                 }
             }
         },
-        spawn: function (control, value) {
+        openDialog: function (control, value, pin) {
             var ui = Typer.ui(control, this);
             ui.setValue(control, value);
+            ui.pinToParent = pin;
             return ui.execute();
         },
-        alert: function (message) {
-            var dialog = Typer.ui('ui:alert', this);
-            dialog.all['ui:prompt-message'].label = message;
-            return dialog.execute();
+        alert: function (message, pin) {
+            var ui = Typer.ui('ui:alert', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
         },
-        confirm: function (message) {
-            var dialog = Typer.ui('ui:confirm', this);
-            dialog.all['ui:prompt-message'].label = message;
-            return dialog.execute();
+        confirm: function (message, pin) {
+            var ui = Typer.ui('ui:confirm', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
         },
-        prompt: function (message, value) {
-            var dialog = Typer.ui('ui:prompt', this);
-            dialog.all['ui:prompt-message'].label = message;
-            dialog.all['ui:prompt'].value = value;
-            return dialog.execute();
+        prompt: function (message, value, pin) {
+            var ui = Typer.ui('ui:prompt', this);
+            ui.all['ui:prompt-message'].label = message;
+            ui.all['ui:prompt'].value = value;
+            ui.pinToParent = pin;
+            return ui.execute();
         }
     });
 
@@ -552,6 +564,31 @@
             if (!$.contains(element, document.activeElement)) {
                 $(':input, [contenteditable], a[href], area[href], iframe', element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
+        },
+        openDialog: function (control, value, pin) {
+            var ui = Typer.ui(control);
+            ui.setValue(control, value);
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        alert: function (message, pin) {
+            var ui = Typer.ui('ui:alert');
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        confirm: function (message, pin) {
+            var ui = Typer.ui('ui:confirm');
+            ui.all['ui:prompt-message'].label = message;
+            ui.pinToParent = pin;
+            return ui.execute();
+        },
+        prompt: function (message, value, pin) {
+            var ui = Typer.ui('ui:prompt');
+            ui.all['ui:prompt-message'].label = message;
+            ui.all['ui:prompt'].value = value;
+            ui.pinToParent = pin;
+            return ui.execute();
         }
     });
 
@@ -623,8 +660,8 @@
         }),
         dialog: define('TyperUIDialog', {
             type: 'dialog',
-            keyboardResolve: false,
-            keyboardReject: false,
+            keyboardResolve: true,
+            keyboardReject: true,
             resolve: 'ui:button-ok',
             reject: 'ui:button-cancel'
         }, function (options) {

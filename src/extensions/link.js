@@ -56,7 +56,7 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.spawn('dialog:selectLink', currentValue);
+                return toolbar.openDialog('dialog:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
