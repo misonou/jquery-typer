@@ -465,6 +465,7 @@
         var topNodeType = options.inline || is(topElement, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
         var widgets = [];
         var widgetOptions = {};
+        var relatedElements = new WeakMap();
         var undoable = {};
         var currentSelection;
         var typerDocument;
@@ -602,7 +603,7 @@
                 } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
                     node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
                 } else {
-                    node.nodeType = widgetOption.inline && !is(context, NODE_INLINE_WIDGET) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
                 }
             }
 
@@ -994,7 +995,7 @@
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
-                            caretPoint = createRange(lastNode, -0);
+                            caretPoint = is(node, NODE_INLINE_WIDGET) ? createRange(lastNode, false) : createRange(lastNode, -0);
                         }
                         paragraphAsInline = false;
                     } else {
@@ -1395,30 +1396,31 @@
                 e.preventDefault();
             });
 
-            $self.bind('focus', function () {
-                var mousedown1 = mousedown;
-                setImmediate(function () {
-                    if (!userFocus.has(typer)) {
-                        typerFocused = true;
-                        triggerEvent(EVENT_ALL, 'focusin');
-                        if (!mousedown1) {
-                            currentSelection.focus();
-                        }
+            $self.bind('focus', function (e) {
+                if (!userFocus.has(typer)) {
+                    typerFocused = true;
+                    triggerEvent(EVENT_ALL, 'focusin');
+                    if (!mousedown) {
+                        currentSelection.focus();
                     }
-                    windowFocusedOut = false;
-                    userFocus.delete(typer);
-                });
+                }
+                windowFocusedOut = false;
+                userFocus.delete(typer);
             });
 
-            $self.bind('blur', function () {
-                setImmediate(function () {
-                    if (!windowFocusedOut && !userFocus.has(typer)) {
-                        typerFocused = false;
-                        triggerWidgetFocusout();
-                        triggerEvent(EVENT_ALL, 'focusout');
+            $self.bind('blur', function (e) {
+                if (!windowFocusedOut) {
+                    for (var element = e.relatedTarget; element; element = element.parentNode) {
+                        if (relatedElements.has(element)) {
+                            userFocus.set(typer, element);
+                            return;
+                        }
                     }
+                    typerFocused = false;
+                    triggerWidgetFocusout();
+                    triggerEvent(EVENT_ALL, 'focusout');
                     normalize();
-                });
+                }
             });
 
             var defaultKeystroke = {
@@ -1485,17 +1487,11 @@
         }
 
         var retainFocusHandlers = {
-            focusin: function (e) {
-                userFocus.set(typer, e.currentTarget);
-            },
             focusout: function (e) {
-                var focusoutTarget = e.currentTarget;
-                setImmediate(function () {
-                    if (!containsOrEquals(focusoutTarget, e.relatedTarget) && userFocus.get(typer) === focusoutTarget && !getActiveRange(topElement)) {
-                        userFocus.delete(typer);
-                        $self.trigger('focusout');
-                    }
-                });
+                if (!containsOrEquals(e.currentTarget, e.relatedTarget) && containsOrEquals(userFocus.get(typer), e.currentTarget) && !getActiveRange(topElement)) {
+                    userFocus.delete(typer);
+                    $self.trigger('focusout');
+                }
             }
         };
 
@@ -1536,6 +1532,7 @@
                 return range && typerDocument.getNode(range.commonAncestorContainer);
             },
             retainFocus: function (element) {
+                relatedElements.set(element, true);
                 $(element).bind(retainFocusHandlers);
             },
             invoke: function (command, value) {
@@ -1581,7 +1578,9 @@
                     insertContents(createRange(widget.element, true), textContent);
                     removeNode(widget.element);
                 } else {
+                    var parentNode = typerDocument.getNode(widget.element.parentNode);
                     removeNode(widget.element);
+                    triggerEvent(parentNode.widget, 'contentChange');
                 }
             },
             execCommand: function (commandName, value) {
@@ -2392,13 +2391,20 @@
                             tx.insertText(value);
                         });
                     }
+                },
+                hasContent: function () {
+                    return !!this.getValue();
+                },
+                validate: function () {
+                    var value = this.getValue();
+                    if (this.presetOptions.required && !value) {
+                        return false;
+                    }
+                    return true;
                 }
             },
             init: function (e) {
                 e.typer.getSelection().moveToText(e.typer.element, -0);
-            },
-            contentChange: function (e) {
-                $(e.typer.element).toggleClass('has-value', !!e.typer.getValue());
             }
         }
     };
@@ -2423,6 +2429,7 @@
         var originalInit = options.init;
         options.init = function (e) {
             $.extend(e.typer, preset.overrides);
+            e.typer.presetOptions = e.typer.getStaticWidget('__preset__').options;
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }
@@ -2443,8 +2450,17 @@
 (function ($, Typer) {
     'use strict';
 
+    var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
+    var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
+
     var isFunction = $.isFunction;
     var boolAttrs = 'checked selected disabled readonly multiple ismap'.split(' ');
+    var alwaysTrue = function () {
+        return true;
+    };
+    var alwaysFalse = function () {
+        return false;
+    };
 
     var definedControls = {};
     var definedIcons = {};
@@ -2549,6 +2565,11 @@
         };
     }
 
+    function getZIndex(element, pseudo) {
+        var style = window.getComputedStyle(element, pseudo || null);
+        return /absolute|fixed|relative/.test(style.position) && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+    }
+
     function toggleDisplay($elm, visible) {
         if (!visible) {
             if ($elm.css('display') !== 'none') {
@@ -2593,6 +2614,9 @@
             inst.parent = control;
             inst.contextualParent = contextualParent;
             inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            if (inst.icon === undefined) {
+                inst.icon = inst.name;
+            }
             if (inst.label === undefined) {
                 inst.label = inst.name;
             }
@@ -2615,7 +2639,7 @@
         var bindedProperties = {};
 
         function propertyChanged(prop, value) {
-            value = (bindTransforms[prop] || bindTransforms.__default__)(value);
+            value = (bindTransforms[prop] || bindTransforms.__default__)(value, ui);
             $.each(bindedProperties[prop], function (i, v) {
                 if (v[1] === '_') {
                     $(v[0]).text(value || '');
@@ -2735,10 +2759,54 @@
         triggerEvent(ui, ui, 'controlExecuted', control);
     }
 
-    function foreachControl(ui, fn, optArg) {
+    function foreachControl(ui, fn, optArg, fnArg) {
         $.each(Object.keys(ui.all).reverse(), function (i, v) {
-            fn(ui, ui.all[v], optArg);
+            fn(ui, ui.all[v], optArg, fnArg);
         });
+    }
+
+    function createForm(ui, control) {
+        var deferred = $.Deferred();
+        var execute = function (value, submitControl) {
+            if (ui.validate()) {
+                submitControl = submitControl || ui.resolve(control.resolve)[0];
+                var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
+                if (promise.state() === 'pending') {
+                    ui.trigger(control, 'waiting', submitControl);
+                }
+                promise.done(function (returnValue) {
+                    ui.trigger(control, 'success', returnValue);
+                    deferred.resolve(value);
+                });
+                promise.fail(function (err) {
+                    ui.trigger(control, 'error', err);
+                    Typer.ui.focus(control.element, true);
+                });
+            } else {
+                ui.trigger(control, 'validateError');
+                Typer.ui.focus(control.element, true);
+            }
+        };
+        var defaultResolve = function () {
+            execute(ui.getValue(control.resolveValue || control), this);
+        };
+        var defaultReject = function () {
+            deferred.reject();
+        };
+        $.each(ui.resolve(control.resolve), function (i, v) {
+            v.execute = defaultResolve;
+        });
+        $.each(ui.resolve(control.reject), function (i, v) {
+            v.execute = defaultReject;
+        });
+        if (isFunction(control.setup)) {
+            control.setup(ui, control, execute, defaultReject);
+        }
+        return {
+            promise: deferred.promise(),
+            resolve: defaultResolve,
+            reject: defaultReject
+        };
     }
 
     Typer.ui = define('TyperUI', null, function (options, parentUI) {
@@ -2865,6 +2933,16 @@
                 }
             }
         },
+        validate: function () {
+            var optArg = {
+                isFailed: alwaysFalse,
+                fail: function () {
+                    this.isFailed = alwaysTrue;
+                }
+            };
+            foreachControl(this, triggerEvent, 'validate', optArg);
+            return !optArg.isFailed();
+        },
         execute: function (control) {
             var self = this;
             if (typeof control === 'string') {
@@ -2881,14 +2959,14 @@
                         executeControl(self, control);
                     });
                     promise.always(function () {
-                        executionContext.pop(control);
+                        executionContext.shift(control);
                     });
                     return promise;
                 }
                 try {
                     executeControl(self, control);
                 } finally {
-                    executionContext.pop(control);
+                    executionContext.shift(control);
                 }
             }
         },
@@ -2923,7 +3001,7 @@
         controls: definedControls,
         themes: definedThemes,
         getIcon: function (control, iconSet) {
-            return (definedIcons[control.icon] || definedIcons[control.name] || '')[iconSet] || '';
+            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[iconSet] || '';
         },
         getShortcut: function (command) {
             var current = definedShortcuts._map[command];
@@ -2991,10 +3069,13 @@
                 if (Typer.comparePosition(v, over, true)) {
                     return 2;
                 }
-                if (/absolute|fixed|relative/.test($(v).css('position')) && $(v).css('z-index') !== 'auto') {
-                    maxZIndex = Math.max(maxZIndex, parseInt($(v).css('z-index')));
+                var zIndex = getZIndex(v);
+                if (zIndex >= 0) {
+                    maxZIndex = Math.max(maxZIndex, zIndex);
                     return 2;
                 }
+                maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
+                return 1;
             }, false);
             Typer.iterate(iterator);
             element.style.zIndex = maxZIndex + 1;
@@ -3002,9 +3083,9 @@
                 element.style.position = 'relative';
             }
         },
-        focus: function (element) {
-            if (!$.contains(element, document.activeElement)) {
-                $(':input, [contenteditable], a[href], area[href], iframe', element).not(':disabled, :hidden').andSelf().eq(0).focus();
+        focus: function (element, inputOnly) {
+            if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
+                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
         },
         openDialog: function (control, value, pin) {
@@ -3105,44 +3186,15 @@
             keyboardResolve: true,
             keyboardReject: true,
             resolve: 'ui:button-ok',
-            reject: 'ui:button-cancel'
-        }, function (options) {
-            $.extend(this, options);
-            this.dialog = function (ui, self) {
-                var deferred = $.Deferred();
+            reject: 'ui:button-cancel',
+            dialog: function (ui, self) {
                 var previousDialog = currentDialog;
                 var previousActiveElement = document.activeElement;
-                var execute = function (value) {
-                    var promise = $.when(isFunction(self.submit) && self.submit(ui, self));
-                    if (promise.state() === 'pending') {
-                        ui.trigger(self, 'submit');
-                        promise.fail(function (err) {
-                            ui.trigger(self, 'error', err);
-                        });
-                    }
-                    promise.done(function () {
-                        deferred.resolve(value);
-                    });
-                };
-                var defaultResolve = function () {
-                    execute(ui.getValue(self.resolveValue || self));
-                };
-                var defaultReject = function () {
-                    deferred.reject();
-                };
-                $.each(ui.resolve(self.resolve), function (i, v) {
-                    v.execute = defaultResolve;
-                });
-                $.each(ui.resolve(self.reject), function (i, v) {
-                    v.execute = defaultReject;
-                });
-                if (isFunction(self.setup)) {
-                    self.setup(ui, self, execute, defaultReject);
-                }
+                var form = createForm(ui, self);
                 ui.update();
                 ui.trigger(self, 'open');
                 setImmediate(Typer.ui.focus, self.element);
-                deferred.always(function () {
+                form.promise.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                     currentDialog = previousDialog;
@@ -3150,16 +3202,14 @@
                         previousActiveElement.focus();
                     }
                 });
-                if (ui.parentUI) {
-                    Typer.ui.setZIndex(ui.element, ui.parentUI.element);
-                }
+                Typer.ui.setZIndex(ui.element, document.body);
                 currentDialog = {
                     element: self.element,
-                    keyboardResolve: self.keyboardResolve && defaultResolve,
-                    keyboardReject: self.keyboardReject && defaultReject
+                    keyboardResolve: self.keyboardResolve && form.resolve,
+                    keyboardReject: self.keyboardReject && form.reject
                 };
-                return deferred.promise();
-            };
+                return form.promise;
+            }
         })
     });
 
@@ -3238,6 +3288,9 @@
         return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
             return v.charAt(0).toUpperCase() + v.slice(1) + '+';
         });
+    };
+    bindTransforms.icon = function (value, ui) {
+        return Typer.ui.getIcon(value, definedThemes[ui.theme].iconset);
     };
 
     $(window).keydown(function (e) {
@@ -4694,32 +4747,41 @@
 (function ($, Typer) {
     'use strict';
 
+    var ANIMATION_END = 'animationend oanimationend webkitAnimationEnd';
+    var TRANSITION_END = 'transitionend otransitionend webkitTransitionEnd';
+    var FLIP_POS = {
+        left: 'right',
+        right: 'left',
+        top: 'bottom',
+        bottom: 'top'
+    };
+
     var currentMenu;
     var currentDialogPositions = [];
 
-    function showContextMenu(element, pos) {
+    function showContextMenu(element, node, pos) {
         if (currentMenu !== element) {
             hideContextMenu();
             currentMenu = element;
             $(element).appendTo(document.body).css('position', 'fixed');
             Typer.ui.setZIndex(element, document.body);
         }
-        if (pos.getBoundingClientRect) {
-            var rect = pos.getBoundingClientRect();
-            pos = {
-                x: rect.left,
-                y: rect.bottom
-            };
-        }
-        if (pos.x + $(element).width() > $(window).width()) {
-            pos.x -= $(element).width();
-        }
-        if (pos.y + $(element).height() > $(window).height()) {
-            pos.y -= $(element).height();
+        var rect = {};
+        if (node.getBoundingClientRect) {
+            var xrel = /\b(left|right)\b/.test(pos) ? RegExp.$1 : 'left';
+            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'top';
+            var rectb = node.getBoundingClientRect();
+            rect[xrel] = rectb.left;
+            rect[yrel] = rectb.top;
+            rect[FLIP_POS[xrel]] = rectb.right;
+            rect[FLIP_POS[yrel]] = rectb.bottom;
+        } else {
+            rect.left = rect.right = node.x;
+            rect.top = rect.bottom = node.y;
         }
         $(element).css({
-            left: pos.x,
-            top: pos.y
+            left: rect.left + $(element).outerWidth() > $(window).width() ? rect.right - $(element).outerWidth() : rect.left,
+            top: rect.top + $(element).outerHeight() > $(window).height() ? rect.bottom - $(element).outerHeight() : rect.top
         });
     }
 
@@ -4745,13 +4807,31 @@
     }
 
     function updateDialogPositions() {
+        var windowSize = document.documentElement.getBoundingClientRect();
+
         $.each(currentDialogPositions, function (i, v) {
+            var dialog = $(v.target).find('.typer-ui-dialog')[0];
+            var dialogSize = dialog.getBoundingClientRect();
             var rect = v.reference.getBoundingClientRect();
-            $(v.target).css({
+            var stick = {};
+
+            var $r = $(v.target).css({
                 top: rect.top,
                 left: rect.left,
                 width: rect.width,
                 height: rect.height
+            });
+            if (v.pinToParent === 'bottom' || v.pinToParent === 'top') {
+                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
+                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
+            }
+            if (v.pinToParent === 'left' || v.pinToParent === 'right') {
+                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
+                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
+            }
+            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
+                $r.toggleClass('stick-' + v, !!stick[v]);
+                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
             });
         });
     }
@@ -4765,25 +4845,23 @@
         controlActiveClass: 'active',
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
+        iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
             var hasIcon = !!Typer.ui.getIcon(control, 'material');
-            return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
+            return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && !ui.showButtonLabel && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
         },
         labelIcon: function (ui, control) {
-            var icon = Typer.ui.getIcon(control, 'material');
-            if ((control.parent || ui).type === 'dropdown') {
+            if ((control.parent || ui).type === 'dropdown' || control.type === 'checkbox' || !Typer.ui.getIcon(control, 'material')) {
                 return '';
             }
-            if ((control.parent || ui).type === 'callout' || ui.type === 'contextmenu') {
-                return control.type === 'checkbox' ? '' : icon.replace(/.*/, '<i class="material-icons">$&</i>');
-            }
-            return icon.replace(/.+/, '<i class="material-icons">$&</i>');
+            return '<i class="material-icons" x:bind="(_:icon)"></i>';
         },
-        buttonset: '<div class="typer-ui-buttonset"><br x:t="children"/></div>',
+        buttonset: '<div class="typer-ui-buttonset"><div class="typer-ui-buttonset-pad"></div><br x:t="children"/></div>',
         buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
+        form: '<div class="typer-ui-form"><br x:t="children"/></div>',
         menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
-        toolbar: '<div class="typer-ui-toolbar"><div class="typer-ui-buttonset"><br x:t="children"/></div></div>',
+        toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
         contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
@@ -4797,7 +4875,7 @@
         file: '<label class="has-clickeffect" x:bind="(title:label)"><input type="file"/><br x:t="label"/></label>',
         fileInit: function (ui, control) {
             $(control.element).find(':file').change(function (e) {
-                control.value = e.target.dataTransfer;
+                control.value = e.target.files;
                 ui.execute(control);
                 setImmediate(function () {
                     var form = document.createElement('form');
@@ -4807,38 +4885,42 @@
                 });
             });
         },
-        callout: '<div class="typer-ui-menu"><button x:bind="(title:label)"><br x:t="label"/></button><br x:t="menupane"/></div>',
-        calloutExecuteOn: {
-            on: 'click',
-            of: '>button'
+        callout: '<button class="typer-ui-callout" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></button>',
+        calloutExecuteOn: 'click',
+        dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
+        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
+        checkboxInit: function (ui, control) {
+            $(control.element).change(function () {
+                control.value = $(this).hasClass('checked');
+                ui.execute(control);
+            });
         },
-        dropdown: '<div class="typer-ui-dropdown typer-ui-menu"><button x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span></button><br x:t="menupane"/></div>',
-        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><input type="checkbox" x:bind="(checked:value)"/><br x:t="label"/></label>',
-        checkboxExecuteOn: {
-            on: 'change',
-            of: ':checkbox'
+        checkboxStateChange: function (ui, control) {
+            $(control.element).toggleClass('checked', !!control.value);
         },
-        textbox: '<label x:bind="(title:label)"><div class="typer-ui-textbox"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div></div></div></label>',
+        textbox: '<label x:bind="(title:label)"><div class="typer-ui-textbox"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div></div></label>',
         textboxInit: function (ui, control) {
-            var $parent = $(control.element).parents('.typer-ui-menu');
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
-                focusin: function () {
-                    $parent.addClass('open');
-                },
-                focusout: function () {
-                    $parent.removeClass('open');
-                },
                 contentChange: function (e) {
                     if (e.typer.focused()) {
                         control.value = control.preset.getValue();
                         ui.execute(control);
                     }
+                    $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
                 }
             }));
         },
+        textboxValidate: function (ui, control, opt) {
+            var valid = control.preset.validate() !== false;
+            $('.typer-ui-textbox', control.element).toggleClass('error', !valid);
+            if (!valid) {
+                opt.fail();
+            }
+        },
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
+            $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent());
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
@@ -4846,13 +4928,14 @@
             var parentControl = ui.parentUI && ui.parentUI.getExecutingControl();
             var $wrapper = $(ui.element).find('.typer-ui-dialog-wrapper');
             var $content = $(ui.element).find('.typer-ui-dialog-content');
-            var $blocker = $('<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:url(data:image/gif;,);">');
 
             $(ui.element).appendTo(document.body);
-            $blocker.prependTo(ui.element).click(function () {
-                $content.addClass('pop');
+            $wrapper.click(function (e) {
+                if (e.target === $wrapper[0]) {
+                    $content.addClass('pop');
+                }
             });
-            $content.bind('animationend oanimationend webkitAnimationEnd', function () {
+            $content.bind(ANIMATION_END, function () {
                 $content.removeClass('pop');
             });
             if (resolveButton) {
@@ -4863,18 +4946,27 @@
                 if (/top|bottom|left|right/.test(ui.pinToParent) && document.activeElement !== document.body) {
                     var pinElement = parentControl ? parentControl.element : document.activeElement;
                     $wrapper.addClass('pinned pinned-' + ui.pinToParent);
-                    $(pinElement).addClass('pin-active');
+                    if (parentControl) {
+                        $(pinElement).addClass('pin-active');
+                    }
                     currentDialogPositions.push({
                         dialog: ui,
                         reference: pinElement,
-                        target: $wrapper[0]
+                        target: $wrapper[0],
+                        pinToParent: ui.pinToParent
                     });
                     updateDialogPositions();
                 }
             });
         },
+        dialogWaiting: function (ui, control) {
+            $(control.element).addClass('loading');
+        },
+        dialogError: function (ui, control) {
+            $(control.element).removeClass('loading');
+        },
         dialogClose: function (ui, control) {
-            $(control.element).addClass('closing').one('transitionend otransitionend webkitTransitionEnd', function () {
+            $(control.element).addClass('closing').one(TRANSITION_END, function () {
                 $(ui.element).remove();
                 $.each(currentDialogPositions, function (i, v) {
                     if (v.dialog === ui) {
@@ -4886,7 +4978,7 @@
             });
         },
         init: function (ui) {
-            $(ui.element).on('mouseover', '.typer-ui-menu:has(>.typer-ui-float)', function (e) {
+            $(ui.element).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
                 setMenuPosition(e.currentTarget);
             });
             $.each(ui.all, function (i, v) {
@@ -4896,7 +4988,7 @@
                         ui.typer.retainFocus(callout);
                     }
                     $(v.element).click(function (e) {
-                        showContextMenu(callout, v.element);
+                        showContextMenu(callout, v.element, 'left bottom');
                     });
                 }
             });
@@ -4914,9 +5006,12 @@
     };
 
     $(function () {
+        $(document.body).on('click', '.typer-ui-material .typer-ui-checkbox', function (e) {
+            $(this).toggleClass('checked').trigger('change');
+        });
         $(document.body).on('mousedown', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
             var pos = e.currentTarget.getBoundingClientRect();
-            var $overlay = $('<div class="typer-ui-clickeffect">').appendTo(e.currentTarget).css({
+            var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget).children().css({
                 top: e.clientY - pos.top,
                 left: e.clientX - pos.left
             });
@@ -4928,11 +5023,11 @@
             setImmediate(function () {
                 $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
+            e.stopPropagation();
         });
         $(document.body).on('mouseup mouseleave', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
-            $overlay.addClass('animate-out');
-            $overlay.bind('transitionend otransitionend webkitTransitionEnd', function () {
+            $overlay.children().addClass('animate-out').bind(TRANSITION_END, function () {
                 $overlay.remove();
             });
         });

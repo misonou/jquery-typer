@@ -1,8 +1,17 @@
 (function ($, Typer) {
     'use strict';
 
+    var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
+    var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
+
     var isFunction = $.isFunction;
     var boolAttrs = 'checked selected disabled readonly multiple ismap'.split(' ');
+    var alwaysTrue = function () {
+        return true;
+    };
+    var alwaysFalse = function () {
+        return false;
+    };
 
     var definedControls = {};
     var definedIcons = {};
@@ -107,6 +116,11 @@
         };
     }
 
+    function getZIndex(element, pseudo) {
+        var style = window.getComputedStyle(element, pseudo || null);
+        return /absolute|fixed|relative/.test(style.position) && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+    }
+
     function toggleDisplay($elm, visible) {
         if (!visible) {
             if ($elm.css('display') !== 'none') {
@@ -151,6 +165,9 @@
             inst.parent = control;
             inst.contextualParent = contextualParent;
             inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            if (inst.icon === undefined) {
+                inst.icon = inst.name;
+            }
             if (inst.label === undefined) {
                 inst.label = inst.name;
             }
@@ -173,7 +190,7 @@
         var bindedProperties = {};
 
         function propertyChanged(prop, value) {
-            value = (bindTransforms[prop] || bindTransforms.__default__)(value);
+            value = (bindTransforms[prop] || bindTransforms.__default__)(value, ui);
             $.each(bindedProperties[prop], function (i, v) {
                 if (v[1] === '_') {
                     $(v[0]).text(value || '');
@@ -293,10 +310,54 @@
         triggerEvent(ui, ui, 'controlExecuted', control);
     }
 
-    function foreachControl(ui, fn, optArg) {
+    function foreachControl(ui, fn, optArg, fnArg) {
         $.each(Object.keys(ui.all).reverse(), function (i, v) {
-            fn(ui, ui.all[v], optArg);
+            fn(ui, ui.all[v], optArg, fnArg);
         });
+    }
+
+    function createForm(ui, control) {
+        var deferred = $.Deferred();
+        var execute = function (value, submitControl) {
+            if (ui.validate()) {
+                submitControl = submitControl || ui.resolve(control.resolve)[0];
+                var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
+                if (promise.state() === 'pending') {
+                    ui.trigger(control, 'waiting', submitControl);
+                }
+                promise.done(function (returnValue) {
+                    ui.trigger(control, 'success', returnValue);
+                    deferred.resolve(value);
+                });
+                promise.fail(function (err) {
+                    ui.trigger(control, 'error', err);
+                    Typer.ui.focus(control.element, true);
+                });
+            } else {
+                ui.trigger(control, 'validateError');
+                Typer.ui.focus(control.element, true);
+            }
+        };
+        var defaultResolve = function () {
+            execute(ui.getValue(control.resolveValue || control), this);
+        };
+        var defaultReject = function () {
+            deferred.reject();
+        };
+        $.each(ui.resolve(control.resolve), function (i, v) {
+            v.execute = defaultResolve;
+        });
+        $.each(ui.resolve(control.reject), function (i, v) {
+            v.execute = defaultReject;
+        });
+        if (isFunction(control.setup)) {
+            control.setup(ui, control, execute, defaultReject);
+        }
+        return {
+            promise: deferred.promise(),
+            resolve: defaultResolve,
+            reject: defaultReject
+        };
     }
 
     Typer.ui = define('TyperUI', null, function (options, parentUI) {
@@ -423,6 +484,16 @@
                 }
             }
         },
+        validate: function () {
+            var optArg = {
+                isFailed: alwaysFalse,
+                fail: function () {
+                    this.isFailed = alwaysTrue;
+                }
+            };
+            foreachControl(this, triggerEvent, 'validate', optArg);
+            return !optArg.isFailed();
+        },
         execute: function (control) {
             var self = this;
             if (typeof control === 'string') {
@@ -439,14 +510,14 @@
                         executeControl(self, control);
                     });
                     promise.always(function () {
-                        executionContext.pop(control);
+                        executionContext.shift(control);
                     });
                     return promise;
                 }
                 try {
                     executeControl(self, control);
                 } finally {
-                    executionContext.pop(control);
+                    executionContext.shift(control);
                 }
             }
         },
@@ -481,7 +552,7 @@
         controls: definedControls,
         themes: definedThemes,
         getIcon: function (control, iconSet) {
-            return (definedIcons[control.icon] || definedIcons[control.name] || '')[iconSet] || '';
+            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[iconSet] || '';
         },
         getShortcut: function (command) {
             var current = definedShortcuts._map[command];
@@ -549,10 +620,13 @@
                 if (Typer.comparePosition(v, over, true)) {
                     return 2;
                 }
-                if (/absolute|fixed|relative/.test($(v).css('position')) && $(v).css('z-index') !== 'auto') {
-                    maxZIndex = Math.max(maxZIndex, parseInt($(v).css('z-index')));
+                var zIndex = getZIndex(v);
+                if (zIndex >= 0) {
+                    maxZIndex = Math.max(maxZIndex, zIndex);
                     return 2;
                 }
+                maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
+                return 1;
             }, false);
             Typer.iterate(iterator);
             element.style.zIndex = maxZIndex + 1;
@@ -560,9 +634,9 @@
                 element.style.position = 'relative';
             }
         },
-        focus: function (element) {
-            if (!$.contains(element, document.activeElement)) {
-                $(':input, [contenteditable], a[href], area[href], iframe', element).not(':disabled, :hidden').andSelf().eq(0).focus();
+        focus: function (element, inputOnly) {
+            if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
+                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
         },
         openDialog: function (control, value, pin) {
@@ -663,44 +737,15 @@
             keyboardResolve: true,
             keyboardReject: true,
             resolve: 'ui:button-ok',
-            reject: 'ui:button-cancel'
-        }, function (options) {
-            $.extend(this, options);
-            this.dialog = function (ui, self) {
-                var deferred = $.Deferred();
+            reject: 'ui:button-cancel',
+            dialog: function (ui, self) {
                 var previousDialog = currentDialog;
                 var previousActiveElement = document.activeElement;
-                var execute = function (value) {
-                    var promise = $.when(isFunction(self.submit) && self.submit(ui, self));
-                    if (promise.state() === 'pending') {
-                        ui.trigger(self, 'submit');
-                        promise.fail(function (err) {
-                            ui.trigger(self, 'error', err);
-                        });
-                    }
-                    promise.done(function () {
-                        deferred.resolve(value);
-                    });
-                };
-                var defaultResolve = function () {
-                    execute(ui.getValue(self.resolveValue || self));
-                };
-                var defaultReject = function () {
-                    deferred.reject();
-                };
-                $.each(ui.resolve(self.resolve), function (i, v) {
-                    v.execute = defaultResolve;
-                });
-                $.each(ui.resolve(self.reject), function (i, v) {
-                    v.execute = defaultReject;
-                });
-                if (isFunction(self.setup)) {
-                    self.setup(ui, self, execute, defaultReject);
-                }
+                var form = createForm(ui, self);
                 ui.update();
                 ui.trigger(self, 'open');
                 setImmediate(Typer.ui.focus, self.element);
-                deferred.always(function () {
+                form.promise.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
                     currentDialog = previousDialog;
@@ -708,16 +753,14 @@
                         previousActiveElement.focus();
                     }
                 });
-                if (ui.parentUI) {
-                    Typer.ui.setZIndex(ui.element, ui.parentUI.element);
-                }
+                Typer.ui.setZIndex(ui.element, document.body);
                 currentDialog = {
                     element: self.element,
-                    keyboardResolve: self.keyboardResolve && defaultResolve,
-                    keyboardReject: self.keyboardReject && defaultReject
+                    keyboardResolve: self.keyboardResolve && form.resolve,
+                    keyboardReject: self.keyboardReject && form.reject
                 };
-                return deferred.promise();
-            };
+                return form.promise;
+            }
         })
     });
 
@@ -796,6 +839,9 @@
         return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
             return v.charAt(0).toUpperCase() + v.slice(1) + '+';
         });
+    };
+    bindTransforms.icon = function (value, ui) {
+        return Typer.ui.getIcon(value, definedThemes[ui.theme].iconset);
     };
 
     $(window).keydown(function (e) {

@@ -17,13 +17,20 @@
                             tx.insertText(value);
                         });
                     }
+                },
+                hasContent: function () {
+                    return !!this.getValue();
+                },
+                validate: function () {
+                    var value = this.getValue();
+                    if (this.presetOptions.required && !value) {
+                        return false;
+                    }
+                    return true;
                 }
             },
             init: function (e) {
                 e.typer.getSelection().moveToText(e.typer.element, -0);
-            },
-            contentChange: function (e) {
-                $(e.typer.element).toggleClass('has-value', !!e.typer.getValue());
             }
         }
     };
@@ -48,6 +55,7 @@
         var originalInit = options.init;
         options.init = function (e) {
             $.extend(e.typer, preset.overrides);
+            e.typer.presetOptions = e.typer.getStaticWidget('__preset__').options;
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }

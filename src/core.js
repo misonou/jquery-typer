@@ -439,6 +439,7 @@
         var topNodeType = options.inline || is(topElement, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
         var widgets = [];
         var widgetOptions = {};
+        var relatedElements = new WeakMap();
         var undoable = {};
         var currentSelection;
         var typerDocument;
@@ -576,7 +577,7 @@
                 } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
                     node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
                 } else {
-                    node.nodeType = widgetOption.inline && !is(context, NODE_INLINE_WIDGET) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
                 }
             }
 
@@ -968,7 +969,7 @@
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
-                            caretPoint = createRange(lastNode, -0);
+                            caretPoint = is(node, NODE_INLINE_WIDGET) ? createRange(lastNode, false) : createRange(lastNode, -0);
                         }
                         paragraphAsInline = false;
                     } else {
@@ -1369,30 +1370,31 @@
                 e.preventDefault();
             });
 
-            $self.bind('focus', function () {
-                var mousedown1 = mousedown;
-                setImmediate(function () {
-                    if (!userFocus.has(typer)) {
-                        typerFocused = true;
-                        triggerEvent(EVENT_ALL, 'focusin');
-                        if (!mousedown1) {
-                            currentSelection.focus();
-                        }
+            $self.bind('focus', function (e) {
+                if (!userFocus.has(typer)) {
+                    typerFocused = true;
+                    triggerEvent(EVENT_ALL, 'focusin');
+                    if (!mousedown) {
+                        currentSelection.focus();
                     }
-                    windowFocusedOut = false;
-                    userFocus.delete(typer);
-                });
+                }
+                windowFocusedOut = false;
+                userFocus.delete(typer);
             });
 
-            $self.bind('blur', function () {
-                setImmediate(function () {
-                    if (!windowFocusedOut && !userFocus.has(typer)) {
-                        typerFocused = false;
-                        triggerWidgetFocusout();
-                        triggerEvent(EVENT_ALL, 'focusout');
+            $self.bind('blur', function (e) {
+                if (!windowFocusedOut) {
+                    for (var element = e.relatedTarget; element; element = element.parentNode) {
+                        if (relatedElements.has(element)) {
+                            userFocus.set(typer, element);
+                            return;
+                        }
                     }
+                    typerFocused = false;
+                    triggerWidgetFocusout();
+                    triggerEvent(EVENT_ALL, 'focusout');
                     normalize();
-                });
+                }
             });
 
             var defaultKeystroke = {
@@ -1459,17 +1461,11 @@
         }
 
         var retainFocusHandlers = {
-            focusin: function (e) {
-                userFocus.set(typer, e.currentTarget);
-            },
             focusout: function (e) {
-                var focusoutTarget = e.currentTarget;
-                setImmediate(function () {
-                    if (!containsOrEquals(focusoutTarget, e.relatedTarget) && userFocus.get(typer) === focusoutTarget && !getActiveRange(topElement)) {
-                        userFocus.delete(typer);
-                        $self.trigger('focusout');
-                    }
-                });
+                if (!containsOrEquals(e.currentTarget, e.relatedTarget) && containsOrEquals(userFocus.get(typer), e.currentTarget) && !getActiveRange(topElement)) {
+                    userFocus.delete(typer);
+                    $self.trigger('focusout');
+                }
             }
         };
 
@@ -1510,6 +1506,7 @@
                 return range && typerDocument.getNode(range.commonAncestorContainer);
             },
             retainFocus: function (element) {
+                relatedElements.set(element, true);
                 $(element).bind(retainFocusHandlers);
             },
             invoke: function (command, value) {
@@ -1555,7 +1552,9 @@
                     insertContents(createRange(widget.element, true), textContent);
                     removeNode(widget.element);
                 } else {
+                    var parentNode = typerDocument.getNode(widget.element.parentNode);
                     removeNode(widget.element);
+                    triggerEvent(parentNode.widget, 'contentChange');
                 }
             },
             execCommand: function (commandName, value) {
