@@ -850,7 +850,7 @@
         }
     });
     $(window).focusout(function (e) {
-        if (currentDialog && !e.relatedTarget && $.contains(currentDialog.element, e.target)) {
+        if (currentDialog && !e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
             Typer.ui.focus(currentDialog.element);
         }
     });

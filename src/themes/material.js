@@ -174,6 +174,7 @@
         },
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
+            control.value = control.preset.getValue();
             $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent());
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',

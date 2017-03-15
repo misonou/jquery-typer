@@ -192,7 +192,7 @@
     font-family: 'Material Icons';
     font-size: 16px;
     line-height: 1;
-    vertical-align: top;
+    vertical-align: text-top;
 }
 
 .typer-ui-checkbox:hover:before {
@@ -422,7 +422,6 @@ button.typer-ui-dropdown.disabled:after {
 .typer-ui-toolbar .typer-ui-textbox [contenteditable],
 .typer-ui-buttonset .typer-ui-textbox [contenteditable],
 .typer-ui-buttonlist .typer-ui-textbox [contenteditable] {
-    width: auto;
     white-space: nowrap;
 }
 
@@ -432,10 +431,6 @@ button.typer-ui-dropdown.disabled:after {
 
 .typer-ui-textbox.error [contenteditable] {
     border-bottom-color: #a90007;
-}
-
-.typer-ui-textbox.empty [contenteditable] {
-    min-width: 3em;
 }
 
 .typer-ui-buttonset .typer-ui-textbox {
@@ -455,6 +450,10 @@ button.typer-ui-dropdown.disabled:after {
 .typer-ui-textbox .typer-ui-textbox-wrapper {
     display: block;
     position: relative;
+}
+
+.typer-ui-textbox.empty .typer-ui-textbox-wrapper {
+    min-width: 3em;
 }
 
 .typer-ui-toolbar .typer-ui-textbox .typer-ui-textbox-wrapper,

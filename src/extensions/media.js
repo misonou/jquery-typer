@@ -1,7 +1,7 @@
 (function ($, Typer) {
     'use strict';
 
-    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/gi;
+    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/i;
 
     Typer.widgets.media = {
         element: 'img,audio,video,a:has(>img)',
@@ -9,7 +9,7 @@
             return widget.element.src;
         },
         insert: function (tx, options) {
-            var element = Typer.createElement(reMediaType.exec(options.src || options) && (RegExp.$1 ? 'img' : RegExp.$2 ? 'video' : 'audio'));
+            var element = Typer.createElement(reMediaType.test(options.src || options) ? (RegExp.$2 ? 'video' : RegExp.$3 ? 'audio' : 'img') : 'img');
             element.src = options.src || options;
             if (element.tagName.toLowerCase() === 'video') {
                 $(element).attr('controls', '');

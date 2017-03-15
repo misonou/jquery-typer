@@ -103,7 +103,7 @@
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 Typer.replaceElement(v.parentNode, $(html)[0]);
                 lists.push(v.parentNode);
-            } else if (tx.selection.focusNode.widget.id === 'list' && $.inArray(v.parentNode, lists) < 0) {
+            } else if ($(v).is('li') && $.inArray(v.parentNode, lists) < 0) {
                 outdentCommand(tx, [v]);
             }
         });

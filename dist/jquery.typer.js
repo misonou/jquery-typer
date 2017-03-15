@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.4
+ * jQuery Typer Plugin v0.9.5-beta
  *
  * The MIT License (MIT)
  *
@@ -814,7 +814,7 @@
             });
         }
 
-        function extractContents(range, mode, callback) {
+        function extractContents(range, mode, source, callback) {
             range = is(range, Range) || createRange(range);
 
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
@@ -910,37 +910,41 @@
                 }
                 if (contentChangedWidgets[0]) {
                     $.each(contentChangedWidgets, function (i, v) {
-                        triggerEvent(v, 'contentChange');
+                        triggerEvent(v, 'contentChange', source);
                     });
-                    triggerEvent(EVENT_STATIC, 'contentChange');
+                    triggerEvent(EVENT_STATIC, 'contentChange', source);
                 }
                 normalize(range);
             });
             return fragment;
         }
 
-        function insertContents(range, content) {
+        function insertContents(range, content, source) {
             if (!is(content, Node)) {
                 content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>');
             }
             content = slice(createDocumentFragment(content).childNodes);
 
-            extractContents(range, 'paste', function (state, startPoint, endPoint, contentEvent) {
+            extractContents(range, 'paste', source, function (state, startPoint, endPoint, contentEvent) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
+                var formattingNodes = [];
 
-                var formattingNodes;
-                if (is(state.startNode, NODE_EDITABLE_PARAGRAPH)) {
-                    formattingNodes = [];
-                } else if (is(state.startNode, NODE_PARAGRAPH)) {
-                    formattingNodes = [state.startNode.element];
-                } else if (is(state.startNode, NODE_ANY_INLINE)) {
-                    formattingNodes = $(state.startElement).parentsUntil(state.startNode.element).andSelf().get().reverse();
-                } else {
-                    formattingNodes = [createElement('p')];
+                var cur = typerDocument.getNode(state.startElement);
+                if (is(cur, NODE_ANY_INLINE)) {
+                    for (; cur !== state.startNode; cur = cur.parentNode) {
+                        if (is(cur, NODE_INLINE)) {
+                            formattingNodes.push(cur.element);
+                        }
+                    }
+                    formattingNodes.push(state.startNode.element);
+                } else if (is(cur, NODE_PARAGRAPH)) {
+                    formattingNodes[0] = state.startNode.element;
+                } else if (!is(cur, NODE_EDITABLE_PARAGRAPH)) {
+                    formattingNodes[0] = createElement('p');
                 }
 
                 while (content[0]) {
@@ -962,6 +966,10 @@
                         }
                         var splitEnd = createRange(splitLastNode.element, false);
                         var splitContent = createRange(caretPoint, splitEnd).extractContents();
+                        if (!splitContent.textContent) {
+                            // avoid unindented empty elements when splitting at end of line
+                            splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
+                        }
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
                         contentEvent.addTarget(splitEnd.startContainer);
@@ -1189,27 +1197,27 @@
 
             function deleteNextContent(e) {
                 if (!currentSelection.isCaret) {
-                    insertContents(currentSelection, '');
+                    insertContents(currentSelection, '', 'keystroke');
                 } else {
                     var selection = currentSelection.clone();
                     if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
-                        insertContents(selection, '');
+                        insertContents(selection, '', 'keystroke');
                     }
                 }
             }
 
             function handleTextInput(inputText, compositionend) {
-                if (inputText && triggerEvent(EVENT_CURRENT, 'textInput', inputText)) {
+                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
-                    insertContents(currentSelection, inputText);
+                    insertContents(currentSelection, inputText, 'textInput');
                     return true;
                 }
                 setImmediate(function () {
                     updateFromNativeInput();
-                    triggerEvent(EVENT_CURRENT, 'contentChange');
-                    triggerEvent(EVENT_STATIC, 'contentChange');
+                    triggerEvent(EVENT_CURRENT, 'contentChange', 'textInput');
+                    triggerEvent(EVENT_STATIC, 'contentChange', 'textInput');
                 });
             }
 
@@ -1233,6 +1241,9 @@
                 };
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
+                    if (!typerFocused) {
+                        currentSelection.focus();
+                    }
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
@@ -1309,8 +1320,8 @@
                 var handlers = {
                     drop: function (e) {
                         var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
-                        var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut');
-                        insertContents(range, content);
+                        var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut', e.type);
+                        insertContents(range, content, e.type);
                         e.preventDefault();
                         $self.unbind(handlers);
                     }
@@ -1320,7 +1331,7 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                clipboard.content = extractContents(currentSelection, e.type);
+                clipboard.content = extractContents(currentSelection, e.type, e.type);
                 clipboard.textContent = extractText(clipboard.content);
                 if (window.clipboardData) {
                     clipboardData.setData('Text', clipboard.textContent);
@@ -1334,13 +1345,18 @@
 
             $self.bind('paste', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                if ($.inArray('application/x-typer', clipboardData.types) >= 0) {
+                var acceptHtml = widgetOptions[currentSelection.focusNode.widget.id].accept !== 'text';
+                if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    insertContents(currentSelection, content);
+                    insertContents(currentSelection, content, e.type);
                 } else {
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
-                    insertContents(currentSelection, textContent === clipboard.textContent ? clipboard.content.cloneNode(true) : textContent);
+                    if (acceptHtml && textContent === clipboard.textContent) {
+                        insertContents(currentSelection, clipboard.content.cloneNode(true), e.type);
+                    } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
+                        insertContents(currentSelection, textContent, e.type);
+                    }
                 }
                 e.preventDefault();
                 if (IS_IE) {
@@ -1396,7 +1412,12 @@
                 e.preventDefault();
             });
 
-            $self.bind('focus', function (e) {
+            $self.bind('focusin', function (e) {
+                // prevent focus event triggered due to content updates through code
+                // when current editor is not focused
+                if (typerFocused || codeUpdate.executing) {
+                    return;
+                }
                 if (!userFocus.has(typer)) {
                     typerFocused = true;
                     triggerEvent(EVENT_ALL, 'focusin');
@@ -1408,8 +1429,8 @@
                 userFocus.delete(typer);
             });
 
-            $self.bind('blur', function (e) {
-                if (!windowFocusedOut) {
+            $self.bind('focusout', function (e) {
+                if (!windowFocusedOut && typerFocused) {
                     for (var element = e.relatedTarget; element; element = element.parentNode) {
                         if (relatedElements.has(element)) {
                             userFocus.set(typer, element);
@@ -1420,6 +1441,16 @@
                     triggerWidgetFocusout();
                     triggerEvent(EVENT_ALL, 'focusout');
                     normalize();
+
+                    // prevent focus returns to current editor
+                    // due to content updates through code
+                    if (containsOrEquals(topElement, document.activeElement)) {
+                        if (e.relatedTarget) {
+                            e.relatedTarget.focus();
+                        } else {
+                            topElement.blur();
+                        }
+                    }
                 }
             });
 
@@ -1488,7 +1519,7 @@
 
         var retainFocusHandlers = {
             focusout: function (e) {
-                if (!containsOrEquals(e.currentTarget, e.relatedTarget) && containsOrEquals(userFocus.get(typer), e.currentTarget) && !getActiveRange(topElement)) {
+                if (!containsOrEquals(e.currentTarget, e.relatedTarget) && userFocus.get(typer) === e.currentTarget && !getActiveRange(topElement)) {
                     userFocus.delete(typer);
                     $self.trigger('focusout');
                 }
@@ -1545,7 +1576,7 @@
                 if (isFunction(command)) {
                     codeUpdate(function () {
                         command.call(typer, tx, value);
-                        if (!userFocus.has(typer)) {
+                        if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
                         }
                     });
@@ -1578,9 +1609,7 @@
                     insertContents(createRange(widget.element, true), textContent);
                     removeNode(widget.element);
                 } else {
-                    var parentNode = typerDocument.getNode(widget.element.parentNode);
-                    removeNode(widget.element);
-                    triggerEvent(parentNode.widget, 'contentChange');
+                    insertContents(createRange(widget.element), '');
                 }
             },
             execCommand: function (commandName, value) {
@@ -1862,7 +1891,7 @@
             delete inst._lock;
             typerSelectionUpdate(inst);
             if (inst === inst.typer.getSelection()) {
-                if (!userFocus.has(inst.typer)) {
+                if (inst.typer.focused() && !userFocus.has(inst.typer)) {
                     inst.focus();
                 }
                 inst.typer.snapshot();
@@ -2380,6 +2409,7 @@
             inline: true,
             defaultOptions: false,
             disallowedElement: '*',
+            accept: 'text',
             overrides: {
                 getValue: function () {
                     return this.extractText();
@@ -2420,7 +2450,7 @@
             (typeof v === 'function' || i === 'options' ? presetDefinition : options)[i] = v;
         });
         $.each(options.__preset__, function (i, v) {
-            if (!presetDefinition.options || !(i in presetDefinition.options)) {
+            if (typeof v === 'function' || !presetDefinition.options || !(i in presetDefinition.options)) {
                 options[i] = v;
                 delete this[i];
             }
@@ -3299,7 +3329,7 @@
         }
     });
     $(window).focusout(function (e) {
-        if (currentDialog && !e.relatedTarget && $.contains(currentDialog.element, e.target)) {
+        if (currentDialog && !e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
             Typer.ui.focus(currentDialog.element);
         }
     });
@@ -3411,7 +3441,7 @@
             } else if (!$(v.parentNode).filter(filter)[0]) {
                 Typer.replaceElement(v.parentNode, $(html)[0]);
                 lists.push(v.parentNode);
-            } else if (tx.selection.focusNode.widget.id === 'list' && $.inArray(v.parentNode, lists) < 0) {
+            } else if ($(v).is('li') && $.inArray(v.parentNode, lists) < 0) {
                 outdentCommand(tx, [v]);
             }
         });
@@ -3925,7 +3955,7 @@
 (function ($, Typer) {
     'use strict';
 
-    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/gi;
+    var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/i;
 
     Typer.widgets.media = {
         element: 'img,audio,video,a:has(>img)',
@@ -3933,7 +3963,7 @@
             return widget.element.src;
         },
         insert: function (tx, options) {
-            var element = Typer.createElement(reMediaType.exec(options.src || options) && (RegExp.$1 ? 'img' : RegExp.$2 ? 'video' : 'audio'));
+            var element = Typer.createElement(reMediaType.test(options.src || options) ? (RegExp.$2 ? 'video' : RegExp.$3 ? 'audio' : 'img') : 'img');
             element.src = options.src || options;
             if (element.tagName.toLowerCase() === 'video') {
                 $(element).attr('controls', '');
@@ -4920,6 +4950,7 @@
         },
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
+            control.value = control.preset.getValue();
             $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent());
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',

@@ -6,6 +6,7 @@
             inline: true,
             defaultOptions: false,
             disallowedElement: '*',
+            accept: 'text',
             overrides: {
                 getValue: function () {
                     return this.extractText();
@@ -46,7 +47,7 @@
             (typeof v === 'function' || i === 'options' ? presetDefinition : options)[i] = v;
         });
         $.each(options.__preset__, function (i, v) {
-            if (!presetDefinition.options || !(i in presetDefinition.options)) {
+            if (typeof v === 'function' || !presetDefinition.options || !(i in presetDefinition.options)) {
                 options[i] = v;
                 delete this[i];
             }
