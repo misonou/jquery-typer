@@ -2292,7 +2292,21 @@
 
                 function distanceFromCharacter(node, index) {
                     while (node.nodeValue.charCodeAt(index) === 10 && --index);
-                    var rect = computeTextRects(createRange(node, index))[0];
+                    var rect;
+                    if (node.nodeValue.charCodeAt(index) === 32 && index) {
+                        // IE11 (update version 11.0.38) crashes with memory access violation when
+                        // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
+                        // https://jsfiddle.net/b6q4p664/
+                        rect = computeTextRects(createRange(node, index - 1))[0];
+                        rect = rect && {
+                            top: rect.top,
+                            left: rect.right,
+                            right: rect.right,
+                            bottom: rect.bottom
+                        };
+                    } else {
+                        rect = computeTextRects(createRange(node, index))[0];
+                    }
                     if (rect) {
                         var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
                         var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
@@ -2315,8 +2329,9 @@
                     var currentZIndex;
                     var target;
                     $(node).children().each(function (i, v) {
-                        if (pointInRect(x, y, v.getBoundingClientRect()) && $(v).css('pointer-events') !== 'none') {
-                            var zIndex = $(v).css('position') === 'static' ? undefined : parseInt($(v).css('z-index')) || 0;
+                        var style = window.getComputedStyle(v, null);
+                        if (style.pointerEvents !== 'none' && style.display !== 'inline' && pointInRect(x, y, v.getBoundingClientRect())) {
+                            var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
                             if (currentZIndex === undefined || zIndex > currentZIndex) {
                                 currentZIndex = zIndex;
                                 target = v;
@@ -2335,31 +2350,28 @@
                 }
 
                 var newY = y;
-                for (var target = element, distance, lastDistance; target && target.nodeType === 1; element = target || element) {
-                    distance = Infinity;
+                for (var target = element, distY, lastDistY; target && target.nodeType === 1; element = target || element) {
+                    distY = Infinity;
                     target = null;
                     $(element).contents().each(function (i, v) {
+                        var rects;
                         if (v.nodeType === 3) {
-                            var rects = computeTextRects(v);
-                            for (var j = 0, length = rects.length; j < length; j++) {
-                                if (rects[j].top <= y && rects[j].bottom >= y) {
-                                    target = v;
-                                    newY = y;
-                                    distance = 0;
-                                    return distanceFromCharacter(v, v.length - 1) < 0;
-                                }
-                                lastDistance = distance;
-                                distance = Math.min(distance, distanceToRect(rects[j]));
-                                if (distance < lastDistance) {
-                                    target = v;
-                                    newY = rects[j].top + rects[j].height / 2;
-                                }
-                            }
+                            rects = computeTextRects(v);
                         } else if (v.nodeType === 1 && $(v).css('pointer-events') !== 'none') {
-                            lastDistance = distance;
-                            distance = Math.min(distance, distanceToRect(v.getBoundingClientRect()));
-                            if (distance < lastDistance) {
+                            rects = [v.getBoundingClientRect()];
+                        }
+                        for (var j = 0, length = (rects || '').length; j < length; j++) {
+                            if (rects[j].top <= y && rects[j].bottom >= y) {
                                 target = v;
+                                newY = y;
+                                distY = 0;
+                                return v.nodeType === 1 || distanceFromCharacter(v, v.length - 1) < 0;
+                            }
+                            lastDistY = distY;
+                            distY = Math.min(distY, distanceToRect(rects[j]));
+                            if (distY < lastDistY) {
+                                target = v;
+                                newY = v.nodeType === 1 ? y : rects[j].top + rects[j].height / 2;
                             }
                         }
                     });
