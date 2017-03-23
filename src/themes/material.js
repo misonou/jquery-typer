@@ -23,7 +23,7 @@
         var rect = {};
         if (node.getBoundingClientRect) {
             var xrel = /\b(left|right)\b/.test(pos) ? RegExp.$1 : 'left';
-            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'top';
+            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'bottom';
             var rectb = node.getBoundingClientRect();
             rect[xrel] = rectb.left;
             rect[yrel] = rectb.top;

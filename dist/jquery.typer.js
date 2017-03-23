@@ -835,10 +835,6 @@
             };
             codeUpdate(function () {
                 if (!range.collapsed) {
-                    var caret = state.getCaret('end').clone();
-                    var appendSpace = !caret.moveByCharacter(1) || caret.node !== state.endNode || (caret.textNode && /\s/.test(caret.textNode.nodeValue[caret.offset - 1]));
-                    var lastChild;
-
                     var stack = [[topElement, fragment]];
                     iterate(state.createTreeWalker(-1, function (node) {
                         var content;
@@ -879,7 +875,6 @@
                                 }
                             }
                             if (content) {
-                                lastChild = content.lastChild;
                                 stack[0][1].appendChild(content);
                             }
                         }
@@ -888,9 +883,6 @@
                         }
                         return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                     }));
-                    if (appendSpace && lastChild) {
-                        $(createTextNode(' ')).insertAfter(lastChild);
-                    }
                 }
                 if (isFunction(callback)) {
                     var startPoint = createRange(range, true);
@@ -1430,7 +1422,7 @@
             });
 
             $self.bind('focusout', function (e) {
-                if (!windowFocusedOut && typerFocused) {
+                if (document.activeElement !== topElement && typerFocused) {
                     for (var element = e.relatedTarget; element; element = element.parentNode) {
                         if (relatedElements.has(element)) {
                             userFocus.set(typer, element);
@@ -2016,31 +2008,30 @@
     definePrototype(TyperCaretNotification, {
         listen: function (inst, element) {
             var arr = this.weakMap.get(element) || (this.weakMap.set(element, []), this.weakMap.get(element));
-            if (arr.indexOf(inst.selection) < 0) {
-                arr.push(inst.selection);
+            if (arr.indexOf(inst) < 0) {
+                arr.push(inst);
             }
         },
         unlisten: function (inst, element) {
             var arr = this.weakMap.get(element);
-            if (arr && arr.indexOf(inst.selection) >= 0) {
-                arr.splice(arr.indexOf(inst.selection), 1);
+            if (arr && arr.indexOf(inst) >= 0) {
+                arr.splice(arr.indexOf(inst), 1);
             }
         },
         update: function (oldElement, newElement) {
-            function replace(caret) {
-                var n1 = caret.node.element === oldElement ? caret.typer.getNode(newElement) : caret.node;
-                var n2 = caret.element === oldElement ? newElement : caret.element;
-                var n3 = containsOrEquals(oldElement, caret.textNode) ? null : caret.textNode;
-                if (n1 !== caret.node || n2 !== caret.element) {
-                    caretSetPositionRaw(caret, n1, n2, n3, n3 ? caret.offset : true);
-                }
-            }
-            (this.weakMap.get(oldElement) || []).forEach(function (selection) {
-                typerSelectionAtomic(selection, function () {
-                    replace(selection.baseCaret);
-                    replace(selection.extendCaret);
+            var carets = this.weakMap.get(oldElement);
+            if (carets && carets.length) {
+                typerSelectionAtomic(carets[0].selection, function () {
+                    carets.forEach(function (caret) {
+                        var n1 = caret.node.element === oldElement ? caret.typer.getNode(newElement) : caret.node;
+                        var n2 = caret.element === oldElement ? newElement : caret.element;
+                        var n3 = containsOrEquals(oldElement, caret.textNode) ? null : caret.textNode;
+                        if (n1 !== caret.node || n2 !== caret.element) {
+                            caretSetPositionRaw(caret, n1, n2, n3, n3 ? caret.offset : true);
+                        }
+                    });
                 });
-            });
+            }
         }
     });
 
@@ -4811,7 +4802,7 @@
         var rect = {};
         if (node.getBoundingClientRect) {
             var xrel = /\b(left|right)\b/.test(pos) ? RegExp.$1 : 'left';
-            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'top';
+            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'bottom';
             var rectb = node.getBoundingClientRect();
             rect[xrel] = rectb.left;
             rect[yrel] = rectb.top;

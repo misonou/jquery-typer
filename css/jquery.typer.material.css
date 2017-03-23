@@ -192,6 +192,7 @@
     font-family: 'Material Icons';
     font-size: 16px;
     line-height: 1;
+    color: #212121;
     vertical-align: text-top;
 }
 
@@ -671,11 +672,14 @@ button.typer-ui-dropdown.disabled:after {
 
 .typer-ui-dialog-content > .typer-ui-buttonset .typer-ui-buttonset-pad {
     display: block;
-    flex-grow: 1;
+    -webkit-flex-grow: 1;
+    -ms-flex-positive: 1;
 }
 
 .typer-ui-dialog-content > .typer-ui-buttonset button.special {
     color: #a90007;
+    -webkit-order: -1;
+    -ms-flex-order: -1;
     order: -1;
 }
 
@@ -816,7 +820,6 @@ button.typer-ui-dropdown.disabled:after {
     left: 0;
     right: 0;
     bottom: 0;
-    border-radius: 2px;
     overflow: hidden;
     pointer-events: none;
     z-index: -1;
