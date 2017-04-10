@@ -58,6 +58,7 @@
     var userFocus;
     var caretNotification;
     var windowFocusedOut;
+    var permitFocusEvent;
 
     function TyperSelection(typer, range) {
         this.typer = typer;
@@ -729,7 +730,8 @@
         }
 
         function textNodeFreezed(textNode) {
-            var t1 = currentSelection.baseCaret, t2 = currentSelection.extendCaret;
+            var t1 = currentSelection.baseCaret;
+            var t2 = currentSelection.extendCaret;
             if (textNode === t1.textNode || textNode === t2.textNode) {
                 return true;
             }
@@ -1013,7 +1015,9 @@
                     contentEvent.addTarget(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    createRange(state.startNode.element, -0).insertNode(createRange(state.endNode.element, 'contents').extractContents());
+                    caretPoint = caretPoint || createRange(state.startNode.element, -0);
+                    caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
+                    caretPoint.collapse(true);
                     removeNode(state.endNode.element);
                     contentEvent.addTarget(state.endNode);
                     contentEvent.addTarget(state.startNode);
@@ -1407,9 +1411,11 @@
             $self.bind('focusin', function (e) {
                 // prevent focus event triggered due to content updates through code
                 // when current editor is not focused
-                if (typerFocused || codeUpdate.executing) {
+                if (typerFocused || (codeUpdate.executing && !permitFocusEvent)) {
                     return;
                 }
+                permitFocusEvent = false;
+                windowFocusedOut = false;
                 if (!userFocus.has(typer)) {
                     typerFocused = true;
                     triggerEvent(EVENT_ALL, 'focusin');
@@ -1417,7 +1423,6 @@
                         currentSelection.focus();
                     }
                 }
-                windowFocusedOut = false;
                 userFocus.delete(typer);
             });
 
@@ -1466,7 +1471,8 @@
                 moveByCharacter: 'leftArrow rightArrow shiftLeftArrow shiftRightArrow'
             }, function (i, v) {
                 $.each(v.split(' '), function (j, v) {
-                    var direction = (j & 1) ? 1 : -1, extend = !!(j & 2);
+                    var direction = (j & 1) ? 1 : -1;
+                    var extend = !!(j & 2);
                     defaultKeystroke[v] = function () {
                         if (!extend && !currentSelection.isCaret) {
                             currentSelection.collapse(direction < 0 ? 'start' : 'end');
@@ -1511,8 +1517,12 @@
 
         var retainFocusHandlers = {
             focusout: function (e) {
-                if (!containsOrEquals(e.currentTarget, e.relatedTarget) && userFocus.get(typer) === e.currentTarget && !getActiveRange(topElement)) {
+                if (!containsOrEquals(e.currentTarget, document.activeElement) && userFocus.get(typer) === e.currentTarget) {
                     userFocus.delete(typer);
+                }
+                if (topElement === e.relatedTarget) {
+                    currentSelection.focus();
+                } else {
                     $self.trigger('focusout');
                 }
             }
@@ -1985,7 +1995,7 @@
         },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
-                userFocus.delete(this.typer);
+                permitFocusEvent = true;
                 applyRange(createRange(this));
             }
         },
@@ -2025,7 +2035,7 @@
                     carets.forEach(function (caret) {
                         var n1 = caret.node.element === oldElement ? caret.typer.getNode(newElement) : caret.node;
                         var n2 = caret.element === oldElement ? newElement : caret.element;
-                        var n3 = containsOrEquals(oldElement, caret.textNode) ? null : caret.textNode;
+                        var n3 = containsOrEquals(newElement, caret.textNode) ? caret.textNode : null;
                         if (n1 !== caret.node || n2 !== caret.element) {
                             caretSetPositionRaw(caret, n1, n2, n3, n3 ? caret.offset : true);
                         }
@@ -2332,7 +2342,8 @@
                 }
 
                 function findOffset(node) {
-                    var b0 = 0, b1 = node.length;
+                    var b0 = 0;
+                    var b1 = node.length;
                     while (b1 - b0 > 1) {
                         var mid = (b1 + b0) >> 1;
                         var p = distanceFromCharacter(node, mid) < 0;
