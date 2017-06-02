@@ -228,8 +228,20 @@
         'selection:selectAll': Typer.ui.button({
             shortcut: 'ctrlA',
             execute: function (toolbar) {
-                toolbar.typer.getSelection().select(toolbar.typer.element, 'contents');
-                toolbar.typer.getSelection().focus();
+                var selection = toolbar.typer.getSelection();
+                selection.select(toolbar.typer.element, 'contents');
+                selection.focus();
+            }
+        }),
+        'selection:selectParagraph': Typer.ui.button({
+            hiddenWhenDisabled: true,
+            execute: function (toolbar) {
+                var selection = toolbar.typer.getSelection();
+                selection.select(selection.startNode.element, 'contents');
+                selection.focus();
+            },
+            enabled: function (toolbar) {
+                return toolbar.typer.getSelection().isCaret;
             }
         }),
         'clipboard:cut': Typer.ui.button({
@@ -263,6 +275,7 @@
         'history:undo': 'Undo',
         'history:redo': 'Redo',
         'selection:selectAll': 'Select all',
+        'selection:selectParagraph': 'Select paragraph',
         'clipboard:cut': 'Cut',
         'clipboard:copy': 'Copy',
         'clipboard:paste': 'Paste',

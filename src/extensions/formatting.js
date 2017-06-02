@@ -23,6 +23,9 @@
         'i': 'lower-roman'
     };
 
+    var reFormat = /^([a-z\d]*)(?:\.(.+))?/i;
+    var reCompatFormat = /^(p|h[1-6])(?:\.(.+))?$/i;
+
     function getTextAlign(element) {
         var textAlign = $(element).css('text-align');
         var direction = $(element).css('direction');
@@ -54,6 +57,12 @@
             value = (value === '' || (value && value !== my)) ? '' : my;
         });
         return value || '';
+    }
+
+    function compatibleFormatting(a, b) {
+        a = a.toLowerCase();
+        b = b.toLowerCase();
+        return a === b || (reCompatFormat.test(a) && reCompatFormat.test(b));
     }
 
     function createElementWithClassName(tagName, className) {
@@ -223,7 +232,11 @@
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
                     $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
-                       Typer.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
+                        if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
+                            Typer.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
+                        } else {
+                            v.className = m[2];
+                        }
                     });
                 }
             },
@@ -324,12 +337,34 @@
             requireCommand: 'formatting',
             hiddenWhenDisabled: true,
             controls: function (toolbar) {
-                return $.map(Object.keys(toolbar.options.formattings || {}), function (v) {
+                var definedOptions = $.map(Object.keys(toolbar.options.formattings || {}), function (v) {
                     return Typer.ui.button({
+                        hiddenWhenDisabled: true,
                         value: v,
-                        label: toolbar.options.formattings[v]
+                        label: toolbar.options.formattings[v],
+                        enabled: function (toolbar, self) {
+                            var selection = toolbar.typer.getSelection();
+                            var curElm = (selection.startNode === selection.endNode ? selection.startNode : selection.focusNode).element;
+                            var myElm = (reFormat.exec(self.value) || [])[1];
+                            return !myElm || compatibleFormatting(curElm.tagName, myElm);
+                        }
                     });
                 });
+                var fallbackOption = Typer.ui.button({
+                    requireWidget: 'formatting',
+                    hiddenWhenDisabled: true,
+                    enabled: function (toolbar, self) {
+                        for (var i = 0, len = definedOptions.length; i < len; i++) {
+                            if (definedOptions[i].value === self.widget.formatting) {
+                                return false;
+                            }
+                        }
+                        self.label = 'formatting:name:' + (reFormat.exec(self.widget.formatting) || [])[1];
+                        self.value = self.widget.formatting;
+                        return true;
+                    }
+                });
+                return definedOptions.concat(fallbackOption);
             },
             execute: 'formatting',
             enabled: function (toolbar) {
@@ -426,6 +461,19 @@
         'formatting:orderedList:A': 'Alphabetically ordered list, uppercase',
         'formatting:orderedList:i': 'Roman numbers, lowercase',
         'formatting:orderedList:I': 'Roman numbers, uppercase',
+        'formatting:name:p': 'Paragraph',
+        'formatting:name:h1': 'Header 1',
+        'formatting:name:h2': 'Header 2',
+        'formatting:name:h3': 'Header 3',
+        'formatting:name:h4': 'Header 4',
+        'formatting:name:h5': 'Header 5',
+        'formatting:name:h6': 'Header 6',
+        'formatting:name:td': 'Table cell',
+        'formatting:name:th': 'Table header',
+        'formatting:name:ul': 'Unordered list',
+        'formatting:name:ol': 'Ordered list',
+        'formatting:name:li': 'List item',
+        'formatting:name:blockquote': 'Blockquote'
     });
 
     Typer.ui.addIcons('material', {

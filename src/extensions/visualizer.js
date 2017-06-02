@@ -24,6 +24,7 @@
             .has-typer-visualizer::-moz-selection,.has-typer-visualizer ::-moz-selection { background-color:transparent; }\
             .typer-visualizer { position:fixed;pointer-events:none;width:100%;height:100%; }\
             .typer-visualizer > div { position:fixed;box-sizing:border-box; }\
+            .typer-visualizer .border { border:1px solid rgba(0,31,81,0.2); }\
             .typer-visualizer .fill { background-color:rgba(0,31,81,0.2); }\
             .typer-visualizer .fill-margin { border:solid rgba(255,158,98,0.2); }\
             @supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)) { .typer-visualizer .bl-r:before,.typer-visualizer .tl-r:before,.typer-visualizer .br-r:after,.typer-visualizer .tr-r:after { content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%); } }\
@@ -39,6 +40,7 @@
             .typer-visualizer .tl-r:before { right:100%;top:0;-webkit-transform:flipY();transform:flipY(); }\
             .typer-visualizer .br-r:after { left:100%;bottom:0;-webkit-transform:flipX();transform:flipX(); }\
             .typer-visualizer .tr-r:after { left:100%;top:0;-webkit-transform:rotate(180deg);transform:rotate(180deg); }\
+            .typer-visualizer [elm]:before { content:attr(elm);box-shadow:0 0 1px white;font-family:monospace;background-color:rgba(0,31,81,0.8);color:white;font-size:10px;padding:0 0.25em;position:absolute;bottom:100%;}\
         ';
         $(document.body).append('<style>' + style + '</style>');
         container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
@@ -162,11 +164,13 @@
             var domCount = 0;
 
             function drawLayer(className, css, value) {
-                dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
-                dom[domCount].className = className;
-                dom[domCount].setAttribute('style', '');
-                $(dom[domCount]).css(css || '', value);
-                return dom[domCount++];
+                var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
+                d.className = className;
+                d.setAttribute('style', '');
+                d.removeAttribute('elm');
+                $(d).css(css || '', value);
+                domCount++;
+                return d;
             }
 
             if (v.type === 'text') {
@@ -183,10 +187,11 @@
                 });
             } else if (v.type === 'layout' || v.type === 'layout-fill' || v.type === 'layout-margin') {
                 var bRect = v.element.getBoundingClientRect();
-                drawLayer('line-n', 'top', bRect.top);
-                drawLayer('line-s', 'top', bRect.top + bRect.height);
-                drawLayer('line-w', 'left', bRect.left);
-                drawLayer('line-e', 'left', bRect.left + bRect.width);
+                drawLayer('border', bRect);
+                if (v.type !== 'layout-margin') {
+                    var elmSpec = v.element.tagName.toLowerCase() + v.element.className.replace(/^(?=.)|\s+/, '.');
+                    drawLayer('', bRect).setAttribute('elm', elmSpec);
+                }
                 if (v.type === 'layout-margin' || v.type === 'layout-fill') {
                     var style = window.getComputedStyle(v.element);
                     var s = toScreenRightBottom(bRect);
@@ -220,7 +225,7 @@
         resetLayers(hoverLayers);
         if (activeTyper) {
             var node = activeTyper.nodeFromPoint(x, y);
-            if (node) {
+            if (node && node.element !== activeTyper.element) {
                 if (node.nodeType & (Typer.NODE_WIDGET)) {
                     addLayer(hoverLayers, node.widget.element, 'layout');
                 } else {

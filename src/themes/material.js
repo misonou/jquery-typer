@@ -49,14 +49,14 @@
         var nested = !!$(thisMenu).parents('.typer-ui-float')[0];
         var rect = callout.getBoundingClientRect();
         if (rect.bottom > $(window).height()) {
-            $(callout).css('bottom', nested ? '0' : '100%');
+            $(callout).removeClass('float-top float-bottom').addClass('float-top');
         } else if (rect.top < 0) {
-            $(callout).css('bottom', 'auto');
+            $(callout).removeClass('float-top float-bottom').addClass('float-bottom');
         }
         if (rect.right > $(window).width()) {
-            $(callout).css('right', nested ? '100%' : '0');
+            $(callout).removeClass('float-left float-right').addClass('float-left');
         } else if (rect.left < 0) {
-            $(callout).css('right', 'auto');
+            $(callout).removeClass('float-left float-right').addClass('float-right');
         }
     }
 
@@ -90,7 +90,7 @@
         });
     }
 
-    Typer.ui.themes.material = {
+    Typer.ui.themes.material = Typer.ui.theme({
         resources: [
             'https://fonts.googleapis.com/css?family=Roboto:400,500,700',
             'https://fonts.googleapis.com/icon?family=Material+Icons',
@@ -139,13 +139,13 @@
                 });
             });
         },
-        callout: '<button class="typer-ui-callout" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></button>',
+        callout: '<label class="typer-ui-callout" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
         calloutExecuteOn: 'click',
         dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
         checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
         checkboxInit: function (ui, control) {
-            $(control.element).change(function () {
-                control.value = $(this).hasClass('checked');
+            $(control.element).click(function () {
+                control.value = $(this).toggleClass('checked').hasClass('checked');
                 ui.execute(control);
             });
         },
@@ -157,11 +157,11 @@
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
                 contentChange: function (e) {
+                    control.value = control.preset.getValue();
+                    $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
                     if (e.typer.focused()) {
-                        control.value = control.preset.getValue();
                         ui.execute(control);
                     }
-                    $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
                 }
             }));
         },
@@ -174,8 +174,6 @@
         },
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
-            control.value = control.preset.getValue();
-            $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent());
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
@@ -258,17 +256,14 @@
                 hideContextMenu();
             }
         }
-    };
+    });
 
     $(function () {
-        $(document.body).on('click', '.typer-ui-material .typer-ui-checkbox', function (e) {
-            $(this).toggleClass('checked').trigger('change');
-        });
         $(document.body).on('mousedown', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
             var pos = e.currentTarget.getBoundingClientRect();
             var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget).children().css({
                 top: e.clientY - pos.top,
-                left: e.clientX - pos.left
+                left: e.clientX - pos.left,
             });
             var p1 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.left, 2);
             var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
@@ -278,6 +273,7 @@
             setImmediate(function () {
                 $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
+            $overlay.parent().css('border-radius', $(e.currentTarget).css('border-radius'));
             e.stopPropagation();
         });
         $(document.body).on('mouseup mouseleave', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {

@@ -7,6 +7,9 @@
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
+    var WIDGET_CORE = '__core__';
+    var WIDGET_ROOT = '__root__';
+    var WIDGET_UNKNOWN = '__unknown__';
     var NODE_WIDGET = 1;
     var NODE_EDITABLE = 2;
     var NODE_EDITABLE_PARAGRAPH = 32;
@@ -146,7 +149,7 @@
 
     function iterate(iterator, callback, from) {
         iterator.currentNode = from || iterator.currentNode;
-        var value = acceptNode(iterator);
+        var value = iterator.currentNode ? acceptNode(iterator) : 3;
         if (value !== 2) {
             if (value === 1 && callback) {
                 callback(iterator.currentNode);
@@ -558,7 +561,9 @@
                 if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
                     if (fireEvent && node.widget && node.widget.element === node.element) {
                         node.widget.destroyed = true;
-                        triggerEvent(node.widget, 'destroy');
+                        if (node.widget.id !== WIDGET_UNKNOWN) {
+                            triggerEvent(node.widget, 'destroy');
+                        }
                     }
                     delete node.widget;
                     $.each(widgetOptions, function (i, v) {
@@ -567,18 +572,23 @@
                             return false;
                         }
                     });
-                    if (fireEvent && node.widget) {
+                    if (fireEvent && node.widget && node.widget.id !== WIDGET_UNKNOWN) {
                         triggerEvent(node.widget, 'init');
                     }
                 }
-                node.widget = node.widget || context.widget;
-                var widgetOption = widgetOptions[node.widget.id];
-                if (node.widget === context.widget && !is(context, NODE_WIDGET)) {
-                    node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
-                } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
-                    node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
+                if (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
+                    node.widget = context.widget;
+                    node.nodeType = NODE_WIDGET;
                 } else {
-                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    node.widget = node.widget || context.widget;
+                    var widgetOption = widgetOptions[node.widget.id];
+                    if (node.widget === context.widget && !is(context, NODE_WIDGET)) {
+                        node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
+                    } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
+                        node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
+                    } else {
+                        node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    }
                 }
             }
 
@@ -673,7 +683,7 @@
                     childList: true
                 });
             }
-            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(nodeSource, '__root__', topElement, options)));
+            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
             dirtyElements.push(null);
 
             return $.extend(self, {
@@ -691,15 +701,14 @@
             return caret.getRange();
         }
 
-        function checkEditable(range) {
-            var selection = new TyperSelection(typer, range);
-            if (is(selection.focusNode, NODE_EDITABLE) && !selection.focusNode.childNodes[0]) {
-                $(EMPTY_LINE).appendTo(selection.focusNode.element);
-                return;
+        function checkEditable(node) {
+            if (is(node, NODE_EDITABLE) && !node.childNodes[0]) {
+                $(node.element).html('<p>' + (trim(node.element.textContent) || ZWSP_ENTITIY) + '</p>');
+                return true;
             }
-            if (is(selection.focusNode, NODE_EDITABLE_PARAGRAPH) && !selection.focusNode.element.childNodes[0]) {
-                $(createTextNode()).appendTo(selection.focusNode.element);
-                return;
+            if (is(node, NODE_EDITABLE_PARAGRAPH) && !node.element.childNodes[0]) {
+                $(createTextNode()).appendTo(node.element);
+                return true;
             }
         }
 
@@ -721,8 +730,10 @@
         function normalize(range) {
             range = is(range, Range) || createRange(topElement, 'contents');
             codeUpdate(function () {
-                checkEditable(range);
                 iterate(new TyperSelection(typer, range).createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
+                    if (checkEditable(node)) {
+                        return;
+                    }
                     if (is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_ANY_ALLOWTEXT)) {
                         $(node.element).wrap('<p>');
                     }
@@ -761,14 +772,6 @@
                                 removeNode(node.element);
                             }
                         }
-                    } else if (!node.element.childNodes[0]) {
-                        $(EMPTY_LINE).appendTo(node.element);
-                    } else {
-                        $(node.element).contents().each(function (i, v) {
-                            if (v.nodeType === 3 && trim(v.nodeValue)) {
-                                $(v).wrap('<p>');
-                            }
-                        });
                     }
                 });
                 // Mozilla adds <br type="_moz"> when a container is empty
@@ -799,7 +802,7 @@
             var fragment = document.createDocumentFragment();
             var contentChangedWidgets = [];
             var state = new TyperSelection(typer, range);
-            var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === '__root__' || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === '__root__' || widgetOptions[state.endNode.widget.id].textFlow));
+            var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
 
             var contentEvent = {
                 addTarget: function (node) {
@@ -867,7 +870,7 @@
 
                     // check if current insertion point is an empty editable element
                     // normalize before inserting content
-                    if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode && checkEditable(range)) {
+                    if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode && checkEditable(newState.startNode)) {
                         newState = new TyperSelection(typer, createRange(newState.startNode.element, 'contents'));
                     }
                     // ensure start point lies within valid selection
@@ -876,14 +879,14 @@
                     }
                     callback(newState, startPoint, endPoint, contentEvent);
                 }
-                if (contentChangedWidgets[0]) {
-                    $.each(contentChangedWidgets, function (i, v) {
-                        triggerEvent(v, 'contentChange', source);
-                    });
-                    triggerEvent(EVENT_STATIC, 'contentChange', source);
-                }
-                normalize(range);
             });
+            if (contentChangedWidgets[0]) {
+                $.each(contentChangedWidgets, function (i, v) {
+                    normalize(v.element);
+                    triggerEvent(v, 'contentChange', source);
+                });
+                triggerEvent(EVENT_STATIC, 'contentChange', source);
+            }
             return fragment;
         }
 
@@ -922,8 +925,8 @@
                         startPoint.insertNode(nodeToInsert);
                         node = typerDocument.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (node.widget.id === '__unknown__' || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
-                            nodeToInsert = createTextNode(node.widget.id === '__unknown__' ? nodeToInsert.textContent : extractText(nodeToInsert));
+                        if (node.widget.id === WIDGET_UNKNOWN || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
+                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
                             node = new TyperNode(NODE_INLINE, nodeToInsert);
                         }
                     }
@@ -971,7 +974,13 @@
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
-                            caretPoint = is(node, NODE_INLINE_WIDGET) ? createRange(lastNode, false) : createRange(lastNode, -0);
+                            if (is(node, NODE_INLINE_WIDGET)) {
+                                // ensure there is a text insertion point after an inline widget
+                                caretPoint = createRange(lastNode, false);
+                                caretPoint.insertNode(createTextNode());
+                            } else {
+                                caretPoint = createRange(lastNode, -0);
+                            }
                         }
                         paragraphAsInline = false;
                     } else {
@@ -1032,7 +1041,7 @@
         function initUndoable() {
             var MARKER_ATTR = ['x-typer-end', 'x-typer-start'];
             var lastValue = topElement.outerHTML;
-            var snapshots = [lastValue];
+            var snapshots = [];
             var currentIndex = 0;
             var snapshotTimeout;
 
@@ -1095,6 +1104,10 @@
 
             $.extend(undoable, {
                 getValue: function () {
+                    if (codeUpdate.needSnapshot) {
+                        codeUpdate.needSnapshot = false;
+                        takeSnapshot();
+                    }
                     return lastValue;
                 },
                 canUndo: function () {
@@ -1475,14 +1488,14 @@
         }
 
         function initWidgets() {
-            widgets[0] = new TyperWidget(typer, '__root__');
+            widgets[0] = new TyperWidget(typer, WIDGET_ROOT);
             $.each(options.widgets || {}, activateWidget);
             $.each(Typer.widgets, activateWidget);
-            widgets[widgets.length] = new TyperWidget(typer, '__core__');
+            widgets[widgets.length] = new TyperWidget(typer, WIDGET_CORE);
 
-            widgetOptions.__root__ = options;
-            widgetOptions.__core__ = {};
-            widgetOptions.__unknown__ = {
+            widgetOptions[WIDGET_ROOT] = options;
+            widgetOptions[WIDGET_CORE] = {};
+            widgetOptions[WIDGET_UNKNOWN] = {
                 // make all other tags that are not considered paragraphs and inlines to be widgets
                 // to avoid unknown behavior while editing
                 element: options.disallowedElement || ':not(' + INNER_PTAG + ',br,b,em,i,u,strike,small,strong,sub,sup,ins,del,mark,span)'
@@ -1619,6 +1632,7 @@
         NODE_SHOW_EDITABLE: NODE_SHOW_EDITABLE,
         ZWSP: ZWSP,
         ZWSP_ENTITIY: ZWSP_ENTITIY,
+        is: is,
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
@@ -1633,6 +1647,7 @@
         rangeCovers: rangeCovers,
         rangeEquals: rangeEquals,
         rectEquals: rectEquals,
+        pointInRect: pointInRect,
         caretRangeFromPoint: caretRangeFromPoint,
         innermost: function (elements) {
             return $.grep(elements, function (v) {
@@ -2130,7 +2145,16 @@
             return false;
         },
         moveToPoint: function (x, y) {
-            return this.moveTo(caretRangeFromPoint(x, y, this.typer.element));
+            var range = caretRangeFromPoint(x, y, this.typer.element);
+            var node = this.typer.getNode(range.startContainer);
+            if (is(node, NODE_WIDGET)) {
+                // range returned is anchored at the closest text node which may or may not be at the point (x, y)
+                // avoid moving caret to widget element that does not actually cover that point
+                if (!pointInRect(x, y, node.widget.element.getBoundingClientRect())) {
+                    range = createRange(node.widget.element, false);
+                }
+            }
+            return this.moveTo(range);
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
@@ -2259,13 +2283,13 @@
         };
         definePrototype(WeakMap, {
             get: function (key) {
-                return key[this.__dataKey__];
+                return key && key[this.__dataKey__];
             },
             set: function (key, value) {
                 key[this.__dataKey__] = value;
             },
             has: function (key) {
-                return this.__dataKey__ in key;
+                return key && this.__dataKey__ in key;
             },
             delete: function (key) {
                 delete key[this.__dataKey__];

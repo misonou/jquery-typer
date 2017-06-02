@@ -551,6 +551,7 @@
     $.extend(Typer.ui, {
         controls: definedControls,
         themes: definedThemes,
+        themeExtensions: {},
         getIcon: function (control, iconSet) {
             return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[iconSet] || '';
         },
@@ -671,6 +672,7 @@
      * ********************************/
 
     $.extend(Typer.ui, {
+        theme: define('TyperUITheme', Typer.ui.themeExtensions),
         button: define('TyperUIButton', {
             type: 'button'
         }),
