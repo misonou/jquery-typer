@@ -576,7 +576,7 @@
                         triggerEvent(node.widget, 'init');
                     }
                 }
-                if (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
+                if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
                     node.widget = context.widget;
                     node.nodeType = NODE_WIDGET;
                 } else {

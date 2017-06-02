@@ -49,6 +49,7 @@
                     if (dir) {
                         e.typer.setValue(e.typer.getValue() + (dir / Math.abs(dir)) * e.widget.options.step);
                     }
+                    ex.preventDefault();
                 }
             });
         },
