@@ -144,7 +144,6 @@
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
-    z-index: 0;
 }
 
 .typer-ui label.disabled,
@@ -211,6 +210,7 @@
     color: #212121;
 }
 
+.typer-ui-checkbox:focus:before,
 .typer-ui-checkbox:active:before {
     box-shadow: inset 0 0 2px rgba(128, 128, 128, 0.5), 0 0 2px #103492;
     border-color: rgba(16, 52, 146, 0.75);
@@ -225,7 +225,7 @@
 }
 
 
-/* Composite Control */
+/* Menu and Toolbar */
 
 .typer-ui-contextmenu {
     display: block;
@@ -414,29 +414,70 @@ button.typer-ui-dropdown.disabled:after {
     font-size: 16px;
 }
 
-.typer-ui-textbox {
+
+/* Textbox */
+
+.typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: inline-block;
+    position: relative;
+    margin: 0 -0.25em 0.42em 0.25em;
+    padding: 0.75em 0.25em 0.17em;
     width: 100%;
+    border-bottom: 1px solid #aeb8c2;
+    vertical-align: top;
+    line-height: 1.33;
+}
+
+.typer-ui-textbox-combo .typer-ui-textbox-wrapper {
+    display: inline-flex;
+    align-items: baseline;
+}
+
+.typer-ui-toolbar .typer-ui-textbox .typer-ui-textbox-wrapper,
+.typer-ui-buttonset .typer-ui-textbox .typer-ui-textbox-wrapper,
+.typer-ui-buttonlist .typer-ui-textbox .typer-ui-textbox-wrapper {
+    border-bottom-style: hidden;
+    width: auto;
+}
+
+.typer-ui-textbox.focused .typer-ui-textbox-wrapper {
+    border-bottom-color: #103492;
+}
+
+.typer-ui-textbox.error .typer-ui-textbox-wrapper {
+    border-bottom-color: #a90007;
+}
+
+.typer-ui-textbox-combo .typer-ui-textbox-wrapper .typer-ui-label {
+    margin: 0 0.25em;
+    -webkit-flex-grow: 0;
+    -ms-flex-positive: 0;
+    flex-grow: 0;
+}
+
+.typer-ui-textbox-combo .typer-ui-textbox-inner {
+    -webkit-flex: 1 0 0;
+    -ms-flex: 1 0 0;
+    flex: 1 0 0;
 }
 
 .typer-ui-textbox [contenteditable] {
     display: inline-block;
     position: relative;
-    margin: 0 -0.25em 0.42em;
-    padding: 0.75em 0.25em 0.17em;
     width: 100%;
-    border-bottom: 1px solid #aeb8c2;
     background: url('data:image/gif:,');
     vertical-align: top;
     color: #212121;
-    line-height: 1.33;
     white-space: normal;
     word-break: break-all;
     cursor: text;
-    flex: 1 0 auto;
-    -ms-flex: 1 0 auto;
     -webkit-user-select: text;
     -moz-user-select: text;
     -ms-user-select: text;
+}
+
+.typer-ui-textbox.empty [contenteditable] {
+    min-width: 3em;
 }
 
 .typer-ui-toolbar .typer-ui-textbox [contenteditable],
@@ -444,43 +485,6 @@ button.typer-ui-dropdown.disabled:after {
 .typer-ui-buttonlist .typer-ui-textbox [contenteditable] {
     width: auto;
     white-space: nowrap;
-}
-
-.typer-ui-textbox [contenteditable]:focus {
-    border-bottom-color: #103492;
-}
-
-.typer-ui-textbox.error [contenteditable] {
-    border-bottom-color: #a90007;
-}
-
-.typer-ui-textbox.empty [contenteditable] {
-    min-width: 3em;
-}
-
-.typer-ui-buttonset .typer-ui-textbox {
-    display: inline-block;
-    height: 100%;
-}
-
-.typer-ui-buttonset .typer-ui-textbox [contenteditable] {
-    border-bottom-style: hidden;
-}
-
-.typer-ui-buttonset .typer-ui-textbox [contenteditable]:hover,
-.typer-ui-buttonset .typer-ui-textbox [contenteditable]:focus {
-    border-bottom-style: solid;
-}
-
-.typer-ui-textbox .typer-ui-textbox-wrapper {
-    display: block;
-    position: relative;
-}
-
-.typer-ui-toolbar .typer-ui-textbox .typer-ui-textbox-wrapper,
-.typer-ui-buttonset .typer-ui-textbox .typer-ui-textbox-wrapper,
-.typer-ui-buttonlist .typer-ui-textbox .typer-ui-textbox-wrapper {
-    display: inline-block;
 }
 
 .typer-ui-textbox .typer-ui-textbox-placeholder,
@@ -495,30 +499,32 @@ button.typer-ui-dropdown.disabled:after {
     z-index: -1;
 }
 
-.typer-ui-textbox.empty .typer-ui-textbox-placeholder,
-.typer-ui-textbox.error .typer-ui-textbox-error {
-    display: inline-block;
-}
-
 .typer-ui-textbox .typer-ui-textbox-error {
     color: #a90007;
     text-align: right;
+}
+
+.typer-ui-textbox.empty .typer-ui-textbox-placeholder,
+.typer-ui-textbox.error .typer-ui-textbox-error,
+.typer-ui-textbox-inner.empty .typer-ui-textbox-placeholder,
+.typer-ui-textbox-inner.error .typer-ui-textbox-error {
+    display: inline-block;
 }
 
 .typer-ui-textbox .typer-ui-textbox-placeholder:empty:after {
     content: 'Enter text';
 }
 
-.typer-ui-textbox.error .typer-ui-textbox-error:before {
+.typer-ui-textbox.error .typer-ui-textbox-error:before,
+.typer-ui-textbox-inner.error .typer-ui-textbox-error:before {
     content: '\00e001';
     display: inline-block;
     font-family: 'Material Icons';
     vertical-align: text-bottom;
 }
 
-.typer-ui-textbox .typer-ui-label {
-    margin-right: 0.5em;
-}
+
+/* Dialog */
 
 .typer-ui-dialog-wrapper {
     position: fixed;
@@ -633,7 +639,7 @@ button.typer-ui-dropdown.disabled:after {
 
 .typer-ui-dialog .typer-ui-textbox {
     display: block !important;
-    height: auto;
+    width: 100%;
 }
 
 .typer-ui-dialog .typer-ui-textbox .typer-ui-label {
@@ -643,7 +649,6 @@ button.typer-ui-dropdown.disabled:after {
 .typer-ui-dialog .typer-ui-textbox [contenteditable] {
     width: 100%;
     background-color: transparent;
-    border-bottom-style: solid;
     white-space: normal;
     word-break: break-all;
     -webkit-transition: padding 0.1s;
@@ -652,12 +657,17 @@ button.typer-ui-dropdown.disabled:after {
     transition: padding 0.1s;
 }
 
+.typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: block;
+    margin-left: -0.25em;
+}
+
 .typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-placeholder {
     text-transform: uppercase;
 }
 
 .typer-ui-dialog .typer-ui-textbox:not(.empty) [contenteditable] {
-    padding-top: 1.75em;
+    padding-top: 1em;
 }
 
 .typer-ui-dialog .typer-ui-textbox:not(.empty) .typer-ui-textbox-placeholder,

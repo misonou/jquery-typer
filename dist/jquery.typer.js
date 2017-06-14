@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.6-beta
+ * jQuery Typer Plugin v0.9.6
  *
  * The MIT License (MIT)
  *
@@ -476,17 +476,45 @@
         var typerFocused = false;
         var $self = $(topElement);
 
-        var codeUpdate = transaction(function () {
-            if (codeUpdate.needSnapshot) {
-                undoable.snapshot();
-            }
-            // IE fires textinput event on the parent element when the text node's value is modified
-            // even if modification is done through JavaScript rather than user action
-            codeUpdate.suppressTextEvent = true;
-            setImmediate(function () {
-                codeUpdate.suppressTextEvent = false;
+        var codeUpdate = (function () {
+            var currentSource;
+            var currentChangedWidgets = [];
+            var nodeManager = {
+                recordChange: function (node) {
+                    node = is(node, TyperNode) || typer.getNode(node);
+                    if (node && currentChangedWidgets.indexOf(node.widget) < 0) {
+                        currentChangedWidgets.push(node.widget);
+                    }
+                }
+            };
+            var run = transaction(function () {
+                var source = currentSource;
+                var changedWidgets = currentChangedWidgets.splice(0);
+                if (codeUpdate.needSnapshot) {
+                    undoable.snapshot();
+                }
+                // IE fires textinput event on the parent element when the text node's value is modified
+                // even if modification is done through JavaScript rather than user action
+                codeUpdate.suppressTextEvent = true;
+                currentSource = null;
+                setImmediate(function () {
+                    codeUpdate.suppressTextEvent = false;
+                    if (changedWidgets[0]) {
+                        codeUpdate('script', function () {
+                            $.each(changedWidgets, function (i, v) {
+                                normalize(v.element);
+                                triggerEvent(v, 'contentChange', source);
+                            });
+                            triggerEvent(EVENT_STATIC, 'contentChange', source);
+                        });
+                    }
+                });
             });
-        });
+            return function (source, callback) {
+                currentSource = currentSource || source;
+                return run(callback, [nodeManager]);
+            };
+        } ());
 
         function TyperTransaction() { }
 
@@ -510,20 +538,31 @@
             });
         }
 
+        function eventListened(widgets, name) {
+            if (!Array.isArray(widgets)) {
+                widgets = $.makeArray(is(widgets, TyperWidget) || getTargetedWidgets(widgets));
+            }
+            return !!any(widgets, function (v) {
+                return !v.destroyed && isFunction(widgetOptions[v.id][name]);
+            });
+        }
+
         function triggerEvent(eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
             var handlerCalled;
-            codeUpdate(function () {
-                $.each(widgets, function (i, v) {
-                    var options = widgetOptions[v.id];
-                    if (!v.destroyed && isFunction(options[eventName])) {
-                        handlerCalled = true;
-                        options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
-                        return eventMode !== EVENT_HANDLER;
-                    }
+            if (eventListened(widgets, eventName)) {
+                codeUpdate('script', function () {
+                    $.each(widgets, function (i, v) {
+                        var options = widgetOptions[v.id];
+                        if (!v.destroyed && isFunction(options[eventName])) {
+                            handlerCalled = true;
+                            options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
+                            return eventMode !== EVENT_HANDLER;
+                        }
+                    });
                 });
-            });
-            if (is(eventMode, TyperWidget)) {
+            }
+            if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
                 setTimeout(function () {
                     triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
@@ -602,7 +641,7 @@
                         triggerEvent(node.widget, 'init');
                     }
                 }
-                if (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
+                if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
                     node.widget = context.widget;
                     node.nodeType = NODE_WIDGET;
                 } else {
@@ -755,7 +794,7 @@
 
         function normalize(range) {
             range = is(range, Range) || createRange(topElement, 'contents');
-            codeUpdate(function () {
+            codeUpdate('script', function () {
                 iterate(new TyperSelection(typer, range).createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
                     if (checkEditable(node)) {
                         return;
@@ -819,26 +858,17 @@
             });
         }
 
-        function extractContents(range, mode, source, callback) {
+        function extractContents(range, mode, callback) {
             range = is(range, Range) || createRange(range);
 
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var contentChangedWidgets = [];
             var state = new TyperSelection(typer, range);
             var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
 
-            var contentEvent = {
-                addTarget: function (node) {
-                    node = is(node, TyperNode) || typer.getNode(node);
-                    if (contentChangedWidgets.indexOf(node.widget) < 0) {
-                        contentChangedWidgets.push(node.widget);
-                    }
-                }
-            };
-            codeUpdate(function () {
+            codeUpdate(mode, function (nodeManager) {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
                     iterate(state.createTreeWalker(-1, function (node) {
@@ -858,10 +888,10 @@
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
                                     $(node.element).html(EMPTY_LINE);
-                                    contentEvent.addTarget(node);
+                                    nodeManager.recordChange(node);
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
                                     $(node.element).html(ZWSP_ENTITIY);
-                                    contentEvent.addTarget(node);
+                                    nodeManager.recordChange(node);
                                 } else {
                                     removeNode(node.element);
                                 }
@@ -884,7 +914,7 @@
                             }
                         }
                         if (clearNode) {
-                            contentEvent.addTarget(node);
+                            nodeManager.recordChange(node);
                         }
                         return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                     }));
@@ -903,26 +933,19 @@
                     if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
                         startPoint = createRange(newState.startNode.element, 0);
                     }
-                    callback(newState, startPoint, endPoint, contentEvent);
+                    callback(newState, startPoint, endPoint, nodeManager);
                 }
             });
-            if (contentChangedWidgets[0]) {
-                $.each(contentChangedWidgets, function (i, v) {
-                    normalize(v.element);
-                    triggerEvent(v, 'contentChange', source);
-                });
-                triggerEvent(EVENT_STATIC, 'contentChange', source);
-            }
             return fragment;
         }
 
-        function insertContents(range, content, source) {
+        function insertContents(range, content) {
             if (!is(content, Node)) {
                 content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>');
             }
             content = slice(createDocumentFragment(content).childNodes);
 
-            extractContents(range, 'paste', source, function (state, startPoint, endPoint, contentEvent) {
+            extractContents(range, 'paste', function (state, startPoint, endPoint, nodeManager) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
@@ -969,7 +992,7 @@
                         }
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
-                        contentEvent.addTarget(splitEnd.startContainer);
+                        nodeManager.recordChange(splitEnd.startContainer);
 
                         if (!/\S/.test(splitLastNode.element.textContent)) {
                             caretPoint.insertNode(createTextNode());
@@ -1021,15 +1044,15 @@
                         paragraphAsInline = !insertAsInline;
                         hasInsertedBlock = true;
                     }
-                    contentEvent.addTarget(caretPoint.startContainer);
+                    nodeManager.recordChange(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     caretPoint = caretPoint || createRange(state.startNode.element, -0);
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
-                    contentEvent.addTarget(state.endNode);
-                    contentEvent.addTarget(state.startNode);
+                    nodeManager.recordChange(state.endNode);
+                    nodeManager.recordChange(state.startNode);
                 }
                 currentSelection.select(caretPoint);
             });
@@ -1206,11 +1229,15 @@
 
             function deleteNextContent(e) {
                 if (!currentSelection.isCaret) {
-                    insertContents(currentSelection, '', 'keystroke');
+                    codeUpdate('keystroke', function () {
+                        insertContents(currentSelection, '');
+                    });
                 } else {
                     var selection = currentSelection.clone();
                     if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
-                        insertContents(selection, '', 'keystroke');
+                        codeUpdate('keystroke', function () {
+                            insertContents(selection, '');
+                        });
                     }
                 }
             }
@@ -1220,7 +1247,9 @@
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
-                    insertContents(currentSelection, inputText, 'textInput');
+                    codeUpdate('textInput', function () {
+                        insertContents(currentSelection, inputText);
+                    });
                     return true;
                 }
                 setImmediate(function () {
@@ -1328,11 +1357,13 @@
                 var selectedRange = createRange(currentSelection);
                 var handlers = {
                     drop: function (e) {
-                        var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
-                        var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut', e.type);
-                        insertContents(range, content, e.type);
-                        e.preventDefault();
-                        $self.unbind(handlers);
+                        codeUpdate('drop', function () {
+                            var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
+                            var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut');
+                            insertContents(range, content);
+                            e.preventDefault();
+                            $self.unbind(handlers);
+                        });
                     }
                 };
                 $self.bind(handlers);
@@ -1340,8 +1371,10 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                clipboard.content = extractContents(currentSelection, e.type, e.type);
-                clipboard.textContent = extractText(clipboard.content);
+                codeUpdate(e.type, function () {
+                    clipboard.content = extractContents(currentSelection, e.type);
+                    clipboard.textContent = extractText(clipboard.content);
+                });
                 if (window.clipboardData) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
@@ -1358,13 +1391,19 @@
                 if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    insertContents(currentSelection, content, e.type);
+                    codeUpdate(e.type, function () {
+                        insertContents(currentSelection, content);
+                    });
                 } else {
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
-                        insertContents(currentSelection, clipboard.content.cloneNode(true), e.type);
+                        codeUpdate(e.type, function () {
+                            insertContents(currentSelection, clipboard.content.cloneNode(true));
+                        });
                     } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
-                        insertContents(currentSelection, textContent, e.type);
+                        codeUpdate(e.type, function () {
+                            insertContents(currentSelection, textContent);
+                        });
                     }
                 }
                 e.preventDefault();
@@ -1589,7 +1628,8 @@
                     command = tx.widget && widgetOptions[tx.widget.id].commands[command];
                 }
                 if (isFunction(command)) {
-                    codeUpdate(function () {
+                    codeUpdate('script', function (nodeManager) {
+                        tx.nodeManager = nodeManager;
                         command.call(typer, tx, value);
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
@@ -1626,6 +1666,18 @@
                 } else {
                     insertContents(createRange(widget.element), '');
                 }
+            },
+            replaceElement: function (oldElement, newElement) {
+                newElement = is(newElement, Node) || createElement(newElement);
+                $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
+                caretNotification.update(oldElement, newElement);
+                removeNode(oldElement, false);
+                this.nodeManager.recordChange(newElement.parentNode);
+                return newElement;
+            },
+            removeElement: function (element) {
+                removeNode(element);
+                this.nodeManager.recordChange(element.parentNode);
             },
             execCommand: function (commandName, value) {
                 var r1, r2;
@@ -1688,16 +1740,6 @@
                     return $.contains(w, v);
                 });
             });
-        },
-        replaceElement: function (oldElement, newElement) {
-            newElement = is(newElement, Node) || createElement(newElement);
-            $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
-            caretNotification.update(oldElement, newElement);
-            removeNode(oldElement, false);
-            return newElement;
-        },
-        removeElement: function (element) {
-            removeNode(element);
         },
         historyLevel: 100,
         defaultOptions: {
@@ -2507,6 +2549,10 @@
     var executionContext = [];
     var currentDialog;
 
+    function randomId() {
+        return Math.random().toString(36).substr(2, 8);
+    }
+
     function define(name, base, ctor) {
         /* jshint -W054 */
         var fn = (new Function('fn', 'return function ' + (name || '') + '() { return fn.apply(this, arguments); }'))(function (options) {
@@ -2648,7 +2694,7 @@
             inst.ui = ui;
             inst.parent = control;
             inst.contextualParent = contextualParent;
-            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + randomId());
             if (inst.icon === undefined) {
                 inst.icon = inst.name;
             }
@@ -2733,7 +2779,7 @@
             }
         }
 
-        control.element = replacePlaceholder(control.type);
+        control.element = replacePlaceholder((params || {})[control.type] || control.type);
         $(control.element).attr('role', control.name);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
@@ -3208,12 +3254,33 @@
             this.controls = controls;
             $.extend(this, params);
         }),
+        label: define('TyperUILabel', {
+            type: 'label'
+        }, function (label) {
+            this.label = label;
+        }),
         callout: define('TyperUICallout', {
             type: 'callout'
         }),
         textbox: define('TyperUITextbox', {
             type: 'textbox',
             preset: 'textbox'
+        }),
+        textboxCombo: define('TyperUITextboxCombo', {
+            type: 'textboxCombo',
+            controls: function (ui, self) {
+                var controls = [];
+                self.valueMap = {};
+                (self.format || '').replace(/\{([^}]+)\}|[^{]+/g, function (v, property) {
+                    var control = property ? Typer.ui.textbox(self[property]) : Typer.ui.label(v);
+                    control.name = self.name + ':' + (property || randomId());
+                    controls.push(control);
+                    if (property) {
+                        self.valueMap[property] = control.name;
+                    }
+                });
+                return controls;
+            }
         }),
         checkbox: define('TyperUICheckbox', {
             type: 'checkbox'
@@ -3335,8 +3402,8 @@
             (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
         }
     });
-    $(window).focusout(function (e) {
-        if (currentDialog && !e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
+    $(window).focusin(function (e) {
+        if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
             Typer.ui.focus(currentDialog.element);
         }
     });
@@ -3424,6 +3491,7 @@
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
+        tx.nodeManager.recordChange(tx.selection.focusNode.element);
     }
 
     function inlineStyleCommand(tx) {
@@ -3438,6 +3506,7 @@
                 tx.execCommand('superscript');
             }
             tx.execCommand(tx.commandName);
+            tx.nodeManager.recordChange(tx.selection.focusNode.element);
         }
     }
 
@@ -3452,15 +3521,16 @@
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v)[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
-                Typer.replaceElement(v, 'li');
+                tx.replaceElement(v, 'li');
                 lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
-                Typer.replaceElement(v.parentNode, $(html)[0]);
+                tx.replaceElement(v.parentNode, $(html)[0]);
                 lists.push(v.parentNode);
             } else if ($(v).is('li') && $.inArray(v.parentNode, lists) < 0) {
                 outdentCommand(tx, [v]);
             }
         });
+        tx.nodeManager.recordChange(tx.selection.focusNode.element);
     }
 
     function indentCommand(tx, elements) {
@@ -3472,12 +3542,12 @@
                 var prevItem = $(v).prev('li')[0] || $('<li>').insertBefore(v)[0];
                 newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
             }
-            $(Typer.replaceElement(v, 'li')).appendTo(newList);
+            $(tx.replaceElement(v, 'li')).appendTo(newList);
             if ($(newList).parent('li')[0]) {
                 $(Typer.createTextNode('\u00a0')).insertBefore(newList);
             }
             if (!list.children[0]) {
-                Typer.removeElement(list);
+                tx.removeElement(list);
             }
         });
     }
@@ -3498,15 +3568,16 @@
             if (parentList) {
                 $(v).insertAfter(parentList);
                 if (!Typer.trim(tx.typer.extractText(parentList))) {
-                    Typer.removeElement(parentList);
+                    tx.removeElement(parentList);
                 }
             } else {
-                $(Typer.replaceElement(v, 'p')).insertAfter(list);
+                $(tx.replaceElement(v, 'p')).insertAfter(list);
             }
             if (!list.children[0]) {
-                Typer.removeElement(list);
+                tx.removeElement(list);
             }
         });
+        tx.nodeManager.recordChange(tx.selection.focusNode.element);
     }
 
     Typer.widgets.inlineStyle = {
@@ -3540,6 +3611,7 @@
                     }).wrap(createElementWithClassName('span', v.className));
                 });
                 $('span[class=""]', paragraphs).contents().unwrap();
+                tx.nodeManager.recordChange(tx.selection.focusNode.element);
             }
         }
     };
@@ -3578,9 +3650,10 @@
                 } else {
                     $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
                         if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
-                            Typer.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
+                            tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2];
+                            tx.nodeManager.recordChange(v);
                         }
                     });
                 }
@@ -3623,7 +3696,9 @@
         },
         contentChange: function (e) {
             if (!$(e.widget.element).children('li')[0]) {
-                Typer.removeElement(e.widget.element);
+                e.typer.invoke(function (tx) {
+                    tx.removeElement(e.widget.element);
+                });
             }
         },
         commands: {
@@ -3888,6 +3963,7 @@
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -3941,6 +4017,7 @@
                         }
                     }
                 }
+                tx.nodeManager.recordChange(self.widget.element);
             },
             active: function (toolbar, self) {
                 return self.widget;
@@ -4064,6 +4141,7 @@
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
+                tx.nodeManager.recordChange(self.widget.element);
             }
         }),
         'media:altText': Typer.ui.textbox({
@@ -4072,8 +4150,9 @@
             stateChange: function (toolbar, self) {
                 self.value = $(self.widget.element).attr('alt');
             },
-            execute: function (toolbar, self) {
+            execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('alt', self.value).attr('title', self.value);
+                tx.nodeManager.recordChange(self.widget.element);
             }
         })
     });
@@ -4166,39 +4245,45 @@
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
                 setEditorStyle(tx.widget.element);
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
                 setEditorStyle(tx.widget.element);
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
                 $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
                 $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
                     $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
                 });
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
+                tx.nodeManager.recordChange(tx.widget.element);
             },
             toggleTableHeader: function (tx) {
                 if ($(tx.widget.element).find('th')[0]) {
                     $(tx.widget.element).find('th').wrapInner('<p>').each(function (i, v) {
-                        Typer.replaceElement(v, 'td');
+                        tx.replaceElement(v, 'td');
                     });
                 } else {
                     var columnCount = $(tx.widget.element).find('>tbody>tr')[0].childElementCount;
@@ -4208,6 +4293,7 @@
                     });
                 }
                 setEditorStyle(tx.widget.element);
+                tx.nodeManager.recordChange(tx.widget.element);
             }
         }
     };
@@ -5266,6 +5352,7 @@
                     if (dir) {
                         e.typer.setValue(e.typer.getValue() + (dir / Math.abs(dir)) * e.widget.options.step);
                     }
+                    ex.preventDefault();
                 }
             });
         },
@@ -5445,9 +5532,9 @@
         buttonset: '<div class="typer-ui-buttonset"><div class="typer-ui-buttonset-pad"></div><br x:t="children"/></div>',
         buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
         form: '<div class="typer-ui-form"><br x:t="children"/></div>',
-        menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
+        menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
+        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
             setImmediate(function () {
@@ -5470,7 +5557,7 @@
                 });
             });
         },
-        callout: '<label class="typer-ui-callout" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
+        callout: '<label class="typer-ui-callout has-clickeffect" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
         calloutExecuteOn: 'click',
         dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
         checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
@@ -5483,22 +5570,31 @@
         checkboxStateChange: function (ui, control) {
             $(control.element).toggleClass('checked', !!control.value);
         },
-        textbox: '<label x:bind="(title:label)"><div class="typer-ui-textbox"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div></div></label>',
+        textboxInner: '<div class="typer-ui-textbox-inner"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div>',
+        textboxCombo: '<label class="typer-ui-textbox typer-ui-textbox-combo" x:bind="(title:label)"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><br x:t="children(textbox:textboxInner)"/></div></label>',
+        textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><br x:t="textboxInner"/></div></label>',
         textboxInit: function (ui, control) {
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
+                focusin: function (e) {
+                    $(control.element).closest('.typer-ui-textbox').addClass('focused');
+                },
+                focusout: function (e) {
+                    $(control.element).closest('.typer-ui-textbox').removeClass('focused');
+                },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();
-                    $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
+                    $(control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
                     if (e.typer.focused()) {
                         ui.execute(control);
                     }
                 }
             }));
+            $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
             var valid = control.preset.validate() !== false;
-            $('.typer-ui-textbox', control.element).toggleClass('error', !valid);
+            $(control.element).toggleClass('error', !valid);
             if (!valid) {
                 opt.fail();
             }

@@ -114,9 +114,9 @@
         buttonset: '<div class="typer-ui-buttonset"><div class="typer-ui-buttonset-pad"></div><br x:t="children"/></div>',
         buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
         form: '<div class="typer-ui-form"><br x:t="children"/></div>',
-        menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
+        menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children(t:button)"/></div></div>',
+        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
             setImmediate(function () {
@@ -139,7 +139,7 @@
                 });
             });
         },
-        callout: '<label class="typer-ui-callout" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
+        callout: '<label class="typer-ui-callout has-clickeffect" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
         calloutExecuteOn: 'click',
         dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
         checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
@@ -152,22 +152,31 @@
         checkboxStateChange: function (ui, control) {
             $(control.element).toggleClass('checked', !!control.value);
         },
-        textbox: '<label x:bind="(title:label)"><div class="typer-ui-textbox"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div></div></label>',
+        textboxInner: '<div class="typer-ui-textbox-inner"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div>',
+        textboxCombo: '<label class="typer-ui-textbox typer-ui-textbox-combo" x:bind="(title:label)"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><br x:t="children(textbox:textboxInner)"/></div></label>',
+        textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><br x:t="textboxInner"/></div></label>',
         textboxInit: function (ui, control) {
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
+                focusin: function (e) {
+                    $(control.element).closest('.typer-ui-textbox').addClass('focused');
+                },
+                focusout: function (e) {
+                    $(control.element).closest('.typer-ui-textbox').removeClass('focused');
+                },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();
-                    $('.typer-ui-textbox', control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
+                    $(control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
                     if (e.typer.focused()) {
                         ui.execute(control);
                     }
                 }
             }));
+            $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
             var valid = control.preset.validate() !== false;
-            $('.typer-ui-textbox', control.element).toggleClass('error', !valid);
+            $(control.element).toggleClass('error', !valid);
             if (!valid) {
                 opt.fail();
             }

@@ -23,6 +23,10 @@
     var executionContext = [];
     var currentDialog;
 
+    function randomId() {
+        return Math.random().toString(36).substr(2, 8);
+    }
+
     function define(name, base, ctor) {
         /* jshint -W054 */
         var fn = (new Function('fn', 'return function ' + (name || '') + '() { return fn.apply(this, arguments); }'))(function (options) {
@@ -164,7 +168,7 @@
             inst.ui = ui;
             inst.parent = control;
             inst.contextualParent = contextualParent;
-            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + (Math.random().toString(36).substr(2, 8)));
+            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + randomId());
             if (inst.icon === undefined) {
                 inst.icon = inst.name;
             }
@@ -249,7 +253,7 @@
             }
         }
 
-        control.element = replacePlaceholder(control.type);
+        control.element = replacePlaceholder((params || {})[control.type] || control.type);
         $(control.element).attr('role', control.name);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
@@ -724,12 +728,33 @@
             this.controls = controls;
             $.extend(this, params);
         }),
+        label: define('TyperUILabel', {
+            type: 'label'
+        }, function (label) {
+            this.label = label;
+        }),
         callout: define('TyperUICallout', {
             type: 'callout'
         }),
         textbox: define('TyperUITextbox', {
             type: 'textbox',
             preset: 'textbox'
+        }),
+        textboxCombo: define('TyperUITextboxCombo', {
+            type: 'textboxCombo',
+            controls: function (ui, self) {
+                var controls = [];
+                self.valueMap = {};
+                (self.format || '').replace(/\{([^}]+)\}|[^{]+/g, function (v, property) {
+                    var control = property ? Typer.ui.textbox(self[property]) : Typer.ui.label(v);
+                    control.name = self.name + ':' + (property || randomId());
+                    controls.push(control);
+                    if (property) {
+                        self.valueMap[property] = control.name;
+                    }
+                });
+                return controls;
+            }
         }),
         checkbox: define('TyperUICheckbox', {
             type: 'checkbox'
@@ -851,8 +876,8 @@
             (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
         }
     });
-    $(window).focusout(function (e) {
-        if (currentDialog && !e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
+    $(window).focusin(function (e) {
+        if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
             Typer.ui.focus(currentDialog.element);
         }
     });
