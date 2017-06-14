@@ -450,17 +450,45 @@
         var typerFocused = false;
         var $self = $(topElement);
 
-        var codeUpdate = transaction(function () {
-            if (codeUpdate.needSnapshot) {
-                undoable.snapshot();
-            }
-            // IE fires textinput event on the parent element when the text node's value is modified
-            // even if modification is done through JavaScript rather than user action
-            codeUpdate.suppressTextEvent = true;
-            setImmediate(function () {
-                codeUpdate.suppressTextEvent = false;
+        var codeUpdate = (function () {
+            var currentSource;
+            var currentChangedWidgets = [];
+            var nodeManager = {
+                recordChange: function (node) {
+                    node = is(node, TyperNode) || typer.getNode(node);
+                    if (node && currentChangedWidgets.indexOf(node.widget) < 0) {
+                        currentChangedWidgets.push(node.widget);
+                    }
+                }
+            };
+            var run = transaction(function () {
+                var source = currentSource;
+                var changedWidgets = currentChangedWidgets.splice(0);
+                if (codeUpdate.needSnapshot) {
+                    undoable.snapshot();
+                }
+                // IE fires textinput event on the parent element when the text node's value is modified
+                // even if modification is done through JavaScript rather than user action
+                codeUpdate.suppressTextEvent = true;
+                currentSource = null;
+                setImmediate(function () {
+                    codeUpdate.suppressTextEvent = false;
+                    if (changedWidgets[0]) {
+                        codeUpdate('script', function () {
+                            $.each(changedWidgets, function (i, v) {
+                                normalize(v.element);
+                                triggerEvent(v, 'contentChange', source);
+                            });
+                            triggerEvent(EVENT_STATIC, 'contentChange', source);
+                        });
+                    }
+                });
             });
-        });
+            return function (source, callback) {
+                currentSource = currentSource || source;
+                return run(callback, [nodeManager]);
+            };
+        } ());
 
         function TyperTransaction() { }
 
@@ -484,20 +512,31 @@
             });
         }
 
+        function eventListened(widgets, name) {
+            if (!Array.isArray(widgets)) {
+                widgets = $.makeArray(is(widgets, TyperWidget) || getTargetedWidgets(widgets));
+            }
+            return !!any(widgets, function (v) {
+                return !v.destroyed && isFunction(widgetOptions[v.id][name]);
+            });
+        }
+
         function triggerEvent(eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
             var handlerCalled;
-            codeUpdate(function () {
-                $.each(widgets, function (i, v) {
-                    var options = widgetOptions[v.id];
-                    if (!v.destroyed && isFunction(options[eventName])) {
-                        handlerCalled = true;
-                        options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
-                        return eventMode !== EVENT_HANDLER;
-                    }
+            if (eventListened(widgets, eventName)) {
+                codeUpdate('script', function () {
+                    $.each(widgets, function (i, v) {
+                        var options = widgetOptions[v.id];
+                        if (!v.destroyed && isFunction(options[eventName])) {
+                            handlerCalled = true;
+                            options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
+                            return eventMode !== EVENT_HANDLER;
+                        }
+                    });
                 });
-            });
-            if (is(eventMode, TyperWidget)) {
+            }
+            if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
                 setTimeout(function () {
                     triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
@@ -729,7 +768,7 @@
 
         function normalize(range) {
             range = is(range, Range) || createRange(topElement, 'contents');
-            codeUpdate(function () {
+            codeUpdate('script', function () {
                 iterate(new TyperSelection(typer, range).createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
                     if (checkEditable(node)) {
                         return;
@@ -793,26 +832,17 @@
             });
         }
 
-        function extractContents(range, mode, source, callback) {
+        function extractContents(range, mode, callback) {
             range = is(range, Range) || createRange(range);
 
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var contentChangedWidgets = [];
             var state = new TyperSelection(typer, range);
             var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
 
-            var contentEvent = {
-                addTarget: function (node) {
-                    node = is(node, TyperNode) || typer.getNode(node);
-                    if (contentChangedWidgets.indexOf(node.widget) < 0) {
-                        contentChangedWidgets.push(node.widget);
-                    }
-                }
-            };
-            codeUpdate(function () {
+            codeUpdate(mode, function (nodeManager) {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
                     iterate(state.createTreeWalker(-1, function (node) {
@@ -832,10 +862,10 @@
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
                                     $(node.element).html(EMPTY_LINE);
-                                    contentEvent.addTarget(node);
+                                    nodeManager.recordChange(node);
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
                                     $(node.element).html(ZWSP_ENTITIY);
-                                    contentEvent.addTarget(node);
+                                    nodeManager.recordChange(node);
                                 } else {
                                     removeNode(node.element);
                                 }
@@ -858,7 +888,7 @@
                             }
                         }
                         if (clearNode) {
-                            contentEvent.addTarget(node);
+                            nodeManager.recordChange(node);
                         }
                         return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                     }));
@@ -877,26 +907,19 @@
                     if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
                         startPoint = createRange(newState.startNode.element, 0);
                     }
-                    callback(newState, startPoint, endPoint, contentEvent);
+                    callback(newState, startPoint, endPoint, nodeManager);
                 }
             });
-            if (contentChangedWidgets[0]) {
-                $.each(contentChangedWidgets, function (i, v) {
-                    normalize(v.element);
-                    triggerEvent(v, 'contentChange', source);
-                });
-                triggerEvent(EVENT_STATIC, 'contentChange', source);
-            }
             return fragment;
         }
 
-        function insertContents(range, content, source) {
+        function insertContents(range, content) {
             if (!is(content, Node)) {
                 content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>');
             }
             content = slice(createDocumentFragment(content).childNodes);
 
-            extractContents(range, 'paste', source, function (state, startPoint, endPoint, contentEvent) {
+            extractContents(range, 'paste', function (state, startPoint, endPoint, nodeManager) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
@@ -943,7 +966,7 @@
                         }
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
-                        contentEvent.addTarget(splitEnd.startContainer);
+                        nodeManager.recordChange(splitEnd.startContainer);
 
                         if (!/\S/.test(splitLastNode.element.textContent)) {
                             caretPoint.insertNode(createTextNode());
@@ -995,15 +1018,15 @@
                         paragraphAsInline = !insertAsInline;
                         hasInsertedBlock = true;
                     }
-                    contentEvent.addTarget(caretPoint.startContainer);
+                    nodeManager.recordChange(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     caretPoint = caretPoint || createRange(state.startNode.element, -0);
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
-                    contentEvent.addTarget(state.endNode);
-                    contentEvent.addTarget(state.startNode);
+                    nodeManager.recordChange(state.endNode);
+                    nodeManager.recordChange(state.startNode);
                 }
                 currentSelection.select(caretPoint);
             });
@@ -1180,11 +1203,15 @@
 
             function deleteNextContent(e) {
                 if (!currentSelection.isCaret) {
-                    insertContents(currentSelection, '', 'keystroke');
+                    codeUpdate('keystroke', function () {
+                        insertContents(currentSelection, '');
+                    });
                 } else {
                     var selection = currentSelection.clone();
                     if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
-                        insertContents(selection, '', 'keystroke');
+                        codeUpdate('keystroke', function () {
+                            insertContents(selection, '');
+                        });
                     }
                 }
             }
@@ -1194,7 +1221,9 @@
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
-                    insertContents(currentSelection, inputText, 'textInput');
+                    codeUpdate('textInput', function () {
+                        insertContents(currentSelection, inputText);
+                    });
                     return true;
                 }
                 setImmediate(function () {
@@ -1302,11 +1331,13 @@
                 var selectedRange = createRange(currentSelection);
                 var handlers = {
                     drop: function (e) {
-                        var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
-                        var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut', e.type);
-                        insertContents(range, content, e.type);
-                        e.preventDefault();
-                        $self.unbind(handlers);
+                        codeUpdate('drop', function () {
+                            var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
+                            var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut');
+                            insertContents(range, content);
+                            e.preventDefault();
+                            $self.unbind(handlers);
+                        });
                     }
                 };
                 $self.bind(handlers);
@@ -1314,8 +1345,10 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                clipboard.content = extractContents(currentSelection, e.type, e.type);
-                clipboard.textContent = extractText(clipboard.content);
+                codeUpdate(e.type, function () {
+                    clipboard.content = extractContents(currentSelection, e.type);
+                    clipboard.textContent = extractText(clipboard.content);
+                });
                 if (window.clipboardData) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
@@ -1332,13 +1365,19 @@
                 if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    insertContents(currentSelection, content, e.type);
+                    codeUpdate(e.type, function () {
+                        insertContents(currentSelection, content);
+                    });
                 } else {
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
-                        insertContents(currentSelection, clipboard.content.cloneNode(true), e.type);
+                        codeUpdate(e.type, function () {
+                            insertContents(currentSelection, clipboard.content.cloneNode(true));
+                        });
                     } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
-                        insertContents(currentSelection, textContent, e.type);
+                        codeUpdate(e.type, function () {
+                            insertContents(currentSelection, textContent);
+                        });
                     }
                 }
                 e.preventDefault();
@@ -1563,7 +1602,8 @@
                     command = tx.widget && widgetOptions[tx.widget.id].commands[command];
                 }
                 if (isFunction(command)) {
-                    codeUpdate(function () {
+                    codeUpdate('script', function (nodeManager) {
+                        tx.nodeManager = nodeManager;
                         command.call(typer, tx, value);
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
@@ -1600,6 +1640,18 @@
                 } else {
                     insertContents(createRange(widget.element), '');
                 }
+            },
+            replaceElement: function (oldElement, newElement) {
+                newElement = is(newElement, Node) || createElement(newElement);
+                $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
+                caretNotification.update(oldElement, newElement);
+                removeNode(oldElement, false);
+                this.nodeManager.recordChange(newElement.parentNode);
+                return newElement;
+            },
+            removeElement: function (element) {
+                removeNode(element);
+                this.nodeManager.recordChange(element.parentNode);
             },
             execCommand: function (commandName, value) {
                 var r1, r2;
@@ -1662,16 +1714,6 @@
                     return $.contains(w, v);
                 });
             });
-        },
-        replaceElement: function (oldElement, newElement) {
-            newElement = is(newElement, Node) || createElement(newElement);
-            $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
-            caretNotification.update(oldElement, newElement);
-            removeNode(oldElement, false);
-            return newElement;
-        },
-        removeElement: function (element) {
-            removeNode(element);
         },
         historyLevel: 100,
         defaultOptions: {
