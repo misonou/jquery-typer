@@ -79,7 +79,7 @@
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function inlineStyleCommand(tx) {
@@ -94,7 +94,7 @@
                 tx.execCommand('superscript');
             }
             tx.execCommand(tx.commandName);
-            tx.nodeManager.recordChange(tx.selection.focusNode.element);
+            tx.trackChange(tx.selection.focusNode.element);
         }
     }
 
@@ -118,7 +118,7 @@
                 outdentCommand(tx, [v]);
             }
         });
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function indentCommand(tx, elements) {
@@ -165,7 +165,7 @@
                 tx.removeElement(list);
             }
         });
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     Typer.widgets.inlineStyle = {
@@ -199,7 +199,7 @@
                     }).wrap(createElementWithClassName('span', v.className));
                 });
                 $('span[class=""]', paragraphs).contents().unwrap();
-                tx.nodeManager.recordChange(tx.selection.focusNode.element);
+                tx.trackChange(tx.selection.focusNode.element);
             }
         }
     };
@@ -241,7 +241,7 @@
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2];
-                            tx.nodeManager.recordChange(v);
+                            tx.trackChange(v);
                         }
                     });
                 }

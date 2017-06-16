@@ -1,6 +1,6 @@
 {
   "name": "jquery-typer",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "devDependencies": {
     "grunt": "^1.0.1",
     "grunt-contrib-concat": "^1.0.1",

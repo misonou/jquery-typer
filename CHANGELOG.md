@@ -1,3 +1,31 @@
+## 0.9.7 / 2017-06-17
+
+- Fix: unable to focus editable regions in FireFox
+- Fix: avoid `contentChange` events fired multiple times after user or code edit
+
+## 0.9.6 / 2017-06-14
+
+- New presets: `number` and `keywords`
+- New extensions: `validation`
+- New UI components
+- Updates to extensions: `toolbar`, `formatting` and `table`
+- Fix: `contentChange` event not fired in some circumstances
+- Fix: non-editable elements inside widgets errneously treated as separate unknown widgets
+- Fix: cannot insert content after an inline widget in IE
+- Fix: caret being set to incorrect position when clicking empty spaces
+- Fix: `Typer.getValue` returns incorrect value
+- Fix: potential exception when iterating nodes
+- Fix: potential exception when using polyfill for `WeakMap`
+- Fix: IE11 crashed at `caretRangeFromPoint`
+
+## 0.9.5 / 2017-03-15
+
+- (Breaking) Major updates to `Typer.ui`
+- Some events become preventable
+- Fix: issues on inserting contents
+- Fix: various issues on focus/blur
+- Fix: widget unindentedly destroyed
+
 ## 0.9.4 / 2017-02-14
 
 - Improved UI dialog handling

@@ -55,7 +55,7 @@
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             }
         }),
         'media:altText': Typer.ui.textbox({
@@ -66,7 +66,7 @@
             },
             execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('alt', self.value).attr('title', self.value);
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             }
         })
     });

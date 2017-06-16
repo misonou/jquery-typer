@@ -71,40 +71,40 @@
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
                 $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
                 $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
                     $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
                 });
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             toggleTableHeader: function (tx) {
                 if ($(tx.widget.element).find('th')[0]) {
@@ -119,7 +119,7 @@
                     });
                 }
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             }
         }
     };

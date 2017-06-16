@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.9.6
+ * jQuery Typer Plugin v0.9.7
  *
  * The MIT License (MIT)
  *
@@ -62,6 +62,7 @@
     var caretNotification;
     var windowFocusedOut;
     var permitFocusEvent;
+    var supportTextInputEvent;
 
     function TyperSelection(typer, range) {
         this.typer = typer;
@@ -105,6 +106,10 @@
         this.whatToShow = whatToShow;
         this.filter = filter || null;
         nodeIteratorInit(this, is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT));
+    }
+
+    function TyperChangeTracker(typer) {
+        this.typer = typer;
     }
 
     function TyperCaret(typer, selection) {
@@ -470,6 +475,7 @@
         var widgets = [];
         var widgetOptions = {};
         var relatedElements = new WeakMap();
+        var tracker = new TyperChangeTracker(typer);
         var undoable = {};
         var currentSelection;
         var typerDocument;
@@ -478,41 +484,33 @@
 
         var codeUpdate = (function () {
             var currentSource;
-            var currentChangedWidgets = [];
-            var nodeManager = {
-                recordChange: function (node) {
-                    node = is(node, TyperNode) || typer.getNode(node);
-                    if (node && currentChangedWidgets.indexOf(node.widget) < 0) {
-                        currentChangedWidgets.push(node.widget);
-                    }
-                }
-            };
             var run = transaction(function () {
                 var source = currentSource;
-                var changedWidgets = currentChangedWidgets.splice(0);
                 if (codeUpdate.needSnapshot) {
                     undoable.snapshot();
                 }
-                // IE fires textinput event on the parent element when the text node's value is modified
-                // even if modification is done through JavaScript rather than user action
-                codeUpdate.suppressTextEvent = true;
                 currentSource = null;
                 setImmediate(function () {
                     codeUpdate.suppressTextEvent = false;
-                    if (changedWidgets[0]) {
+                    tracker.collect(function (changedWidgets) {
                         codeUpdate('script', function () {
                             $.each(changedWidgets, function (i, v) {
                                 normalize(v.element);
-                                triggerEvent(v, 'contentChange', source);
+                                if (v.id !== WIDGET_ROOT) {
+                                    triggerEvent(v, 'contentChange', source);
+                                }
                             });
                             triggerEvent(EVENT_STATIC, 'contentChange', source);
                         });
-                    }
+                    });
                 });
             });
             return function (source, callback) {
                 currentSource = currentSource || source;
-                return run(callback, [nodeManager]);
+                // IE fires textinput event on the parent element when the text node's value is modified
+                // even if modification is done through JavaScript rather than user action
+                codeUpdate.suppressTextEvent = true;
+                return run(callback);
             };
         } ());
 
@@ -841,20 +839,6 @@
                 });
                 // Mozilla adds <br type="_moz"> when a container is empty
                 $('br[type="_moz"]', topElement).remove();
-
-                // IE fires input and text-input event on the innermost element where the caret positions at
-                // the event does not bubble up so need to trigger manually on the top element
-                // also IE use all lowercase letter in the event name
-                $(IS_IE && '*', topElement).each(function (i, v) {
-                    if (!$(v).data('typerIEFix')) {
-                        $(v).data('typerIEFix', true);
-                        $(v).bind('input textinput', function (e) {
-                            if (!codeUpdate.executing && !codeUpdate.suppressTextEvent) {
-                                $self.trigger(e);
-                            }
-                        });
-                    }
-                });
             });
         }
 
@@ -868,7 +852,7 @@
             var state = new TyperSelection(typer, range);
             var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
 
-            codeUpdate(mode, function (nodeManager) {
+            codeUpdate(mode, function () {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
                     iterate(state.createTreeWalker(-1, function (node) {
@@ -888,10 +872,10 @@
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
                                     $(node.element).html(EMPTY_LINE);
-                                    nodeManager.recordChange(node);
+                                    tracker.track(node);
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
                                     $(node.element).html(ZWSP_ENTITIY);
-                                    nodeManager.recordChange(node);
+                                    tracker.track(node);
                                 } else {
                                     removeNode(node.element);
                                 }
@@ -914,7 +898,7 @@
                             }
                         }
                         if (clearNode) {
-                            nodeManager.recordChange(node);
+                            tracker.track(node);
                         }
                         return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                     }));
@@ -933,7 +917,7 @@
                     if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
                         startPoint = createRange(newState.startNode.element, 0);
                     }
-                    callback(newState, startPoint, endPoint, nodeManager);
+                    callback(newState, startPoint, endPoint);
                 }
             });
             return fragment;
@@ -945,7 +929,7 @@
             }
             content = slice(createDocumentFragment(content).childNodes);
 
-            extractContents(range, 'paste', function (state, startPoint, endPoint, nodeManager) {
+            extractContents(range, 'paste', function (state, startPoint, endPoint) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
@@ -992,7 +976,7 @@
                         }
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
-                        nodeManager.recordChange(splitEnd.startContainer);
+                        tracker.track(splitEnd.startContainer);
 
                         if (!/\S/.test(splitLastNode.element.textContent)) {
                             caretPoint.insertNode(createTextNode());
@@ -1044,15 +1028,15 @@
                         paragraphAsInline = !insertAsInline;
                         hasInsertedBlock = true;
                     }
-                    nodeManager.recordChange(caretPoint.startContainer);
+                    tracker.track(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     caretPoint = caretPoint || createRange(state.startNode.element, -0);
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
-                    nodeManager.recordChange(state.endNode);
-                    nodeManager.recordChange(state.startNode);
+                    tracker.track(state.endNode);
+                    tracker.track(state.startNode);
                 }
                 currentSelection.select(caretPoint);
             });
@@ -1254,7 +1238,9 @@
                 }
                 setImmediate(function () {
                     updateFromNativeInput();
-                    triggerEvent(EVENT_CURRENT, 'contentChange', 'textInput');
+                    if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
+                        triggerEvent(EVENT_CURRENT, 'contentChange', 'textInput');
+                    }
                     triggerEvent(EVENT_STATIC, 'contentChange', 'textInput');
                 });
             }
@@ -1345,8 +1331,8 @@
                 }
             });
 
-            $self.bind('keypress textInput textinput', function (e) {
-                if (!codeUpdate.executing && (e.type === 'keypress' || !codeUpdate.suppressTextEvent)) {
+            $self.bind('keypress input textInput', function (e) {
+                if (!codeUpdate.executing && !codeUpdate.suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent)) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
@@ -1628,8 +1614,7 @@
                     command = tx.widget && widgetOptions[tx.widget.id].commands[command];
                 }
                 if (isFunction(command)) {
-                    codeUpdate('script', function (nodeManager) {
-                        tx.nodeManager = nodeManager;
+                    codeUpdate('script', function () {
                         command.call(typer, tx, value);
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
@@ -1672,12 +1657,15 @@
                 $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
                 caretNotification.update(oldElement, newElement);
                 removeNode(oldElement, false);
-                this.nodeManager.recordChange(newElement.parentNode);
+                tracker.track(newElement.parentNode);
                 return newElement;
             },
             removeElement: function (element) {
                 removeNode(element);
-                this.nodeManager.recordChange(element.parentNode);
+                tracker.track(element.parentNode);
+            },
+            trackChange: function (node) {
+                tracker.track(node);
             },
             execCommand: function (commandName, value) {
                 var r1, r2;
@@ -2054,6 +2042,11 @@
             if (containsOrEquals(document, this.typer.element)) {
                 permitFocusEvent = true;
                 applyRange(createRange(this));
+                // Firefox does not set focus on the host element automatically
+                // when selection is changed by JavaScript
+                if (document.activeElement !== this.typer.element) {
+                    this.typer.element.focus();
+                }
             }
         },
         clone: function () {
@@ -2323,6 +2316,21 @@
         }
     });
 
+    definePrototype(TyperChangeTracker, {
+        changes: [],
+        track: function (node) {
+            node = is(node, TyperNode) || this.typer.getNode(node);
+            if (node && this.changes.indexOf(node.widget) < 0) {
+                this.changes.push(node.widget);
+            }
+        },
+        collect: function (callback) {
+            if (this.changes.length && isFunction(callback)) {
+                callback(this.changes.splice(0));
+            }
+        }
+    });
+
     // disable Mozilla object resizing and inline table editing controls
     if (!IS_IE) {
         try {
@@ -2477,6 +2485,43 @@
                 return createRange(element, -0);
             };
         } ();
+    }
+
+    // detect support for textInput event
+    function detectTextInputEvent(e) {
+        keypressed = e.type === 'keypress';
+        if (keypressed) {
+            setImmediate(function () {
+                supportTextInputEvent = !keypressed;
+                document.removeEventListener('keypress', detectTextInputEvent, true);
+                document.removeEventListener('textInput', detectTextInputEvent, true);
+            });
+        }
+    }
+
+    var keypressed;
+    document.addEventListener('keypress', detectTextInputEvent, true);
+    document.addEventListener('textInput', detectTextInputEvent, true);
+
+    // IE fires input and text-input event on the innermost element where the caret positions at
+    // the event does not bubble up so need to trigger manually on the top element
+    // also IE use all lowercase letter in the event name
+    function dispatchInputEvent(e) {
+        for (var target = e.target; target; target = target.parentNode) {
+            if (target.contentEditable === 'true') {
+                var event = document.createEvent('Event');
+                event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
+                event.data = e.data;
+                e.stopPropagation();
+                target.dispatchEvent(event);
+                return;
+            }
+        }
+    }
+
+    if (IS_IE) {
+        document.addEventListener('input', dispatchInputEvent, true);
+        document.addEventListener('textinput', dispatchInputEvent, true);
     }
 
 } (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
@@ -3491,7 +3536,7 @@
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function inlineStyleCommand(tx) {
@@ -3506,7 +3551,7 @@
                 tx.execCommand('superscript');
             }
             tx.execCommand(tx.commandName);
-            tx.nodeManager.recordChange(tx.selection.focusNode.element);
+            tx.trackChange(tx.selection.focusNode.element);
         }
     }
 
@@ -3530,7 +3575,7 @@
                 outdentCommand(tx, [v]);
             }
         });
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function indentCommand(tx, elements) {
@@ -3577,7 +3622,7 @@
                 tx.removeElement(list);
             }
         });
-        tx.nodeManager.recordChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode.element);
     }
 
     Typer.widgets.inlineStyle = {
@@ -3611,7 +3656,7 @@
                     }).wrap(createElementWithClassName('span', v.className));
                 });
                 $('span[class=""]', paragraphs).contents().unwrap();
-                tx.nodeManager.recordChange(tx.selection.focusNode.element);
+                tx.trackChange(tx.selection.focusNode.element);
             }
         }
     };
@@ -3653,7 +3698,7 @@
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2];
-                            tx.nodeManager.recordChange(v);
+                            tx.trackChange(v);
                         }
                     });
                 }
@@ -3963,7 +4008,7 @@
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -4017,7 +4062,7 @@
                         }
                     }
                 }
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             },
             active: function (toolbar, self) {
                 return self.widget;
@@ -4141,7 +4186,7 @@
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             }
         }),
         'media:altText': Typer.ui.textbox({
@@ -4152,7 +4197,7 @@
             },
             execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('alt', self.value).attr('title', self.value);
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             }
         })
     });
@@ -4245,40 +4290,40 @@
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
                 $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
                 $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
                 $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
                     $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
                 });
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             toggleTableHeader: function (tx) {
                 if ($(tx.widget.element).find('th')[0]) {
@@ -4293,7 +4338,7 @@
                     });
                 }
                 setEditorStyle(tx.widget.element);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             }
         }
     };

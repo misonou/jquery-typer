@@ -32,7 +32,7 @@
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
-                tx.nodeManager.recordChange(tx.widget.element);
+                tx.trackChange(tx.widget.element);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -86,7 +86,7 @@
                         }
                     }
                 }
-                tx.nodeManager.recordChange(self.widget.element);
+                tx.trackChange(self.widget.element);
             },
             active: function (toolbar, self) {
                 return self.widget;
