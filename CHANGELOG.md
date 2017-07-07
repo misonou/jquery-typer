@@ -1,3 +1,22 @@
+## 0.10.0 / 2017-07-14
+
+- New methods: `setValue`, `hasContent`, `releaseFocus`, `selectAll`
+- New events: `mousewheel`
+- Improved handling on concatenating paragraphs with inline styles and widgets
+- Improved selection highlight
+- New helper methods: `getWheelDelta`, `parseOrigin`
+- New UI components: `calendar`
+- New presets: `datepicker`
+- Improved control resolving syntax (default namespace and scopes)
+- (Breaking) Removed `openDialog`, `alert`, `confirm` and `prompt` on `Typer.ui.prototype`
+- (Breaking) parameter changes to preset override functions
+- Updates to extensions: `formatting`, `link`, `media`
+- Fix: `focusout` events incorrectly fired when focus moved to elements that are set to has retained focus
+- Fix: incorrect value returned by `Typer.getValue`
+- Fix: incorrect source in `contentChange` events
+- Fix: unable to move to empty line separated by `<br>` in IE
+- Fix: issue with `TyperChangeTracker`
+
 ## 0.9.7 / 2017-06-17
 
 - Fix: unable to focus editable regions in FireFox

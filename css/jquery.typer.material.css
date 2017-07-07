@@ -70,7 +70,7 @@
 }
 
 
-/* Material Icons */
+/* Icons and Labels */
 
 .typer-ui-label {
     display: inline-block;
@@ -121,8 +121,6 @@
     display: block;
     position: relative;
     margin: 0;
-    padding: 0 0.75em;
-    min-height: 2.67em;
     border-style: none;
     background-color: transparent;
     background-image: none;
@@ -146,42 +144,50 @@
     -ms-user-select: none;
 }
 
+.typer-ui button,
+.typer-ui-buttonlist label,
+.typer-ui-buttonset label {
+    padding: 0 0.75em;
+    min-height: 2.67em;
+}
+
 .typer-ui label.disabled,
 .typer-ui button.disabled {
     background-color: transparent;
     color: #999;
 }
 
-.typer-ui-toolbar label:hover,
-.typer-ui-toolbar label.active,
-.typer-ui-float label:hover,
-.typer-ui-float label.active,
-.typer-ui label.has-clickeffect:hover,
-.typer-ui label.has-clickeffect.active,
+.typer-ui .has-clickeffect:hover,
+.typer-ui .has-clickeffect.active,
 .typer-ui button:hover,
 .typer-ui button.active {
     background-color: rgba(238, 238, 238, 0.5);
 }
 
-.typer-ui-toolbar label.pin-active,
-.typer-ui-float label.pin-active,
-.typer-ui label.has-clickeffect.pin-active,
+.typer-ui button.warn {
+    color: #a90007;
+}
+
+.typer-ui .has-clickeffect.pin-active,
 .typer-ui button.pin-active {
     background-color: rgba(16, 52, 146, 0.7);
     color: white;
 }
 
-.typer-ui-checkbox {
-    display: inline-block;
-    position: relative;
-    margin: 0;
-    width: 1em;
-    height: 1em;
-    font-size: 16px;
-    vertical-align: text-top;
+button.typer-ui-checkbox {
+    padding-left: 0;
 }
 
-.typer-ui-checkbox:before {
+.typer-ui-buttonlist button.typer-ui-checkbox,
+.typer-ui-buttonset button.typer-ui-checkbox {
+    padding-left: 0.75em;
+}
+
+button.typer-ui-checkbox:hover {
+    background-color: transparent;
+}
+
+button.typer-ui-checkbox:before {
     content: '\00e876';
     display: inline-block;
     margin: -1px 0 0 -1px;
@@ -197,188 +203,31 @@
     vertical-align: text-top;
 }
 
-.typer-ui-checkbox:hover:before {
+button.typer-ui-checkbox:hover:before {
     border-color: #aeb8c2;
 }
 
-.typer-ui-checkbox.disabled:before {
+button.typer-ui-checkbox.disabled:before {
     border-color: #d3d3d3;
 }
 
-.typer-ui-checkbox.checked:before {
+button.typer-ui-checkbox.checked:before {
     content: '\00e876';
     color: #212121;
 }
 
-.typer-ui-checkbox:focus:before,
-.typer-ui-checkbox:active:before {
+button.typer-ui-checkbox:focus:before,
+button.typer-ui-checkbox:active:before {
     box-shadow: inset 0 0 2px rgba(128, 128, 128, 0.5), 0 0 2px #103492;
     border-color: rgba(16, 52, 146, 0.75);
 }
 
-.typer-ui-checkbox.disabled:before {
+button.typer-ui-checkbox.disabled:before {
     box-shadow: none;
 }
 
-.typer-ui-checkbox .typer-ui-label {
+button.typer-ui-checkbox .typer-ui-label {
     margin-left: 0.5em;
-}
-
-
-/* Menu and Toolbar */
-
-.typer-ui-contextmenu {
-    display: block;
-    min-width: 7em;
-}
-
-.typer-ui-float {
-    position: absolute;
-    background-color: white;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
-    z-index: 1;
-}
-
-.typer-ui-float.parent-is-callout,
-.typer-ui-float.parent-is-dropdown {
-    position: relative;
-}
-
-.typer-ui-float label,
-.typer-ui-float button {
-    border-radius: 0;
-}
-
-.typer-ui-buttonset {
-    text-transform: uppercase;
-    font-weight: bold;
-    font-size: 80%;
-}
-
-.typer-ui-toolbar > *,
-.typer-ui-toolbar .typer-ui-group > *,
-.typer-ui-toolbar label,
-.typer-ui-toolbar button,
-.typer-ui-buttonset > *,
-.typer-ui-buttonset .typer-ui-group > *,
-.typer-ui-buttonset label,
-.typer-ui-buttonset button {
-    display: inline-block;
-    position: relative;
-    vertical-align: top;
-}
-
-.typer-ui-form,
-.typer-ui-buttonlist {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    width: auto\9;
-    -ms-flex-direction: column;
-    flex-direction: column;
-}
-
-.typer-ui-form > *,
-.typer-ui-buttonlist > * {
-    display: block;
-    box-sizing: border-box;
-    align-items: stretch;
-    flex-shrink: 0;
-}
-
-.typer-ui-form label,
-.typer-ui-form button,
-.typer-ui-buttonlist label,
-.typer-ui-buttonlist button {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    width: 100%;
-    align-items: center;
-}
-
-.typer-ui-form .typer-ui-group,
-.typer-ui-buttonlist .typer-ui-group {
-    display: block;
-    display: -ms-flexbox;
-    display: flex;
-    display: block\9;
-    width: 100%\9;
-    -ms-flex-direction: column;
-    flex-direction: column;
-}
-
-.typer-ui-buttonlist .typer-ui-group.sep-before:before,
-.typer-ui-buttonlist .typer-ui-group.sep-after:after {
-    content: '';
-    display: block;
-    margin: 0.25em 0;
-    border-top: 1px solid rgba(128, 128, 128, 0.3);
-}
-
-.typer-ui-form .typer-ui-label,
-.typer-ui-buttonlist .typer-ui-label {
-    width: 100%;
-}
-
-.typer-ui-buttonlist .typer-ui-label span:first-child {
-    display: inline-block;
-    padding-left: 16px;
-    text-indent: 0.5em;
-}
-
-.typer-ui-buttonlist .typer-ui-checkbox .typer-ui-label span:first-child {
-    padding-left: 0;
-    text-indent: 0;
-}
-
-.typer-ui-buttonlist [role="shortcut"] {
-    display: inline-block;
-}
-
-.typer-ui-buttonlist .typer-ui-callout {
-    padding-right: 2em;
-}
-
-.typer-ui-buttonlist .typer-ui-callout:after {
-    content: '';
-    display: block;
-    position: absolute;
-    top: 50%;
-    right: 0;
-    height: 0;
-    margin: -0.4em 0.5em 0 0;
-    border-left: 0.5em solid #555;
-    border-top: 0.4em solid transparent;
-    border-bottom: 0.4em solid transparent;
-    pointer-events: none;
-}
-
-.typer-ui-callout .typer-ui-float {
-    display: none;
-    left: 100%;
-    top: 0;
-}
-
-.typer-ui-callout .typer-ui-float.float-top {
-    top: auto;
-    bottom: 0;
-}
-
-.typer-ui-callout .typer-ui-float.float-left {
-    left: auto;
-    right: 100%;
-}
-
-.typer-ui-callout:hover > .typer-ui-float {
-    display: block;
-}
-
-.typer-ui-float label,
-.typer-ui-float button {
-    border-radius: 0;
 }
 
 button.typer-ui-dropdown {
@@ -402,7 +251,7 @@ button.typer-ui-dropdown.disabled:after {
     border-top-color: #999;
 }
 
-.parent-is-dropdown button.active:before {
+.is-dropdown button.active:before {
     position: absolute;
     content: '\00e876';
     font-family: 'Material Icons';
@@ -414,13 +263,163 @@ button.typer-ui-dropdown.disabled:after {
     font-size: 16px;
 }
 
+label.typer-ui-callout {
+    padding: 0;
+}
+
+.typer-ui-buttonlist label.typer-ui-callout > button {
+    padding-right: 2em !important;
+}
+
+.typer-ui-buttonlist label.typer-ui-callout > button:after {
+    content: '';
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 0;
+    height: 0;
+    margin: -0.4em 0.5em 0 0;
+    border-left: 0.5em solid #555;
+    border-top: 0.4em solid transparent;
+    border-bottom: 0.4em solid transparent;
+    pointer-events: none;
+}
+
+
+/* Menus */
+
+.typer-ui-float {
+    position: absolute;
+    background-color: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+    z-index: 1;
+}
+
+.typer-ui-float label,
+.typer-ui-float button {
+    border-radius: 0;
+}
+
+.typer-ui-float .typer-ui-buttonlist {
+    min-width: 7em;
+}
+
+.typer-ui-callout .typer-ui-float {
+    display: none;
+    left: 100%;
+    top: 0;
+}
+
+.typer-ui-callout:hover > .typer-ui-float {
+    display: block;
+}
+
+.typer-ui-callout .typer-ui-float.float-top {
+    top: auto;
+    bottom: 0;
+}
+
+.typer-ui-callout .typer-ui-float.float-left {
+    left: auto;
+    right: 100%;
+}
+
+.typer-ui-buttonlist {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: auto\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
+}
+
+.typer-ui-buttonlist label,
+.typer-ui-buttonlist button {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%;
+    align-items: center;
+}
+
+.typer-ui-buttonlist .typer-ui-group {
+    display: block;
+    display: -ms-flexbox;
+    display: flex;
+    display: block\9;
+    width: 100%\9;
+    -ms-flex-direction: column;
+    flex-direction: column;
+}
+
+.typer-ui-buttonlist .typer-ui-group.sep-before:before,
+.typer-ui-buttonlist .typer-ui-group.sep-after:after {
+    content: '';
+    display: block;
+    margin: 0.25em 0;
+    border-top: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.typer-ui-buttonlist .typer-ui-label span:first-child {
+    display: inline-block;
+    padding-left: calc(16px + 0.5em);
+}
+
+.typer-ui-buttonlist .typer-ui-checkbox .typer-ui-label span:first-child {
+    padding-left: 0;
+}
+
+.typer-ui-buttonlist [role="shortcut"] {
+    display: inline-block;
+}
+
+.typer-ui-buttonset {
+    display: -ms-flexbox;
+    display: -webkit-flex;
+    display: flex;
+    align-items: center;
+    line-height: 2.67;
+}
+
+.typer-ui-buttonset-pad {
+    display: block;
+    -webkit-flex-grow: 1;
+    -ms-flex-positive: 1;
+    flex-grow: 1;
+}
+
+.typer-ui-buttonset > *,
+.typer-ui-buttonset .typer-ui-group > *,
+.typer-ui-buttonset > label,
+.typer-ui-buttonset > button {
+    display: inline-block;
+    position: relative;
+    vertical-align: top;
+    width: auto;
+}
+
+.typer-ui-buttonset .typer-ui-label span:first-child {
+    padding-left: 0;
+}
+
 
 /* Textbox */
 
-.typer-ui-textbox .typer-ui-textbox-wrapper {
+.typer-ui-textbox .typer-ui-label {
+    display: none;
+}
+
+.typer-ui-buttonlist .typer-ui-textbox .typer-ui-label,
+.typer-ui-buttonset .typer-ui-textbox .typer-ui-label {
     display: inline-block;
+}
+
+.typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: block;
     position: relative;
-    margin: 0 -0.25em 0.42em 0.25em;
+    margin: 0 -0.25em 0.42em;
     padding: 0.75em 0.25em 0.17em;
     width: 100%;
     border-bottom: 1px solid #aeb8c2;
@@ -433,9 +432,10 @@ button.typer-ui-dropdown.disabled:after {
     align-items: baseline;
 }
 
-.typer-ui-toolbar .typer-ui-textbox .typer-ui-textbox-wrapper,
 .typer-ui-buttonset .typer-ui-textbox .typer-ui-textbox-wrapper,
 .typer-ui-buttonlist .typer-ui-textbox .typer-ui-textbox-wrapper {
+    display: inline-block;
+    margin-left: 0.25em;
     border-bottom-style: hidden;
     width: auto;
 }
@@ -464,6 +464,8 @@ button.typer-ui-dropdown.disabled:after {
 .typer-ui-textbox [contenteditable] {
     display: inline-block;
     position: relative;
+    margin: -0.17em 0;
+    padding: 0.17em 0;
     width: 100%;
     background: url('data:image/gif:,');
     vertical-align: top;
@@ -476,15 +478,14 @@ button.typer-ui-dropdown.disabled:after {
     -ms-user-select: text;
 }
 
-.typer-ui-textbox.empty [contenteditable] {
-    min-width: 3em;
+.typer-ui-buttonlist .typer-ui-textbox [contenteditable],
+.typer-ui-buttonset .typer-ui-textbox [contenteditable] {
+    white-space: nowrap;
 }
 
-.typer-ui-toolbar .typer-ui-textbox [contenteditable],
-.typer-ui-buttonset .typer-ui-textbox [contenteditable],
-.typer-ui-buttonlist .typer-ui-textbox [contenteditable] {
-    width: auto;
-    white-space: nowrap;
+.typer-ui-buttonlist .typer-ui-textbox.empty [contenteditable],
+.typer-ui-buttonset .typer-ui-textbox.empty [contenteditable] {
+    min-width: 3em;
 }
 
 .typer-ui-textbox .typer-ui-textbox-placeholder,
@@ -521,6 +522,15 @@ button.typer-ui-dropdown.disabled:after {
     display: inline-block;
     font-family: 'Material Icons';
     vertical-align: text-bottom;
+}
+
+
+/* Forms */
+
+.typer-ui-form .typer-ui-buttonset {
+    font-weight: bold;
+    font-size: 80%;
+    text-transform: uppercase;
 }
 
 
@@ -637,15 +647,6 @@ button.typer-ui-dropdown.disabled:after {
     transform: none;
 }
 
-.typer-ui-dialog .typer-ui-textbox {
-    display: block !important;
-    width: 100%;
-}
-
-.typer-ui-dialog .typer-ui-textbox .typer-ui-label {
-    display: none;
-}
-
 .typer-ui-dialog .typer-ui-textbox [contenteditable] {
     width: 100%;
     background-color: transparent;
@@ -655,11 +656,6 @@ button.typer-ui-dropdown.disabled:after {
     -moz-transition: padding 0.1s;
     -ms-transition: padding 0.1s;
     transition: padding 0.1s;
-}
-
-.typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-wrapper {
-    display: block;
-    margin-left: -0.25em;
 }
 
 .typer-ui-dialog .typer-ui-textbox .typer-ui-textbox-placeholder {
@@ -697,22 +693,8 @@ button.typer-ui-dropdown.disabled:after {
     display: -ms-flexbox;
     display: -webkit-flex;
     display: flex;
-    margin: 1.5em 0 -0.5em;
+    margin: 1.5em -0.5em -0.5em;
     text-align: right;
-}
-
-.typer-ui-dialog-content > .typer-ui-buttonset .typer-ui-buttonset-pad {
-    display: block;
-    -webkit-flex-grow: 1;
-    -ms-flex-positive: 1;
-    flex-grow: 1;
-}
-
-.typer-ui-dialog-content > .typer-ui-buttonset button.special {
-    color: #a90007;
-    -webkit-order: -1;
-    -ms-flex-order: -1;
-    order: -1;
 }
 
 .typer-ui-dialog-pin {
@@ -786,6 +768,7 @@ button.typer-ui-dropdown.disabled:after {
 
 .typer-ui-dialog-content {
     position: relative;
+    padding: 0 0.5em;
 }
 
 .typer-ui-dialog-content.pop {
@@ -846,6 +829,42 @@ button.typer-ui-dropdown.disabled:after {
 
 /* Animated Effects */
 
+.typer-ui-float.is-contextmenu {
+    -webkit-transition: 0.1s ease-in;
+    -moz-transition: 0.1s ease-in;
+    -ms-transition: 0.1s ease-in;
+    transition: 0.1s ease-in;
+    -webkit-transition-property: filter, transform, opacity;
+    -moz-transition-property: filter, transform, opacity;
+    -ms-transition-property: filter, transform, opacity;
+    transition-property: filter, transform, opacity;
+    -webkit-filter: blur(2px);
+    -moz-filter: blur(2px);
+    -ms-filter: blur(2px);
+    filter: blur(2px);
+    opacity: 0;
+}
+
+.typer-ui-float.is-contextmenu.open {
+    -webkit-filter: none;
+    -moz-filter: none;
+    -ms-filter: none;
+    filter: none;
+    opacity: 1;
+}
+
+.typer-ui-float.is-contextmenu.closing {
+    -webkit-transform: scale(0.75);
+    -moz-transform: scale(0.75);
+    -ms-transform: scale(0.75);
+    transform: scale(0.75);
+    -webkit-filter: blur(20px);
+    -moz-filter: blur(20px);
+    -ms-filter: blur(20px);
+    filter: blur(20px);
+    opacity: 0;
+}
+
 .typer-ui-clickeffect {
     position: absolute;
     top: 0;
@@ -888,9 +907,10 @@ button.typer-ui-dropdown.disabled:after {
 }
 
 
-/* Extras: Grid */
+/* Grid */
 
 .typer-ui-grid .typer-ui-label {
+    display: block;
     text-align: center;
 }
 
@@ -917,7 +937,7 @@ button.typer-ui-dropdown.disabled:after {
 }
 
 .typer-ui-grid {
-    width: calc(8.5em + 28px);
+    width: calc(7em + 28px);
     padding: 0 0.75em;
 }
 
@@ -932,7 +952,7 @@ button.typer-ui-dropdown.disabled:after {
 }
 
 
-/* Extras: Keyword */
+/* Tagging */
 
 .typer-ui-keyword {
     display: inline-block;
@@ -961,6 +981,7 @@ button.typer-ui-dropdown.disabled:after {
 
 .typer-ui-keyword i:after {
     content: 'close';
+    margin-left: 0.25em;
     font-size: 14px;
     font-family: 'Material Icons';
     font-weight: normal;
@@ -975,5 +996,81 @@ button.typer-ui-dropdown.disabled:after {
     -webkit-font-feature-settings: 'liga';
     font-feature-settings: 'liga' 1;
     -webkit-font-smoothing: antialiased;
-    margin-left: 0.25em;
+}
+
+
+/* Calendar */
+
+.typer-ui-calendar-header {
+    border-bottom: 1px solid #d3d3d3;
+}
+
+.typer-ui-calendar-header .typer-ui-dropdown {
+    padding-right: 0.75em !important;
+}
+
+.typer-ui-calendar-header .typer-ui-dropdown + .typer-ui-dropdown {
+    margin-left: -0.75em;
+}
+
+.typer-ui-calendar-header .typer-ui-dropdown:after {
+    content: none;
+}
+
+.typer-ui-calendar table {
+    border-collapse: separate;
+    border-spacing: 0.5em 0;
+    table-layout: fixed;
+    font-size: 90%;
+}
+
+.typer-ui-calendar.select-range table {
+    border-collapse: collapse;
+}
+
+.typer-ui-calendar th {
+    padding: 0.75em 0.5em 0.5em 0;
+    color: #999;
+    font-weight: normal;
+    text-align: right;
+    cursor: default;
+}
+
+.typer-ui-calendar.select-range th {
+    padding-right: 0.75em;
+}
+
+.typer-ui-calendar td {
+    padding: 0;
+}
+
+.typer-ui-calendar.select-range td {
+    padding-left: 0.25em;
+    padding-right: 0.25em;
+}
+
+.typer-ui-calendar.select-range td:first-child {
+    padding-left: 0.5em;
+}
+
+.typer-ui-calendar.select-range td:last-child {
+    padding-right: 0.5em;
+}
+
+.typer-ui-calendar td.prev,
+.typer-ui-calendar td.next {
+    opacity: 0.5;
+}
+
+.typer-ui-calendar td.selected {
+    background-color: rgba(16, 52, 146, 0.2);
+}
+
+.typer-ui-calendar td button {
+    display: block;
+    padding: 0.5em;
+    width: 2.2em;
+    min-height: 0;
+    line-height: 1.2;
+    text-align: right;
 }

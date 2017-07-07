@@ -2,9 +2,6 @@
     'use strict';
 
     Typer.presets.number = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         validation: {
             allowChars: '0-9'
         },
@@ -15,20 +12,20 @@
             step: 1
         },
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return parseInt(this.extractText());
             },
-            setValue: function (value) {
+            setValue: function (preset, value) {
                 value = +value || 0;
-                if (this.presetOptions.max !== null && value > this.presetOptions.max) {
-                    value = this.presetOptions.max;
+                if (preset.options.max !== null && value > preset.options.max) {
+                    value = preset.options.max;
                 }
-                if (this.presetOptions.min !== null && value < this.presetOptions.min) {
-                    value = this.presetOptions.min;
+                if (preset.options.min !== null && value < preset.options.min) {
+                    value = preset.options.min;
                 }
                 value = String(+value || 0);
-                if (this.presetOptions.digits === 'fixed') {
-                    var numOfDigits = String(+this.presetOptions.max || 0).length;
+                if (preset.options.digits === 'fixed') {
+                    var numOfDigits = String(+preset.options.max || 0).length;
                     value = (new Array(numOfDigits + 1).join('0') + value).substr(-numOfDigits);
                 }
                 if (value !== this.extractText()) {
@@ -42,20 +39,13 @@
                 return !!this.extractText();
             }
         },
-        init: function (e) {
-            $(e.typer.element).bind('mousewheel', function (ex) {
-                if (e.typer.focused()) {
-                    var dir = ex.originalEvent.wheelDeltaY || ex.originalEvent.wheelDelta || -ex.originalEvent.detail;
-                    if (dir) {
-                        e.typer.setValue(e.typer.getValue() + (dir / Math.abs(dir)) * e.widget.options.step);
-                    }
-                    ex.preventDefault();
-                }
-            });
-        },
         focusout: function (e) {
             var value = parseInt(e.typer.extractText()) || 0;
             e.typer.setValue(value);
+        },
+        mousewheel: function (e) {
+            e.typer.setValue(e.typer.getValue() - e.data * e.widget.options.step);
+            e.preventDefault();
         },
         upArrow: function (e) {
             var value = parseInt(e.typer.extractText()) || 0;

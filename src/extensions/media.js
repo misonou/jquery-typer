@@ -20,24 +20,24 @@
 
     Typer.defaultOptions.media = true;
 
-    var insertMediaButton = Typer.ui.button.extend(function (type) {
-        this._super({
+    function insertMediaButton(type) {
+        return Typer.ui.button({
             requireWidgetEnabled: 'media',
             hiddenWhenDisabled: true,
             dialog: function (toolbar) {
                 if (typeof toolbar.options.selectMedia === 'function') {
                     return toolbar.options.selectMedia(type);
                 }
-                return toolbar.prompt('dialog:selectImage');
+                return toolbar.prompt('typer:media:selectImage');
             },
             execute: function (toolbar, self, tx, value) {
                 tx.insertWidget('media', value);
             }
         });
-    });
+    }
 
-    $.extend(Typer.ui.controls, {
-        'widget:media': Typer.ui.group('media:* widget:delete'),
+    Typer.ui.addControls('typer', {
+        'widget:media': Typer.ui.group('typer:media:*'),
         'insert:image': insertMediaButton('image'),
         'insert:video': insertMediaButton('video'),
         'media:filePicker': Typer.ui.button({
@@ -51,7 +51,7 @@
                     var mediaType = reMediaType.exec(self.label) && (RegExp.$1 ? 'image' : RegExp.$2 ? 'video' : 'audio');
                     return toolbar.options.selectMedia(mediaType, self.value);
                 }
-                return toolbar.prompt('dialog:selectImage', self.value);
+                return Typer.ui.prompt('dialog:selectImage', self.value);
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
@@ -71,17 +71,17 @@
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'insert:image': 'Image',
         'insert:video': 'Video',
         'media:altText': 'Alternate text',
-        'dialog:selectImage': 'Enter image URL'
+        'media:selectImage': 'Enter image URL'
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'insert:image': '\ue251',  // insert_photo
         'insert:video': '\ue04b',  // videocam
         'media:altText': '\ue0b9'  // comment
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));

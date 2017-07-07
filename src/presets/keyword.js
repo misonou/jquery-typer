@@ -49,9 +49,6 @@
     }
 
     Typer.presets.keyword = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         options: {
             allowFreeInput: true,
             suggestionCount: 5,
@@ -61,15 +58,15 @@
             }
         },
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return $('span', this.element).map(function (i, v) {
                     return v.childNodes[0].data;
                 }).get();
             },
-            setValue: function (values) {
+            setValue: function (preset, values) {
                 this.invoke(function (tx) {
                     function validateAndAdd(v) {
-                        if (tx.typer.presetOptions.validate(v)) {
+                        if (preset.options.validate(v)) {
                             tx.insertWidget('tag', v);
                         }
                     }
@@ -85,9 +82,9 @@
             hasContent: function () {
                 return !!($('span', this.element)[0] || this.extractText());
             },
-            validate: function () {
+            validate: function (preset) {
                 var value = this.getValue();
-                if (this.presetOptions.required && !value.length) {
+                if (preset.options.required && !value.length) {
                     return false;
                 }
                 return !$('.invalid', this.element)[0];

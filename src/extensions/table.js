@@ -40,6 +40,10 @@
         });
     }
 
+    Typer.ui.define('tableGrid', {
+        type: 'tableGrid'
+    });
+
     Typer.widgets.table = {
         element: 'table',
         editable: 'th,td',
@@ -137,27 +141,25 @@
                 $(self.element).find('.typer-ui-grid-cell').removeClass('active');
                 $(self.element).find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
             });
-            self.label = '';
+            self.label = '0 \u00d7 0';
             self.value = {};
         }
     });
 
-    $.extend(Typer.ui.controls, {
+    Typer.ui.addControls('typer', {
         'insert:table': Typer.ui.callout({
-            controls: 'insert:table:*',
             requireWidgetEnabled: 'table',
             hiddenWhenDisabled: true
         }),
-        'insert:table:callout': {
-            type: 'tableGrid',
+        'insert:table:create': Typer.ui.tableGrid({
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('table', self.value);
             }
-        },
+        }),
         'contextmenu:table': Typer.ui.callout({
-            controls: 'table:*',
             requireWidget: 'table',
-            hiddenWhenDisabled: true
+            hiddenWhenDisabled: true,
+            defaultNS: 'typer:table'
         }),
         'selection:selectTable': Typer.ui.button({
             requireWidget: 'table',
@@ -190,7 +192,7 @@
                 });
                 var fallbackOption = Typer.ui.button({
                     requireWidget: 'table',
-                    label: 'table:styleDefault',
+                    label: 'typer:table:styleDefault',
                     execute: function (toolbar, self) {
                         self.widget.element.className = '';
                     }
@@ -198,55 +200,47 @@
                 return definedOptions.concat(fallbackOption);
             }
         }),
-        'table:tableWidth': Typer.ui.callout({
-            controls: 'table-width:*'
-        }),
-        'table:columnWidth': Typer.ui.button({
-            hiddenWhenDisabled: true,
-            enabled: function () {
-                return false;
-            }
-        }),
-        'table:addRemoveCell': Typer.ui.group('table-cell:*'),
-        'table-width:fitContent': Typer.ui.button({
+        'table:tableWidth': Typer.ui.callout(),
+        'table:tableWidth:fitContent': Typer.ui.button({
             requireWidget: 'table',
             execute: function (toolbar, self) {
                 $(self.widget.element).removeAttr('width');
             }
         }),
-        'table-width:fullWidth': Typer.ui.button({
+        'table:tableWidth:fullWidth': Typer.ui.button({
             requireWidget: 'table',
             execute: function (toolbar, self) {
                 $(self.widget.element).attr('width', '100%');
             }
         }),
-        'table-cell:addColumnBefore': Typer.ui.button({
+        'table:addRemoveCell': Typer.ui.group(),
+        'table:addRemoveCell:addColumnBefore': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addColumnBefore'
         }),
-        'table-cell:addColumnAfter': Typer.ui.button({
+        'table:addRemoveCell:addColumnAfter': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addColumnAfter'
         }),
-        'table-cell:addRowAbove': Typer.ui.button({
+        'table:addRemoveCell:addRowAbove': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addRowAbove'
         }),
-        'table-cell:addRowBelow': Typer.ui.button({
+        'table:addRemoveCell:addRowBelow': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addRowBelow'
         }),
-        'table-cell:removeColumn': Typer.ui.button({
+        'table:addRemoveCell:removeColumn': Typer.ui.button({
             requireWidget: 'table',
             execute: 'removeColumn'
         }),
-        'table-cell:removeRow': Typer.ui.button({
+        'table:addRemoveCell:removeRow': Typer.ui.button({
             requireWidget: 'table',
             execute: 'removeRow'
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'insert:table': 'Table',
         'contextmenu:table': 'Modify table',
         'selection:selectTable': 'Select table',
@@ -255,14 +249,14 @@
         'table:tableWidth': 'Set table width',
         'table:style': 'Set table style',
         'table:styleDefault': 'Default',
-        'table-cell:addColumnBefore': 'Add column before',
-        'table-cell:addColumnAfter': 'Add column after',
-        'table-cell:addRowAbove': 'Add row above',
-        'table-cell:addRowBelow': 'Add row below',
-        'table-cell:removeColumn': 'Remove column',
-        'table-cell:removeRow': 'Remove row',
-        'table-width:fitContent': 'Fit to content',
-        'table-width:fullWidth': 'Full width'
+        'table:addRemoveCell:addColumnBefore': 'Add column before',
+        'table:addRemoveCell:addColumnAfter': 'Add column after',
+        'table:addRemoveCell:addRowAbove': 'Add row above',
+        'table:addRemoveCell:addRowBelow': 'Add row below',
+        'table:addRemoveCell:removeColumn': 'Remove column',
+        'table:addRemoveCell:removeRow': 'Remove row',
+        'table:tableWidth:fitContent': 'Fit to content',
+        'table:tableWidth:fullWidth': 'Full width'
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));

@@ -1,48 +1,8 @@
-(function ($, Typer) {
+(function ($, Typer, window, document) {
     'use strict';
 
     var ANIMATION_END = 'animationend oanimationend webkitAnimationEnd';
     var TRANSITION_END = 'transitionend otransitionend webkitTransitionEnd';
-    var FLIP_POS = {
-        left: 'right',
-        right: 'left',
-        top: 'bottom',
-        bottom: 'top'
-    };
-
-    var currentMenu;
-    var currentDialogPositions = [];
-
-    function showContextMenu(element, node, pos) {
-        if (currentMenu !== element) {
-            hideContextMenu();
-            currentMenu = element;
-            $(element).appendTo(document.body).css('position', 'fixed');
-            Typer.ui.setZIndex(element, document.body);
-        }
-        var rect = {};
-        if (node.getBoundingClientRect) {
-            var xrel = /\b(left|right)\b/.test(pos) ? RegExp.$1 : 'left';
-            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'bottom';
-            var rectb = node.getBoundingClientRect();
-            rect[xrel] = rectb.left;
-            rect[yrel] = rectb.top;
-            rect[FLIP_POS[xrel]] = rectb.right;
-            rect[FLIP_POS[yrel]] = rectb.bottom;
-        } else {
-            rect.left = rect.right = node.x;
-            rect.top = rect.bottom = node.y;
-        }
-        $(element).css({
-            left: rect.left + $(element).outerWidth() > $(window).width() ? rect.right - $(element).outerWidth() : rect.left,
-            top: rect.top + $(element).outerHeight() > $(window).height() ? rect.bottom - $(element).outerHeight() : rect.top
-        });
-    }
-
-    function hideContextMenu() {
-        $(currentMenu).detach();
-        currentMenu = null;
-    }
 
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
@@ -60,33 +20,13 @@
         }
     }
 
-    function updateDialogPositions() {
-        var windowSize = document.documentElement.getBoundingClientRect();
-
-        $.each(currentDialogPositions, function (i, v) {
-            var dialog = $(v.target).find('.typer-ui-dialog')[0];
-            var dialogSize = dialog.getBoundingClientRect();
-            var rect = v.reference.getBoundingClientRect();
-            var stick = {};
-
-            var $r = $(v.target).css({
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height
-            });
-            if (v.pinToParent === 'bottom' || v.pinToParent === 'top') {
-                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
-                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
-            }
-            if (v.pinToParent === 'left' || v.pinToParent === 'right') {
-                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
-                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
-            }
-            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
-                $r.toggleClass('stick-' + v, !!stick[v]);
-                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
-            });
+    function detachCallout(control) {
+        var callout = $('<div class="typer-ui typer-ui-material">').append($(control.element).children('.typer-ui-float').addClass('is-' + control.type))[0];
+        if (control.ui.typer) {
+            control.ui.typer.retainFocus(callout);
+        }
+        $(control.element).click(function (e) {
+            control.ui.show(control, callout, control.element, 'left bottom');
         });
     }
 
@@ -99,24 +39,32 @@
         controlActiveClass: 'active',
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
+        controlPinActiveClass: 'pin-active',
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
-            var hasIcon = !!Typer.ui.getIcon(control, 'material');
-            return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && !ui.showButtonLabel && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
+            if (control.is('textbox')) {
+                return '';
+            }
+            if ((control.contextualParent || ui).type !== 'callout' && ui.getIcon(control)) {
+                if (!control.showButtonLabel || !control.contextualParent.showButtonLabel || !ui.showButtonLabel) {
+                    return '';
+                }
+            }
+            return '<span x:bind="(_:label)"></span>';
         },
         labelIcon: function (ui, control) {
-            if ((control.parent || ui).type === 'dropdown' || control.type === 'checkbox' || !Typer.ui.getIcon(control, 'material')) {
+            if ((control.contextualParent || ui).is('dropdown') || control.is('checkbox') || !ui.getIcon(control)) {
                 return '';
             }
             return '<i class="material-icons" x:bind="(_:icon)"></i>';
         },
-        buttonset: '<div class="typer-ui-buttonset"><div class="typer-ui-buttonset-pad"></div><br x:t="children"/></div>',
+        buttonset: '<div class="typer-ui-buttonset"><br x:t="children(buttonsetGroup:left)"/><div class="typer-ui-buttonset-pad"></div><br x:t="children(buttonsetGroup:right)"/></div>',
         buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
         form: '<div class="typer-ui-form"><br x:t="children"/></div>',
         menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
-        toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
+        toolbar: '<div class="typer-ui-buttonset is-toolbar"><br x:t="children"/></div>',
+        contextmenu: '<div class="typer-ui-float is-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
             setImmediate(function () {
@@ -139,10 +87,20 @@
                 });
             });
         },
-        callout: '<label class="typer-ui-callout has-clickeffect" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
+        callout: '<label class="typer-ui-callout" x:bind="(title:label)"><br x:t="button"/><br x:t="menupane"/></label>',
         calloutExecuteOn: 'click',
+        calloutInit: function (ui, control) {
+            if (!control.contextualParent.is('callout contextmenu')) {
+                detachCallout(control);
+            }
+        },
         dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
-        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
+        dropdownInit: function (ui, control) {
+            if (!control.contextualParent.is('callout contextmenu')) {
+                detachCallout(control);
+            }
+        },
+        checkbox: '<button class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></button>',
         checkboxInit: function (ui, control) {
             $(control.element).click(function () {
                 control.value = $(this).toggleClass('checked').hasClass('checked');
@@ -172,6 +130,7 @@
                     }
                 }
             }));
+            control.preset.parentControl = control;
             $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
@@ -184,10 +143,9 @@
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',
+        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
-            var resolveButton = ui.resolve(control.resolve)[0];
-            var parentControl = ui.parentUI && ui.parentUI.getExecutingControl();
+            var resolveButton = control.resolve(control.resolveBy)[0];
             var $wrapper = $(ui.element).find('.typer-ui-dialog-wrapper');
             var $content = $(ui.element).find('.typer-ui-dialog-content');
 
@@ -205,19 +163,10 @@
             }
             setImmediate(function () {
                 $(control.element).addClass('open');
-                if (/top|bottom|left|right/.test(ui.pinToParent) && document.activeElement !== document.body) {
-                    var pinElement = parentControl ? parentControl.element : document.activeElement;
-                    $wrapper.addClass('pinned pinned-' + ui.pinToParent);
-                    if (parentControl) {
-                        $(pinElement).addClass('pin-active');
-                    }
-                    currentDialogPositions.push({
-                        dialog: ui,
-                        reference: pinElement,
-                        target: $wrapper[0],
-                        pinToParent: ui.pinToParent
-                    });
-                    updateDialogPositions();
+                if (ui.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
+                    $wrapper.addClass('pinned pinned-' + ui.parentControl.pinDirection);
+                    $(ui.parentControl.element).addClass('pin-active');
+                    Typer.ui.pin(control, $wrapper[0], ui.parentControl.element, ui.parentControl.pinDirection);
                 }
             });
         },
@@ -230,45 +179,44 @@
         dialogClose: function (ui, control) {
             $(control.element).addClass('closing').one(TRANSITION_END, function () {
                 $(ui.element).remove();
-                $.each(currentDialogPositions, function (i, v) {
-                    if (v.dialog === ui) {
-                        $(v.reference).removeClass('pin-active');
-                        currentDialogPositions.splice(i, 1);
-                        return false;
-                    }
-                });
-            });
-        },
-        init: function (ui) {
-            $(ui.element).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
-                setMenuPosition(e.currentTarget);
-            });
-            $.each(ui.all, function (i, v) {
-                if (/callout|dropdown/.test(v.type) && v.contextualParent.type !== 'callout' && v.contextualParent.type !== 'contextmenu') {
-                    var callout = $('<div class="typer-ui typer-ui-material">').append($(v.element).children('.typer-ui-float').addClass('parent-is-' + v.type))[0];
-                    if (ui.typer) {
-                        ui.typer.retainFocus(callout);
-                    }
-                    $(v.element).click(function (e) {
-                        showContextMenu(callout, v.element, 'left bottom');
-                    });
+                if (ui.pinnable && ui.parentControl) {
+                    $(ui.parentControl.element).removeClass('pin-active');
+                    Typer.ui.unpin(control);
                 }
             });
         },
-        show: function (ui, control, pos) {
-            if (ui.type === 'contextmenu') {
-                showContextMenu(ui.element, pos);
+        afterShow: function (ui, control, data) {
+            if (control.is('dialog contextmenu')) {
+                $(data.element).removeClass('closing').addClass('open');
             }
         },
-        controlExecuted: function (ui, control, executed) {
-            if (/callout|dropdown|contextmenu/.test(executed.contextualParent.type)) {
-                hideContextMenu();
+        beforeHide: function (ui, control, data) {
+            if (control.is('dialog contextmenu')) {
+                var deferred = $.Deferred();
+                $(data.element).addClass('closing').one(TRANSITION_END, function () {
+                    if ($(this).hasClass('closing')) {
+                        $(this).removeClass('open closing');
+                        deferred.resolve();
+                    }
+                });
+                return deferred.promise();
+            }
+        },
+        positionUpdate: function (ui, control, data) {
+            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
+                $(data.element).toggleClass('stick-' + v, !!data.stick[v]);
+            });
+        },
+        controlExecuted: function (ui, control) {
+            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu')) {
+                ui.hide(control.contextualParent);
             }
         }
     });
 
     $(function () {
-        $(document.body).on('mousedown', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+        var SELECT_EFFECT = '.typer-ui-material button:not(.typer-ui-checkbox), .typer-ui-material .has-clickeffect';
+        $(document.body).on('mousedown', SELECT_EFFECT, function (e) {
             var pos = e.currentTarget.getBoundingClientRect();
             var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget).children().css({
                 top: e.clientY - pos.top,
@@ -278,27 +226,21 @@
             var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
             var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
             var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
-            var scalePercent = 0.5 + 2 * Math.sqrt(Math.max.call(null, p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
+            var scalePercent = 0.5 + 2 * Math.sqrt(Math.max(p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
             setImmediate(function () {
                 $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
             $overlay.parent().css('border-radius', $(e.currentTarget).css('border-radius'));
-            e.stopPropagation();
         });
-        $(document.body).on('mouseup mouseleave', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+        $(document.body).on('mouseup mouseleave', SELECT_EFFECT, function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
             $overlay.children().addClass('animate-out').bind(TRANSITION_END, function () {
                 $overlay.remove();
             });
         });
-        $(document.body).mousedown(function (e) {
-            if (currentMenu && !Typer.containsOrEquals(currentMenu, e.target)) {
-                hideContextMenu();
-            }
-        });
-        $(window).bind('resize scroll orientationchange', function (e) {
-            updateDialogPositions();
+        $(document.body).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
+            setMenuPosition(e.currentTarget);
         });
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer, window, document));

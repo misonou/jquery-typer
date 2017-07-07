@@ -23,6 +23,7 @@
             } else {
                 tx.execCommand('createLink', value);
                 tx.selection.collapse('end');
+                tx.trackChange(tx.selection.startElement);
             }
         },
         remove: 'keepText',
@@ -42,9 +43,9 @@
 
     Typer.defaultOptions.link = true;
 
-    $.extend(Typer.ui.controls, {
+    Typer.ui.addControls('typer', {
         'toolbar:link': Typer.ui.button({
-            after: 'toolbar:insert',
+            after: 'insert',
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
@@ -57,7 +58,7 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.openDialog('dialog:selectLink', currentValue);
+                return Typer.ui.openDialog('typer:link:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
@@ -73,6 +74,7 @@
                     } else {
                         $(self.widget.element).removeAttr('target');
                     }
+                    tx.trackChange(self.widget.element);
                 } else {
                     var textNode = Typer.createTextNode(text);
                     tx.insertHtml(textNode);
@@ -86,14 +88,13 @@
                         }
                     }
                 }
-                tx.trackChange(self.widget.element);
             },
             active: function (toolbar, self) {
                 return self.widget;
             }
         }),
+        'contextmenu:link': Typer.ui.group('typer:link:*(type:button)'),
         'link:open': Typer.ui.button({
-            context: 'contextmenu',
             requireWidget: 'link',
             hiddenWhenDisabled: true,
             shortcut: 'ctrlClick',
@@ -106,33 +107,32 @@
             requireWidget: 'link',
             execute: 'unlink'
         }),
-        'contextmenu:link': Typer.ui.group('link:*'),
-        'dialog:selectLink:text': Typer.ui.textbox(),
-        'dialog:selectLink:url': Typer.ui.textbox(),
-        'dialog:selectLink:blank': Typer.ui.checkbox(),
-        'dialog:selectLink': Typer.ui.dialog({
-            controls: 'dialog:selectLink:* ui:prompt-buttonset',
+        'link:selectLink:text': Typer.ui.textbox(),
+        'link:selectLink:url': Typer.ui.textbox(),
+        'link:selectLink:blank': Typer.ui.checkbox(),
+        'link:selectLink': Typer.ui.dialog({
+            controls: '* dialog:buttonset',
             valueMap: {
-                text: 'dialog:selectLink:text',
-                href: 'dialog:selectLink:url',
-                blank: 'dialog:selectLink:blank'
+                text: 'text',
+                href: 'url',
+                blank: 'blank'
             }
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'toolbar:link': 'Insert hyperlink',
         'link:url': 'Link URL',
         'link:blank': 'Open in new window',
         'link:open': 'Open hyperlink',
         'link:unlink': 'Remove hyperlink',
-        'dialog:selectLink': 'Create hyperlink',
-        'dialog:selectLink:text': 'Text',
-        'dialog:selectLink:url': 'URL',
-        'dialog:selectLink:blank': 'Open in new window',
+        'link:selectLink': 'Create hyperlink',
+        'link:selectLink:text': 'Text',
+        'link:selectLink:url': 'URL',
+        'link:selectLink:blank': 'Open in new window',
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'toolbar:link': '\ue250',  // insert_link
         'link:url': '\ue250'       // insert_link
     });

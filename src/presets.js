@@ -6,9 +6,14 @@
     Typer.preset = function (element, name, options) {
         var preset = Typer.presets[name];
         var presetDefinition = {};
+        var presetWidget;
+
         options = {
-            __preset__: options || {},
-            widgets: {}
+            inline: true,
+            defaultOptions: false,
+            disallowedElement: '*',
+            widgets: {},
+            __preset__: $.extend({}, options)
         };
         $.each(preset, function (i, v) {
             (typeof v === 'function' || i === 'options' ? presetDefinition : options)[i] = v;
@@ -16,14 +21,18 @@
         $.each(options.__preset__, function (i, v) {
             if (typeof v === 'function' || !presetDefinition.options || !(i in presetDefinition.options)) {
                 options[i] = v;
-                delete this[i];
+                delete options.__preset__[i];
             }
         });
 
         var originalInit = options.init;
         options.init = function (e) {
-            $.extend(e.typer, preset.overrides);
-            e.typer.presetOptions = e.typer.getStaticWidget('__preset__').options;
+            presetWidget = e.typer.getStaticWidget('__preset__');
+            $.each(preset.overrides, function (i, v) {
+                e.typer[i] = function (value) {
+                    return v.call(this, presetWidget, value);
+                };
+            });
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }

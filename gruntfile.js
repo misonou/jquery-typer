@@ -9,7 +9,7 @@ module.exports = function (grunt) {
                 process: true,
             },
             build: {
-                src: ['src/license.js', 'src/{core,presets,ui}.js', 'src/{themes,extensions,presets}/*', 'node_modules/setimmediate/setimmediate.js'],
+                src: ['src/license.js', 'src/{core,presets,ui}.js', 'src/{themes,extensions,presets}/*', 'node_modules/setimmediate/setimmediate.js', 'node_modules/showdown/dist/showdown.min.js'],
                 dest: 'dist/jquery.typer.js'
             }
         },

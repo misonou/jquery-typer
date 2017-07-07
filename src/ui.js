@@ -1,16 +1,41 @@
-(function ($, Typer) {
+(function ($, Typer, Object, window, document) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
     var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
+    var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
 
     var isFunction = $.isFunction;
-    var boolAttrs = 'checked selected disabled readonly multiple ismap'.split(' ');
+    var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+    var defineProperty = Object.defineProperty;
+
     var alwaysTrue = function () {
         return true;
     };
     var alwaysFalse = function () {
         return false;
+    };
+    var FLIP_POS = {
+        left: 'right',
+        right: 'left',
+        top: 'bottom',
+        bottom: 'top'
+    };
+    var ZERO_ORIGIN = {
+        percentX: 0,
+        percentY: 0,
+        offsetX: 0,
+        offsetY: 0
+    };
+    var ORIGIN_TO_PERCENT = {
+        center: 0.5,
+        right: 1,
+        bottom: 1
+    };
+    var MAC_CTRLKEY = {
+        ctrl: '\u2318',
+        alt: '\u2325',
+        shift: '\u8679'
     };
 
     var definedControls = {};
@@ -18,13 +43,66 @@
     var definedLabels = {};
     var definedThemes = {};
     var definedShortcuts = {};
-    var bindTransforms = {};
-    var expandCache = {};
+    var controlExtensions = {};
+    var wsDelimCache = {};
     var executionContext = [];
+    var currentPinnedElements = [];
+    var currentCallouts = [];
     var currentDialog;
+    var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
 
     function randomId() {
         return Math.random().toString(36).substr(2, 8);
+    }
+
+    function isString(v) {
+        return typeof v === 'string';
+    }
+
+    function capfirst(v) {
+        v = String(v || '');
+        return v.charAt(0).toUpperCase() + v.slice(1);
+    }
+
+    function exclude(haystack, needle) {
+        if (!needle || !needle.length) {
+            return haystack.slice(0);
+        }
+        return haystack.filter(function (v) {
+            return needle.indexOf(v) < 0;
+        });
+    }
+
+    function matchWSDelim(haystack, needle) {
+        var re = wsDelimCache[needle] || (wsDelimCache[needle] = new RegExp('(?:^|\\s)(' + needle.replace(/\s+/g, '|') + ')(?=$|\\s)'));
+        return re.test(String(haystack || '')) && RegExp.$1;
+    }
+
+    function matchParams(params, control) {
+        for (var i in params) {
+            if (!matchWSDelim(control[i], params[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function getPropertyDescriptor(obj, prop) {
+        if (prop in obj) {
+            for (var cur = obj; cur; cur = Object.getPrototypeOf(cur)) {
+                if (obj.hasOwnProperty(prop)) {
+                    return getOwnPropertyDescriptor(cur, prop);
+                }
+            }
+        }
+    }
+
+    function defineHiddenProperty(obj, prop, value) {
+        defineProperty(obj, prop, {
+            configurable: true,
+            writable: true,
+            value: value
+        });
     }
 
     function define(name, base, ctor) {
@@ -38,74 +116,36 @@
             if (!isFunction(ctor)) {
                 return $.extend(this, options);
             }
-            try {
-                this._super = base;
-                ctor.apply(this, arguments);
-            } finally {
-                delete this._super;
-            }
+            ctor.apply(this, arguments);
         });
-        if (isFunction(base)) {
-            fn.prototype = new base();
-        } else if (base) {
-            fn.prototype = base;
-            Object.defineProperty(base, 'constructor', {
-                enumerable: false,
-                configurable: true,
-                writable: true,
-                value: fn
-            });
-        }
-        fn.prototype = isFunction(base) ? new base() : $.extend(fn.prototype, base);
-        fn.extend = function (ctor) {
-            return define(null, fn, ctor);
-        };
+        fn.prototype = base || {};
+        defineHiddenProperty(base, 'constructor', fn);
+        Object.setPrototypeOf(fn.prototype, controlExtensions);
         return fn;
     }
 
     function listen(obj, prop, callback) {
-        var myValue = obj[prop];
-        Object.defineProperty(obj, prop, {
+        var desc = getPropertyDescriptor(obj, prop) || {
             enumerable: true,
-            configurable: true,
+            value: obj[prop]
+        };
+        defineProperty(obj, prop, {
+            enumerable: desc.enumerable,
+            configurable: false,
             get: function () {
-                return myValue;
+                return desc.get ? desc.get.apply(obj) : desc.value;
             },
             set: function (value) {
-                if (myValue !== value) {
-                    myValue = value;
+                if (value !== this[prop]) {
+                    if (desc.set) {
+                        desc.set.apply(obj, value);
+                    } else {
+                        desc.value = value;
+                    }
                     callback.call(this, prop, value);
                 }
             }
         });
-    }
-
-    function expandControls(ui, str, controls) {
-        controls = controls || definedControls;
-
-        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '') + ' @ ' + (ui.type || '');
-        if (expandCache[cacheKey]) {
-            return expandCache[cacheKey].slice(0);
-        }
-
-        var tokens = (str || '').split(/\s+/);
-        var arr = [];
-        var allowed = function (name) {
-            return (!controls[name].context || controls[name].context.indexOf(ui.type) >= 0) && tokens.indexOf('-' + name) < 0 && arr.indexOf(name) < 0;
-        };
-        $.each(tokens, function (i, v) {
-            if (v.slice(-1) === '*') {
-                $.each(controls, function (i) {
-                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && allowed(i)) {
-                        arr[arr.length] = i;
-                    }
-                });
-            } else if (v.charAt(0) !== '-' && controls[v] && allowed(v)) {
-                arr[arr.length] = v;
-            }
-        });
-        expandCache[cacheKey] = arr.slice(0);
-        return arr;
     }
 
     function parseCompactSyntax(str) {
@@ -116,13 +156,35 @@
         } catch (e) { }
         return {
             name: m[1],
-            params: params
+            params: params || {}
         };
     }
 
     function getZIndex(element, pseudo) {
         var style = window.getComputedStyle(element, pseudo || null);
-        return /absolute|fixed|relative/.test(style.position) && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+        return matchWSDelim(style.position, 'absolute fixed relative') && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+    }
+
+    function getZIndexOver(over) {
+        var maxZIndex = -1;
+        var iterator = document.createTreeWalker(document.body, 1, function (v) {
+            if (Typer.comparePosition(v, over, true)) {
+                return 2;
+            }
+            var zIndex = getZIndex(v);
+            if (zIndex >= 0) {
+                maxZIndex = Math.max(maxZIndex, zIndex);
+                return 2;
+            }
+            maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
+            return 1;
+        }, false);
+        Typer.iterate(iterator);
+        return maxZIndex + 1;
+    }
+
+    function getBoundingClientRect(elm) {
+        return (elm || document.documentElement).getBoundingClientRect();
     }
 
     function toggleDisplay($elm, visible) {
@@ -138,67 +200,242 @@
         }
     }
 
-    function callFunction(ui, control, name, optArg) {
-        if (isFunction(control[name])) {
-            return control[name](ui, control, optArg);
+    function updatePinnedPositions() {
+        var windowSize = getBoundingClientRect();
+
+        $.each(currentPinnedElements, function (i, v) {
+            var dialog = $(v.element).find('.typer-ui-dialog')[0];
+            var dialogSize = getBoundingClientRect(dialog);
+            var rect = getBoundingClientRect(v.reference);
+            var stick = {};
+
+            var $r = $(v.element).css({
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height
+            });
+            if (v.direction === 'bottom' || v.direction === 'top') {
+                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
+                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
+            }
+            if (v.direction === 'left' || v.direction === 'right') {
+                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
+                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
+            }
+            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
+                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
+            });
+            callThemeFunction(v.dialog, 'positionUpdate', {
+                element: v.element,
+                position: rect,
+                stick: stick
+            });
+        });
+    }
+
+    function showCallout(control, element, ref, pos) {
+        for (var i = 0; i < currentCallouts.length; i++) {
+            if (currentCallouts[i].control !== control && !currentCallouts[i].control.parentOf(control)) {
+                hideCallout(currentCallouts[i].control);
+                break;
+            }
+        }
+        $(element).appendTo(document.body).css({
+            position: 'fixed',
+            zIndex: getZIndexOver(currentCallouts[0] ? currentCallouts[0].element : document.body)
+        });
+
+        var rect = {
+            control: control,
+            element: element
+        };
+        if (ref.getBoundingClientRect) {
+            var xrel = matchWSDelim(pos, 'left right') || 'left';
+            var yrel = matchWSDelim(pos, 'top bottom') || 'bottom';
+            var refRect = getBoundingClientRect(ref);
+            rect[xrel] = refRect.left;
+            rect[yrel] = refRect.top;
+            rect[FLIP_POS[xrel]] = refRect.right;
+            rect[FLIP_POS[yrel]] = refRect.bottom;
+        } else {
+            rect.left = rect.right = ref.x;
+            rect.top = rect.bottom = ref.y;
+        }
+        var winRect = getBoundingClientRect();
+        var elmRect = getBoundingClientRect(element);
+        $(element).css({
+            left: (rect.left + elmRect.width > winRect.width ? rect.right - elmRect.width : rect.left) + 'px',
+            top: (rect.top + elmRect.height > winRect.height ? rect.bottom - elmRect.height : rect.top) + 'px'
+        });
+        currentCallouts.unshift(rect);
+        callThemeFunction(control, 'afterShow', rect);
+    }
+
+    function hideCallout(control) {
+        var i = currentCallouts.length - 1;
+        if (control) {
+            for (; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
+        }
+        $.each(currentCallouts.splice(0, i + 1), function (i, v) {
+            $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
+                $(v.element).detach();
+            });
+        });
+    }
+
+    function callFunction(control, name, data) {
+        var holder = name.substr(0, 7) === 'control' ? control.ui : control;
+        if (isFunction(holder[name])) {
+            try {
+                executionContext.unshift(holder);
+                return holder[name](control.ui, control, data);
+            } finally {
+                executionContext.shift();
+            }
         }
     }
 
-    function triggerEvent(ui, control, name, optArg) {
-        callFunction(ui, control, name, optArg);
-        var themeEvent = ui === control ? name : control.type + name.charAt(0).toUpperCase() + name.slice(1);
-        if (isFunction(definedThemes[ui.theme][themeEvent])) {
-            definedThemes[ui.theme][themeEvent](ui, control, optArg);
+    function callThemeFunction(control, name, data) {
+        var theme = definedThemes[control.ui.theme];
+        if (isFunction(theme[name])) {
+            try {
+                executionContext.unshift(control);
+                return theme[name](control.ui, control, data);
+            } finally {
+                executionContext.shift();
+            }
         }
     }
 
-    function resolveControls(ui, control, contextualParent) {
-        control = control || ui;
-        contextualParent = control.type !== 'group' ? control : contextualParent || ui;
+    function triggerEvent(control, name, data) {
+        callFunction(control, name, data);
+        if (control.ui === control || name.substr(0, 7) === 'control') {
+            callThemeFunction(control, name, data);
+        } else {
+            callThemeFunction(control, control.type + capfirst(name), data);
+        }
+    }
+
+    function findControls(control, needle, defaultNS, haystack, exclusions) {
+        haystack = haystack || control.all || control.contextualParent.all;
+        if (!haystack._cache) {
+            defineHiddenProperty(haystack, '_cache', {});
+        }
+        defaultNS = defaultNS || control.defaultNS;
+        exclusions = exclusions || [];
+
+        var cacheKey = defaultNS + '/' + needle;
+        if (haystack === definedControls) {
+            cacheKey = [control.ui.type, control.type, cacheKey].join('/');
+        }
+        if (haystack._cache[cacheKey]) {
+            return exclude(haystack._cache[cacheKey], exclusions);
+        }
+
+        var result = [];
+        String(needle || '').replace(/(?:^|\s)(-?)((?:([\w-:]+|\*):)?(?:[\w-]+|\*|(?=\()))(\([^)]+\))?(?=$|\s)/g, function (v, minus, name, ns, params) {
+            var arr = [];
+            var startWith = (ns || defaultNS || '').replace(/.$/, '$&:');
+            if (!name || name.slice(-1) === '*') {
+                $.each(haystack, function (i) {
+                    if (ns === '*' || (i.substr(0, startWith.length) === startWith && i.indexOf(':', startWith.length) < 0)) {
+                        arr[arr.length] = i;
+                    }
+                });
+            } else {
+                name = name.indexOf(':') < 0 ? startWith + name : name;
+                if (haystack[name]) {
+                    arr[arr.length] = name;
+                }
+            }
+            if (params) {
+                params = parseCompactSyntax(params).params;
+                arr = arr.filter(function (v) {
+                    return matchParams(params, haystack[v]);
+                });
+            }
+            if (minus) {
+                exclusions.push.apply(exclusions, arr);
+                result = exclude(result, arr);
+            } else {
+                arr = exclude(arr, exclusions);
+                result.push.apply(result, exclude(arr, result));
+            }
+        });
+        haystack._cache[cacheKey] = result.slice(0);
+        return result;
+    }
+
+    function sortControls(controls) {
+        var defaultOrder = {};
+        $.each(controls, function (i, v) {
+            defaultOrder[v.name] = i;
+        });
+        controls.sort(function (a, b) {
+            function m(a, b, prop, mult) {
+                return !a[prop] ? 0 : findControls(a.contextualParent, a[prop], a.name.substr(0, a.name.lastIndexOf(':'))).indexOf(b.name) >= 0 ? mult : -mult;
+            }
+            var a1 = m(a, b, 'after', 1);
+            var a2 = m(a, b, 'before', -1);
+            var b1 = m(b, a, 'after', -1);
+            var b2 = m(b, a, 'before', 1);
+            if ((!a1 && !a2) ^ (!b1 && !b2)) {
+                return a1 || a2 || b1 || b2;
+            }
+            return (a1 + a2 + b1 + b2) || defaultOrder[a.name] - defaultOrder[b.name];
+        });
+    }
+
+    function createControls(control, contextualParent, exclusions) {
+        var ui = control.ui;
+        contextualParent = control instanceof typerUI.group ? contextualParent || ui : control;
+        contextualParent.all = contextualParent.all || {};
+        exclusions = exclusions || [];
+
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
-        if (typeof control.controls === 'string') {
-            control.controls = expandControls(ui, control.controls);
+        if (isString(control.controls)) {
+            control.controls = findControls(control, control.controls, null, definedControls, exclusions);
         }
-
-        var defaultOrder = {};
         control.controls = $.map(control.controls || [], function (v, i) {
-            var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
+            var inst = Object.create(isString(v) ? definedControls[v] : v);
             inst.ui = ui;
             inst.parent = control;
             inst.contextualParent = contextualParent;
-            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + randomId());
-            if (inst.icon === undefined) {
+            inst.name = inst.name || (isString(v) ? v : control.defaultNS + ':' + randomId());
+            if (!isString(inst.defaultNS)) {
+                inst.defaultNS = inst.name;
+            }
+            if (!isString(inst.icon)) {
                 inst.icon = inst.name;
             }
-            if (inst.label === undefined) {
+            if (!isString(inst.label)) {
                 inst.label = inst.name;
             }
-            defaultOrder[inst.name] = i;
-            ui.all[inst.name] = inst;
-            resolveControls(ui, inst, contextualParent);
+            contextualParent.all[inst.name] = inst;
+            createControls(inst, contextualParent, contextualParent === control && exclusions.slice(0));
             return inst;
         });
-        control.controls.sort(function (a, b) {
-            function m(a, b, prop, mult) {
-                return !a[prop] || (b[prop] && b[prop].indexOf(a.name)) ? 0 : mult * (a[prop].indexOf(b.name) >= 0 ? 1 : -1);
-            }
-            return m(a, b, 'after', 1) || m(a, b, 'before', -1) || m(b, a, 'after', -1) || m(b, a, 'before', 1) || defaultOrder[a.name] - defaultOrder[b.name];
-        });
+        sortControls(control.controls);
         return control.controls;
     }
 
-    function renderControl(ui, control, params) {
-        control = control || ui;
+    function renderControls(control, params) {
+        var ui = control.ui;
         var bindedProperties = {};
 
         function propertyChanged(prop, value) {
-            value = (bindTransforms[prop] || bindTransforms.__default__)(value, ui);
+            if (isFunction(definedThemes[ui.theme]['bind' + capfirst(prop)])) {
+                value = callThemeFunction(control, 'bind' + capfirst(prop), value);
+            } else {
+                value = callThemeFunction(control, 'bind', value);
+            }
             $.each(bindedProperties[prop], function (i, v) {
                 if (v[1] === '_') {
-                    $(v[0]).text(value || '');
-                } else if (boolAttrs.indexOf(v[1]) >= 0) {
+                    $(v[0]).html(value || '');
+                } else if (matchWSDelim(v[1], BOOL_ATTRS)) {
                     $(v[0]).prop(v[1], !!value && value !== "false");
                 } else if (value) {
                     $(v[0]).attr(v[1], value);
@@ -222,7 +459,7 @@
         }
 
         function replacePlaceholder(name) {
-            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>')[0];
+            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>').attr('role', control.name)[0];
             bindPlaceholder(element);
             $('[x\\:t]', element).each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:t'));
@@ -231,8 +468,13 @@
                     element = $(definedThemes[ui.theme][t.name](ui, control, t.params));
                     bindPlaceholder(element);
                 } else if (t.name === 'children') {
-                    element = $.map(control.controls, function (v) {
-                        return renderControl(ui, v, t.params);
+                    var arr = control.controls;
+                    for (var j in t.params) {
+                        arr = arr.filter(matchParams.bind(null, t.params));
+                        break;
+                    }
+                    element = arr.map(function (v) {
+                        return renderControls(v, t.params);
                     });
                 } else {
                     element = replacePlaceholder(t.name);
@@ -253,14 +495,13 @@
             }
         }
 
-        control.element = replacePlaceholder((params || {})[control.type] || control.type);
-        $(control.element).attr('role', control.name);
+        control.element = replacePlaceholder(control.type);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
         });
 
         var executeEvent = definedThemes[ui.theme][control.type + 'ExecuteOn'];
-        if (typeof executeEvent === 'string') {
+        if (isString(executeEvent)) {
             $(control.element).bind(executeEvent, executeFromEvent);
         } else if (executeEvent) {
             $(executeEvent.of, control.element).bind(executeEvent.on, executeFromEvent);
@@ -268,17 +509,54 @@
         return control.element;
     }
 
-    function updateControl(ui, control) {
+    function resolveControls(control, name) {
+        var all = control.all || control.contextualParent.all;
+        var controls = findControls(control, name, null, all);
+        if (!controls.length) {
+            return $.map(control.controls, function (v) {
+                return resolveControls(v, name);
+            });
+        }
+        return $.map(controls, function (v) {
+            return all[v];
+        });
+    }
+
+    function isEnabled(control) {
+        var ui = control.ui;
+        if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
+            return false;
+        }
+        if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
+            (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
+            return false;
+        }
+        if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
+            (control.requireWidget && !control.widget)) {
+            return false;
+        }
+        if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
+            return false;
+        }
+        return callFunction(control, 'enabled') !== false;
+    }
+
+    function isActive(control) {
+        return !!callFunction(control, 'active');
+    }
+
+    function updateControl(control) {
+        var ui = control.ui;
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
             control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange) {
-            triggerEvent(ui, control, 'stateChange');
+            triggerEvent(control, 'stateChange');
         }
 
-        var disabled = !ui.enabled(control);
+        var disabled = !isEnabled(control);
         var visible = !control.hiddenWhenDisabled || !disabled;
 
         var $elm = $(control.element);
@@ -290,7 +568,7 @@
             $elm.toggleClass(theme.controlDisabledClass, disabled);
         }
         if (theme.controlActiveClass) {
-            $elm.toggleClass(theme.controlActiveClass, !!ui.active(control));
+            $elm.toggleClass(theme.controlActiveClass, isActive(control));
         }
         if (theme.controlHiddenClass) {
             $elm.toggleClass(theme.controlHiddenClass, !visible);
@@ -299,7 +577,8 @@
         }
     }
 
-    function executeControl(ui, control) {
+    function executeControl(control) {
+        var ui = control.ui;
         if (ui.typer) {
             if (isFunction(control.execute)) {
                 ui.typer.invoke(function (tx) {
@@ -311,20 +590,25 @@
         } else if (isFunction(control.execute)) {
             control.execute(ui, control, null, control.value);
         }
-        triggerEvent(ui, ui, 'controlExecuted', control);
+        triggerEvent(control, 'controlExecuted');
     }
 
-    function foreachControl(ui, fn, optArg, fnArg) {
-        $.each(Object.keys(ui.all).reverse(), function (i, v) {
-            fn(ui, ui.all[v], optArg, fnArg);
+    function foreachControl(control, fn, optArg, fnArg) {
+        $.each(Object.keys(control.all).reverse(), function (i, v) {
+            v = control.all[v];
+            if (v.all) {
+                foreachControl(v, fn, optArg, fnArg);
+            }
+            fn(v, optArg, fnArg);
         });
     }
 
-    function createForm(ui, control) {
+    function createForm(control) {
+        var ui = control.ui;
         var deferred = $.Deferred();
         var execute = function (value, submitControl) {
             if (ui.validate()) {
-                submitControl = submitControl || ui.resolve(control.resolve)[0];
+                submitControl = submitControl || control.resolve(control.resolveBy)[0];
                 var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
                 if (promise.state() === 'pending') {
                     ui.trigger(control, 'waiting', submitControl);
@@ -335,23 +619,23 @@
                 });
                 promise.fail(function (err) {
                     ui.trigger(control, 'error', err);
-                    Typer.ui.focus(control.element, true);
+                    typerUI.focus(control.element, true);
                 });
             } else {
                 ui.trigger(control, 'validateError');
-                Typer.ui.focus(control.element, true);
+                typerUI.focus(control.element, true);
             }
         };
         var defaultResolve = function () {
-            execute(ui.getValue(control.resolveValue || control), this);
+            execute(ui.getValue(control.resolveWith || control), this);
         };
         var defaultReject = function () {
             deferred.reject();
         };
-        $.each(ui.resolve(control.resolve), function (i, v) {
+        $.each(control.resolve(control.resolveBy), function (i, v) {
             v.execute = defaultResolve;
         });
-        $.each(ui.resolve(control.reject), function (i, v) {
+        $.each(control.resolve(control.rejectBy), function (i, v) {
             v.execute = defaultReject;
         });
         if (isFunction(control.setup)) {
@@ -364,47 +648,46 @@
         };
     }
 
-    Typer.ui = define('TyperUI', null, function (options, parentUI) {
-        if (typeof options === 'string') {
+    var typerUI = Typer.ui = define('TyperUI', {
+        language: 'en'
+    }, function (options) {
+        if (isString(options)) {
             options = {
                 controls: options
             };
         }
-        if (parentUI) {
+        if (executionContext[0]) {
+            var parentUI = executionContext[0].ui;
             $.extend(options, {
                 theme: parentUI.theme,
                 typer: parentUI.typer,
                 widget: parentUI.widget,
-                parentUI: parentUI
+                parent: parentUI,
+                parentControl: parentUI.getExecutingControl()
             });
         }
         var self = $.extend(this, options);
-        self.all = {};
-        Object.defineProperty(self.all, 'expandedFrom', {
-            value: self.controls
-        });
-        if (!self.theme) {
-            self.theme = Object.getOwnPropertyNames(definedThemes)[0];
-        }
-        self.controls = resolveControls(self);
-        self.element = renderControl(self);
+        self.ui = self;
+        self.theme = self.theme || Object.keys(definedThemes)[0];
+        self.controls = createControls(self);
+        self.element = renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
         foreachControl(self, triggerEvent, 'init');
-        triggerEvent(self, self, 'init');
+        triggerEvent(self, 'init');
     });
 
-    $.extend(Typer.ui.prototype, {
+    $.extend(typerUI.prototype, {
         update: function () {
             var self = this;
-            var obj = self._widgets = {};
+            self._widgets = {};
             if (self.widget) {
-                obj[self.widget.id] = self.widget;
+                self._widgets[self.widget.id] = self.widget;
             } else if (self.typer) {
                 $.each(self.typer.getSelection().getWidgets().concat(self.typer.getStaticWidgets()), function (i, v) {
-                    obj[v.id] = v;
+                    self._widgets[v.id] = v;
                 });
             }
             foreachControl(this, updateControl);
@@ -412,74 +695,93 @@
         destroy: function () {
             foreachControl(this, triggerEvent, 'destroy');
         },
-        trigger: function (control, event, optArg) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+        resolve: function (control) {
+            return resolveControls(this.getExecutingControl() || this, control);
+        },
+        trigger: function (control, event, data) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            triggerEvent(this, control, event, optArg);
+            triggerEvent(control, event, data);
+        },
+        show: function (control, element, ref, pos) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
+            }
+            if (control.ui === this) {
+                showCallout(control, element, ref, pos);
+            } else {
+                showCallout(this, this.element, control, element);
+            }
+        },
+        hide: function (control) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
+            }
+            hideCallout(control || this);
         },
         enabled: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            if (!this.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
-                return false;
-            }
-            if ((control.requireCommand && !this.typer.hasCommand(control.requireCommand)) ||
-                (control.requireWidgetEnabled && !this.typer.widgetEnabled(control.requireWidgetEnabled))) {
-                return false;
-            }
-            if ((control.requireWidget === true && !Object.getOwnPropertyNames(this._widgets)[0]) ||
-                (control.requireWidget && !control.widget)) {
-                return false;
-            }
-            if (control.requireChildControls === true && !control.controls[0]) {
-                return false;
-            }
-            return callFunction(this, control, 'enabled') !== false;
+            return isEnabled(control);
         },
         active: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            return !!callFunction(this, control, 'active');
+            return isActive(control);
         },
-        resolve: function (control) {
-            var self = this;
-            return $.map(expandControls(this, control, self.all), function (v) {
-                return self.all[v];
-            });
+        getIcon: function (control) {
+            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[this.iconset || definedThemes[this.theme].iconset] || '';
         },
-        getValue: function (control) {
-            var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+        getLabel: function (control) {
+            control = (control || '').label || control;
+            if (definedLabels[control]) {
+                if (this.language in definedLabels[control]) {
+                    return definedLabels[control][this.language];
+                }
+                for (var i in definedLabels[control]) {
+                    return definedLabels[control][i];
+                }
             }
-            if (!control.valueMap) {
-                return control.value;
-            }
-            var value = {};
-            $.each(control.valueMap, function (i, v) {
-                value[i] = self.getValue(v);
-            });
-            return value;
+            return control;
         },
-        setValue: function (control, value) {
+        getValue: function (control, prop) {
             var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+            prop = prop || 'value';
+            if (isString(control)) {
+                control = self.resolve(control)[0];
             }
-            if (control.valueMap) {
-                var map = control.valueMap || {};
-                $.each(value, function (i, v) {
-                    $.each(self.resolve(map[i]), function (i, w) {
-                        self.setValue(w, v);
-                    });
+            if (control) {
+                if (!control.valueMap) {
+                    return control[prop];
+                }
+                var value = {};
+                $.each(control.valueMap, function (i, v) {
+                    value[i] = self.getValue(resolveControls(control, v)[0], prop);
                 });
-                return;
+                return value;
             }
-            control.value = value;
-            updateControl(self, control);
+        },
+        setValue: function (control, prop, value) {
+            var self = this;
+            if (arguments.length < 3) {
+                return self.setValue(control, 'value', prop);
+            }
+            if (isString(control)) {
+                control = self.resolve(control)[0];
+            }
+            if (control) {
+                if (control.valueMap) {
+                    $.each(value, function (i, v) {
+                        self.setValue(resolveControls(control, control.valueMap[i])[0], prop, v);
+                    });
+                    return;
+                }
+                control[prop] = value;
+                updateControl(control);
+            }
         },
         getExecutingControl: function () {
             for (var i = 0, length = executionContext.length; i < length; i++) {
@@ -500,18 +802,19 @@
         },
         execute: function (control) {
             var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+            if (isString(control)) {
+                control = self.resolve(control)[0];
             } else if (!control) {
                 control = self.controls[0];
             }
-            if (executionContext.indexOf(control) < 0 && self.enabled(control)) {
+            if (control && executionContext.indexOf(control) < 0 && isEnabled(control)) {
                 executionContext.unshift(control);
+                triggerEvent(control, 'controlExecuting');
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         self.setValue(control, value);
-                        executeControl(self, control);
+                        executeControl(control);
                     });
                     promise.always(function () {
                         executionContext.shift(control);
@@ -519,64 +822,63 @@
                     return promise;
                 }
                 try {
-                    executeControl(self, control);
+                    executeControl(control);
                 } finally {
                     executionContext.shift(control);
                 }
             }
-        },
-        openDialog: function (control, value, pin) {
-            var ui = Typer.ui(control, this);
-            ui.setValue(control, value);
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        alert: function (message, pin) {
-            var ui = Typer.ui('ui:alert', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        confirm: function (message, pin) {
-            var ui = Typer.ui('ui:confirm', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        prompt: function (message, value, pin) {
-            var ui = Typer.ui('ui:prompt', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.all['ui:prompt'].value = value;
-            ui.pinToParent = pin;
-            return ui.execute();
         }
     });
 
-    $.extend(Typer.ui, {
+    $.extend(typerUI, {
         controls: definedControls,
         themes: definedThemes,
         themeExtensions: {},
-        getIcon: function (control, iconSet) {
-            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[iconSet] || '';
+        controlExtensions: controlExtensions,
+        matchWSDelim: matchWSDelim,
+        define: function (name, base, ctor) {
+            if (typeof name === 'object') {
+                $.each(name, typerUI.define);
+                return;
+            }
+            base = base || {};
+            ctor = ctor || (getOwnPropertyDescriptor(base, 'constructor') || '').value;
+            base.type = name;
+            typerUI[name] = define('TyperUI' + capfirst(name), base, ctor);
         },
         getShortcut: function (command) {
             var current = definedShortcuts._map[command];
             return current && current[0];
         },
-        addIcons: function (iconSet, values) {
-            $.each(values, function (i, v) {
+        addControls: function (ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                definedControls[prefix + i] = v;
+            });
+        },
+        addIcons: function (iconSet, ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                i = prefix + i;
                 if (!definedIcons[i]) {
                     definedIcons[i] = {};
                 }
                 definedIcons[i][iconSet] = v;
             });
         },
-        addLabels: function (language, values) {
-            $.extend(definedLabels, values);
+        addLabels: function (language, ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                i = prefix + i;
+                if (!definedLabels[i]) {
+                    definedLabels[i] = {};
+                }
+                definedLabels[i][language] = v;
+            });
         },
         addHook: function (keystroke, hook) {
             if (typeof keystroke === 'object') {
-                $.each(keystroke, Typer.ui.addHook);
+                $.each(keystroke, typerUI.addHook);
                 return;
             }
             (keystroke || '').replace(/\S+/g, function (v) {
@@ -588,7 +890,7 @@
         },
         setShortcut: function (command, keystroke) {
             if (typeof command === 'object') {
-                $.each(command, Typer.ui.setShortcut);
+                $.each(command, typerUI.setShortcut);
                 return;
             }
             command = parseCompactSyntax(command);
@@ -620,24 +922,27 @@
             });
         },
         setZIndex: function (element, over) {
-            var maxZIndex = -1;
-            var iterator = document.createTreeWalker(document.body, 1, function (v) {
-                if (Typer.comparePosition(v, over, true)) {
-                    return 2;
-                }
-                var zIndex = getZIndex(v);
-                if (zIndex >= 0) {
-                    maxZIndex = Math.max(maxZIndex, zIndex);
-                    return 2;
-                }
-                maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
-                return 1;
-            }, false);
-            Typer.iterate(iterator);
-            element.style.zIndex = maxZIndex + 1;
+            element.style.zIndex = getZIndexOver(over);
             if ($(element).css('position') === 'static') {
                 element.style.position = 'relative';
             }
+        },
+        pin: function (control, element, reference, direction) {
+            currentPinnedElements.push({
+                control: control,
+                element: element,
+                reference: reference,
+                direction: direction
+            });
+            updatePinnedPositions();
+        },
+        unpin: function (control) {
+            $.each(currentPinnedElements, function (i, v) {
+                if (v.control === control) {
+                    currentPinnedElements.splice(i, 1);
+                    return false;
+                }
+            });
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
@@ -645,29 +950,85 @@
             }
         },
         openDialog: function (control, value, pin) {
-            var ui = Typer.ui(control);
+            var ui = typerUI(control);
             ui.setValue(control, value);
-            ui.pinToParent = pin;
             return ui.execute();
         },
         alert: function (message, pin) {
-            var ui = Typer.ui('ui:alert');
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:alert');
+            ui.setValue('message', message);
             return ui.execute();
         },
         confirm: function (message, pin) {
-            var ui = Typer.ui('ui:confirm');
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:confirm');
+            ui.setValue('message', message);
             return ui.execute();
         },
         prompt: function (message, value, pin) {
-            var ui = Typer.ui('ui:prompt');
-            ui.all['ui:prompt-message'].label = message;
-            ui.all['ui:prompt'].value = value;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:prompt');
+            ui.setValue('message', message);
+            ui.setValue('prompt', value);
             return ui.execute();
+        },
+        getWheelDelta: function (e) {
+            e = e.originalEvent || e;
+            var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
+            return dir / Math.abs(dir);
+        },
+        parseOrigin: function (value) {
+            if (/(left|center|right)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?(?:\s+(top|center|bottom)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?)?/g.test(value)) {
+                return {
+                    percentX: (ORIGIN_TO_PERCENT[RegExp.$1] || 0) + (RegExp.$3 === '%' && +RegExp.$2),
+                    percentY: (ORIGIN_TO_PERCENT[RegExp.$4 || (!RegExp.$5 && RegExp.$1)] || 0) + (RegExp.$6 === '%' && +RegExp.$5),
+                    offsetX: +(RegExp.$3 === 'px' && +RegExp.$2),
+                    offsetY: +(RegExp.$6 === 'px' && +RegExp.$5)
+                };
+            }
+            return $.extend({}, ZERO_ORIGIN);
+        }
+    });
+
+    $.extend(controlExtensions, {
+        buttonsetGroup: 'left',
+        markdown: false,
+        showButtonLabel: true,
+        is: function (type) {
+            return matchWSDelim(this.type, type);
+        },
+        resolve: function (control) {
+            return resolveControls(this, control);
+        },
+        parentOf: function (control) {
+            for (; control; control = control.parent) {
+                if (this === control) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    });
+
+    $.extend(typerUI.themeExtensions, {
+        bind: function (ui, control, value) {
+            value = ui.getLabel(value) || '';
+            if (control.markdown) {
+                return new showdown.Converter({
+                    simplifiedAutoLink: true,
+                    excludeTrailingPunctuationFromURLs: true,
+                    simpleLineBreaks: true
+                }).makeHtml(String(value));
+            }
+            var elm = document.createElement('div');
+            elm.textContent = value;
+            return elm.innerHTML;
+        },
+        bindIcon: function (ui, control, value) {
+            return ui.getIcon(value);
+        },
+        bindShortcut: function (ui, control, value) {
+            return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+                return IS_MAC ? MAC_CTRLKEY[v.toLowerCase()] : capfirst(v) + '+';
+            });
         }
     });
 
@@ -675,23 +1036,35 @@
      * Built-in Control Types
      * ********************************/
 
-    $.extend(Typer.ui, {
-        theme: define('TyperUITheme', Typer.ui.themeExtensions),
-        button: define('TyperUIButton', {
-            type: 'button'
-        }),
-        file: define('TyperUIFile', {
-            type: 'file'
-        }),
-        dropdown: define('TyperUIDropdown', {
-            type: 'dropdown',
+    typerUI.define({
+        theme: typerUI.themeExtensions,
+        group: {
+            hiddenWhenDisabled: true,
             requireChildControls: true,
+            controls: '*',
+            constructor: function (controls, params) {
+                if (isString(controls)) {
+                    this.controls = controls;
+                    if (isString(params)) {
+                        this.type = params;
+                    } else {
+                        $.extend(this, params);
+                    }
+                } else {
+                    $.extend(this, controls);
+                }
+            }
+        },
+        dropdown: {
+            requireChildControls: true,
+            controls: '*',
             get value() {
                 return this.selectedValue;
             },
             set value(value) {
                 var self = this;
-                $.each(self.controls, function (i, v) {
+                self.selectedIndex = -1;
+                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
                     if (v.value === value) {
                         self.selectedIndex = i;
                         self.selectedText = v.label || v.name;
@@ -699,12 +1072,14 @@
                         return false;
                     }
                 });
-                $.each(self.controls, function (i, v) {
-                    updateControl(self.ui, v);
-                });
+                if (self.selectedIndex === -1) {
+                    self.selectedValue = '';
+                    self.selectedText = self.label || self.name;
+                }
+                foreachControl(self, updateControl);
             },
             init: function (ui, self) {
-                $.each(self.controls, function (i, v) {
+                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
                     v.active = function () {
                         return self.selectedIndex === i;
                     };
@@ -714,39 +1089,29 @@
                     };
                 });
             }
-        }),
-        group: define('TyperUIGroup', {
-            type: 'group',
-            hiddenWhenDisabled: true,
-            requireChildControls: true,
-            enabled: function (ui, self) {
-                return !!$.grep(self.controls, function (v) {
-                    return ui.enabled(v);
-                })[0];
+        },
+        callout: {
+            controls: '*'
+        },
+        label: {
+            get value() {
+                return this.label;
+            },
+            set value(value) {
+                this.label = value;
             }
-        }, function (controls, params) {
-            this.controls = controls;
-            $.extend(this, params);
-        }),
-        label: define('TyperUILabel', {
-            type: 'label'
-        }, function (label) {
-            this.label = label;
-        }),
-        callout: define('TyperUICallout', {
-            type: 'callout'
-        }),
-        textbox: define('TyperUITextbox', {
-            type: 'textbox',
+        },
+        button: {},
+        file: {},
+        textbox: {
             preset: 'textbox'
-        }),
-        textboxCombo: define('TyperUITextboxCombo', {
-            type: 'textboxCombo',
+        },
+        textboxCombo: {
             controls: function (ui, self) {
                 var controls = [];
                 self.valueMap = {};
                 (self.format || '').replace(/\{([^}]+)\}|[^{]+/g, function (v, property) {
-                    var control = property ? Typer.ui.textbox(self[property]) : Typer.ui.label(v);
+                    var control = property ? typerUI.textbox(self[property]) : typerUI.label(v);
                     control.name = self.name + ':' + (property || randomId());
                     controls.push(control);
                     if (property) {
@@ -755,23 +1120,21 @@
                 });
                 return controls;
             }
-        }),
-        checkbox: define('TyperUICheckbox', {
-            type: 'checkbox'
-        }),
-        dialog: define('TyperUIDialog', {
-            type: 'dialog',
+        },
+        checkbox: {},
+        dialog: {
+            pinnable: false,
             keyboardResolve: true,
             keyboardReject: true,
-            resolve: 'ui:button-ok',
-            reject: 'ui:button-cancel',
+            resolveBy: 'dialog:buttonOK',
+            rejectBy: 'dialog:buttonCancel',
             dialog: function (ui, self) {
                 var previousDialog = currentDialog;
                 var previousActiveElement = document.activeElement;
-                var form = createForm(ui, self);
+                var form = createForm(self);
                 ui.update();
                 ui.trigger(self, 'open');
-                setImmediate(Typer.ui.focus, self.element);
+                setImmediate(typerUI.focus, self.element);
                 form.promise.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
@@ -780,7 +1143,7 @@
                         previousActiveElement.focus();
                     }
                 });
-                Typer.ui.setZIndex(ui.element, document.body);
+                typerUI.setZIndex(ui.element, document.body);
                 currentDialog = {
                     element: self.element,
                     keyboardResolve: self.keyboardResolve && form.resolve,
@@ -788,55 +1151,59 @@
                 };
                 return form.promise;
             }
-        })
+        }
     });
 
     /* ********************************
      * Built-in Controls and Resources
      * ********************************/
 
-    $.extend(definedControls, {
-        'ui:button-ok': Typer.ui.button(),
-        'ui:button-cancel': Typer.ui.button(),
-        'ui:prompt-message': {
-            type: 'label'
-        },
-        'ui:prompt-input': Typer.ui.textbox({
-            label: '',
-            executeOnSetValue: false
+    typerUI.addControls('dialog', {
+        buttonset: typerUI.group('(type:button)', {
+            type: 'buttonset',
+            defaultNS: 'dialog'
         }),
-        'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
-        'ui:prompt': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:prompt-input ui:prompt-buttonset',
-            resolveValue: 'ui:prompt-input',
+        buttonOK: typerUI.button({
+            buttonsetGroup: 'right'
+        }),
+        buttonCancel: typerUI.button({
+            buttonsetGroup: 'right'
+        }),
+        message: typerUI.label({
+            markdown: true
+        }),
+        input: typerUI.textbox({
+            label: '',
+        }),
+        prompt: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message input buttonset',
+            resolveWith: 'input',
             setup: function (ui, self) {
-                ui.setValue('ui:prompt-input', self.value);
+                ui.setValue('input', self.value);
             }
         }),
-        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
-        'ui:confirm': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:confirm-buttonset'
+        confirm: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message buttonset'
         }),
-        'ui:alert-buttonset': Typer.ui.group('ui:button-ok', { type: 'buttonset' }),
-        'ui:alert': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:alert-buttonset'
-        }),
+        alert: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message buttonset -buttonCancel'
+        })
     });
 
-    Typer.ui.addLabels('en', {
-        'ui:button-ok': 'OK',
-        'ui:button-cancel': 'Cancel'
+    typerUI.addLabels('en', 'dialog', {
+        buttonOK: 'OK',
+        buttonCancel: 'Cancel'
     });
 
-    Typer.ui.addIcons('material', {
-        'ui:button-ok': '\ue876',
-        'ui:button-cancel': '\ue5cd'
+    typerUI.addIcons('material', 'dialog', {
+        buttonOK: '\ue876',
+        buttonCancel: '\ue5cd'
     });
 
     Typer.defaultOptions.shortcut = true;
@@ -859,27 +1226,27 @@
         }
     };
 
-    bindTransforms.__default__ = function (value) {
-        return typeof value === 'string' && value in definedLabels ? definedLabels[value] : value;
-    };
-    bindTransforms.shortcut = function (value) {
-        return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
-            return v.charAt(0).toUpperCase() + v.slice(1) + '+';
+    $(function () {
+        $(window).keydown(function (e) {
+            if (currentDialog && (e.which === 13 || e.which === 27)) {
+                (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
+            }
         });
-    };
-    bindTransforms.icon = function (value, ui) {
-        return Typer.ui.getIcon(value, definedThemes[ui.theme].iconset);
-    };
-
-    $(window).keydown(function (e) {
-        if (currentDialog && (e.which === 13 || e.which === 27)) {
-            (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
-        }
+        $(window).focusin(function (e) {
+            if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
+                typerUI.focus(currentDialog.element);
+            }
+        });
+        $(window).bind('resize scroll orientationchange', function (e) {
+            updatePinnedPositions();
+        });
+        $(document.body).mousedown(function (e) {
+            $.each(currentCallouts.slice(0), function (i, v) {
+                if (!Typer.containsOrEquals(v.element, e.target)) {
+                    hideCallout(v.control);
+                }
+            });
+        });
     });
-    $(window).focusin(function (e) {
-        if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
-            Typer.ui.focus(currentDialog.element);
-        }
-    });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer, Object, window, document));

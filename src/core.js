@@ -4,6 +4,7 @@
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
     var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
     var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
+    var SOURCE_PRIORITY = 'keystroke textInput mouse cut paste'.split(' ');
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
@@ -28,9 +29,12 @@
     var EVENT_CURRENT = 4;
     var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined;
 
+    var caretRangeFromPoint_ = document.caretRangeFromPoint;
+    var compareDocumentPosition_ = document.compareDocumentPosition;
+    var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
+
     var isFunction = $.isFunction;
     var selection = window.getSelection();
-    var caretRangeFromPoint_ = document.caretRangeFromPoint;
     var clipboard = {};
     var userFocus;
     var caretNotification;
@@ -84,6 +88,7 @@
 
     function TyperChangeTracker(typer) {
         this.typer = typer;
+        this.changes = [];
     }
 
     function TyperCaret(typer, selection) {
@@ -110,10 +115,9 @@
         };
     }
 
-    function defineProperty(obj, name, value, enumerable) {
+    function defineProperty(obj, name, value, freeze) {
         Object.defineProperty(obj, name, {
-            enumerable: enumerable !== false,
-            configurable: true,
+            configurable: !freeze,
             writable: true,
             value: value
         });
@@ -121,7 +125,7 @@
 
     function definePrototype(fn, prototype) {
         fn.prototype = prototype;
-        defineProperty(prototype, 'constructor', fn, false);
+        defineProperty(prototype, 'constructor', fn);
     }
 
     function slice(arr, start, end) {
@@ -226,7 +230,7 @@
         if (a === b) {
             return 0;
         }
-        var v = a && b && a.compareDocumentPosition(b);
+        var v = a && b && compareDocumentPosition_.call(a, b);
         if (v & 2) {
             return (strict && v & 8) || (v & 1) ? NaN : 1;
         }
@@ -237,7 +241,7 @@
     }
 
     function connected(a, b) {
-        return a && b && !((a.commonAncestorContainer || a).compareDocumentPosition(b.commonAncestorContainer || b) & 1);
+        return a && b && !(compareDocumentPosition_.call(a.commonAncestorContainer || a, b.commonAncestorContainer || b) & 1);
     }
 
     function containsOrEquals(container, contained) {
@@ -245,7 +249,7 @@
     }
 
     function getCommonAncestor(a, b) {
-        for (b = b || a; a && a !== b && a.compareDocumentPosition(b) !== 20; a = a.parentNode);
+        for (b = b || a; a && a !== b && compareDocumentPosition_.call(a, b) !== 20; a = a.parentNode);
         return a;
     }
 
@@ -286,10 +290,10 @@
         }
         if (is(startOffset, Range) && connected(range, startOffset)) {
             var inverse = range.collapsed && startOffset.collapsed ? -1 : 1;
-            if (range.compareBoundaryPoints(0, startOffset) * inverse < 0) {
+            if (compareBoundaryPoints_.call(range, 0, startOffset) * inverse < 0) {
                 range.setStart(startOffset.startContainer, startOffset.startOffset);
             }
-            if (range.compareBoundaryPoints(2, startOffset) * inverse > 0) {
+            if (compareBoundaryPoints_.call(range, 2, startOffset) * inverse > 0) {
                 range.setEnd(startOffset.endContainer, startOffset.endOffset);
             }
         }
@@ -299,25 +303,25 @@
     function rangeIntersects(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(3, b) <= 0 && a.compareBoundaryPoints(1, b) >= 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 3, b) <= 0 && compareBoundaryPoints_.call(a, 1, b) >= 0;
     }
 
     function rangeCovers(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(0, b) <= 0 && a.compareBoundaryPoints(2, b) >= 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 0, b) <= 0 && compareBoundaryPoints_.call(a, 2, b) >= 0;
     }
 
     function rangeEquals(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(0, b) === 0 && a.compareBoundaryPoints(2, b) === 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 0, b) === 0 && compareBoundaryPoints_.call(a, 2, b) === 0;
     }
 
     function compareRangePosition(a, b, strict) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        var value = !connected(a, b) ? NaN : a.compareBoundaryPoints(0, b) + a.compareBoundaryPoints(2, b);
+        var value = !connected(a, b) ? NaN : compareBoundaryPoints_.call(a, 0, b) + compareBoundaryPoints_.call(a, 2, b);
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
@@ -326,6 +330,10 @@
             return Math.abs(a[prop] - b[prop]) < 1;
         }
         return check('left') && check('top') && check('bottom') && check('right');
+    }
+
+    function rectCovers(a, b) {
+        return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
     function pointInRect(x, y, rect) {
@@ -376,11 +384,12 @@
 
     function caretRangeFromPoint(x, y, element) {
         var range = caretRangeFromPoint_.call(document, x, y);
-        if (element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
+        if (range && element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
             var elm = [];
             try {
-                while (comparePosition(element, range.commonAncestorContainer, true)) {
-                    var target = $(range.commonAncestorContainer).parentsUntil(getCommonAncestor(element, range.commonAncestorContainer)).slice(-1)[0] || range.commonAncestorContainer;
+                var container;
+                while (comparePosition(element, (container = range.commonAncestorContainer), true)) {
+                    var target = $(container).parentsUntil(getCommonAncestor(element, container)).slice(-1)[0] || container;
                     if (target === elm[elm.length - 1]) {
                         return null;
                     }
@@ -457,34 +466,39 @@
         var $self = $(topElement);
 
         var codeUpdate = (function () {
-            var currentSource;
+            var currentSource = 'script';
             var run = transaction(function () {
                 var source = currentSource;
                 if (codeUpdate.needSnapshot) {
                     undoable.snapshot();
                 }
-                currentSource = null;
+                currentSource = 'script';
                 setImmediate(function () {
                     codeUpdate.suppressTextEvent = false;
                     tracker.collect(function (changedWidgets) {
-                        codeUpdate('script', function () {
+                        codeUpdate(source, function () {
                             $.each(changedWidgets, function (i, v) {
                                 normalize(v.element);
                                 if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(v, 'contentChange', source);
+                                    triggerEvent(source, v, 'contentChange', source);
                                 }
                             });
-                            triggerEvent(EVENT_STATIC, 'contentChange', source);
+                            triggerEvent(source, EVENT_STATIC, 'contentChange', source);
                         });
                     });
                 });
             });
             return function (source, callback) {
-                currentSource = currentSource || source;
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
                 codeUpdate.suppressTextEvent = true;
-                return run(callback);
+                if (source !== currentSource && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource)) {
+                    currentSource = source || 'script';
+                }
+                var args = slice(arguments, 2);
+                return run(function () {
+                    return callback.apply(null, args);
+                });
             };
         } ());
 
@@ -519,11 +533,11 @@
             });
         }
 
-        function triggerEvent(eventMode, eventName, data, props) {
+        function triggerEvent(eventSource, eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
             var handlerCalled;
             if (eventListened(widgets, eventName)) {
-                codeUpdate('script', function () {
+                codeUpdate(eventSource, function () {
                     $.each(widgets, function (i, v) {
                         var options = widgetOptions[v.id];
                         if (!v.destroyed && isFunction(options[eventName])) {
@@ -536,7 +550,7 @@
             }
             if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
                 setTimeout(function () {
-                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
+                    triggerEvent(eventSource, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
                     });
                 });
@@ -544,9 +558,9 @@
             return handlerCalled;
         }
 
-        function triggerDefaultPreventableEvent(eventMode, eventName, data, eventObj) {
+        function triggerDefaultPreventableEvent(eventSource, eventMode, eventName, data, eventObj) {
             eventObj = eventObj || $.Event(eventName);
-            triggerEvent(eventMode, eventName, data, {
+            triggerEvent(eventSource, eventMode, eventName, data, {
                 preventDefault: eventObj.preventDefault.bind(eventObj),
                 isDefaultPrevented: function () {
                     return eventObj.isDefaultPrevented();
@@ -583,7 +597,7 @@
                     if (index >= 0) {
                         if (fireEvent && !suppressEvent && node.widget.element === node.element) {
                             node.widget.destroyed = true;
-                            triggerEvent(node.widget, 'destroy');
+                            triggerEvent(null, node.widget, 'destroy');
                         }
                         node.parentNode.childNodes.splice(index, 1);
                         node.parentNode = null;
@@ -599,7 +613,7 @@
                     if (fireEvent && node.widget && node.widget.element === node.element) {
                         node.widget.destroyed = true;
                         if (node.widget.id !== WIDGET_UNKNOWN) {
-                            triggerEvent(node.widget, 'destroy');
+                            triggerEvent(null, node.widget, 'destroy');
                         }
                     }
                     delete node.widget;
@@ -610,7 +624,7 @@
                         }
                     });
                     if (fireEvent && node.widget && node.widget.id !== WIDGET_UNKNOWN) {
-                        triggerEvent(node.widget, 'init');
+                        triggerEvent(null, node.widget, 'init');
                     }
                 }
                 if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
@@ -777,15 +791,20 @@
                     if (is(node, NODE_ANY_ALLOWTEXT)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
-                        var lastBr = $('br:last-child', node.element)[0];
+                        var lastBr = $('>br:last-child', node.element)[0];
                         if (lastBr && !lastBr.nextSibling) {
                             $(createTextNode()).insertBefore(lastBr);
                             removeNode(lastBr);
                         }
-                        var firstBr = $('br:first-child', node.element)[0];
+                        var firstBr = $('>br:first-child', node.element)[0];
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
+                        $('>br', node.element).each(function (i, v) {
+                            if (!v.nextSibling || v.nextSibling.nodeType === 1) {
+                                $(createTextNode()).insertAfter(v);
+                            }
+                        });
                         $(node.element).contents().each(function (i, v) {
                             if (v.nodeType === 3 && !textNodeFreezed(v)) {
                                 var nextNode = v.nextSibling;
@@ -928,7 +947,8 @@
                 while (content[0]) {
                     var nodeToInsert = content.shift();
                     var node = new TyperNode(NODE_INLINE, nodeToInsert);
-                    if (nodeToInsert.nodeType === 1 && tagName(nodeToInsert) !== 'br') {
+                    var isLineBreak = tagName(nodeToInsert) === 'br';
+                    if (nodeToInsert.nodeType === 1 && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
                         node = typerDocument.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
@@ -937,9 +957,9 @@
                             node = new TyperNode(NODE_INLINE, nodeToInsert);
                         }
                     }
-                    if (!is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
+                    if ((isLineBreak && !is(typerDocument.getEditableNode(caretPoint.startContainer), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
                         var splitLastNode = typerDocument.getEditableNode(caretPoint.startContainer);
-                        while (!is(splitLastNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
+                        while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
                         var splitEnd = createRange(splitLastNode.element, false);
@@ -966,25 +986,30 @@
                             var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
                             n2.nodeValue = n2.nodeValue.slice(1);
                         }
-                        caretPoint = splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
+                        caretPoint = isLineBreak ? createRange(splitEnd, true) : splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
                         endPoint = createRange(splitEnd, false);
-                        paragraphAsInline = true;
-                        hasInsertedBlock = true;
+                        if (!isLineBreak) {
+                            paragraphAsInline = true;
+                            hasInsertedBlock = true;
+                        }
                     }
                     insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
-                    if (is(node, NODE_ANY_INLINE)) {
-                        nodeToInsert = createDocumentFragment(wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes));
-                    } else if (insertAsInline && paragraphAsInline) {
-                        nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
+                    if (!isLineBreak) {
+                        if (is(node, NODE_ANY_INLINE)) {
+                            nodeToInsert = createDocumentFragment(wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes));
+                        } else if (insertAsInline && paragraphAsInline) {
+                            nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
+                        }
                     }
                     var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
-                            if (is(node, NODE_INLINE_WIDGET)) {
+                            if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
                                 caretPoint = createRange(lastNode, false);
                                 caretPoint.insertNode(createTextNode());
+                                caretPoint.collapse(false);
                             } else {
                                 caretPoint = createRange(lastNode, -0);
                             }
@@ -1005,7 +1030,15 @@
                     tracker.track(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    caretPoint = caretPoint || createRange(state.startNode.element, -0);
+                    if (caretPoint) {
+                        var caretNode2 = typerDocument.getNode(caretPoint.startContainer);
+                        while (is(caretNode2, NODE_ANY_INLINE)) {
+                            caretNode2 = caretNode2.parentNode;
+                        }
+                        caretPoint = createRange(caretNode2.element, -0);
+                    } else {
+                        caretPoint = createRange(state.startNode.element, -0);
+                    }
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
@@ -1054,8 +1087,8 @@
 
             function triggerStateChange() {
                 setTimeout(function () {
-                    triggerEvent(EVENT_ALL, 'beforeStateChange');
-                    triggerEvent(EVENT_ALL, 'stateChange');
+                    triggerEvent(null, EVENT_ALL, 'beforeStateChange');
+                    triggerEvent(null, EVENT_ALL, 'stateChange');
                 });
             }
 
@@ -1115,7 +1148,7 @@
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     }
-                    return lastValue;
+                    return lastValue.slice(lastValue.indexOf('>') + 1, lastValue.lastIndexOf('<'));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
@@ -1166,7 +1199,7 @@
                 var widget = activeWidget;
                 if (activeWidget && !activeWidget.destroyed) {
                     activeWidget = null;
-                    triggerEvent(widget, 'focusout');
+                    triggerEvent(null, widget, 'focusout');
                 }
             }
 
@@ -1201,7 +1234,7 @@
             }
 
             function handleTextInput(inputText, compositionend) {
-                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
+                if (inputText && triggerDefaultPreventableEvent('textInput', EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
@@ -1213,9 +1246,9 @@
                 setImmediate(function () {
                     updateFromNativeInput();
                     if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
-                        triggerEvent(EVENT_CURRENT, 'contentChange', 'textInput');
+                        triggerEvent('textInput', EVENT_CURRENT, 'contentChange', 'textInput');
                     }
-                    triggerEvent(EVENT_STATIC, 'contentChange', 'textInput');
+                    triggerEvent('textInput', EVENT_STATIC, 'contentChange', 'textInput');
                 });
             }
 
@@ -1278,10 +1311,10 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
+                        if (triggerEvent('keystroke', EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
-                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                        if (triggerDefaultPreventableEvent('keystroke', EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
                             e.preventDefault();
                         }
                     }
@@ -1331,7 +1364,7 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                codeUpdate(e.type, function () {
+                codeUpdate('cut', function () {
                     clipboard.content = extractContents(currentSelection, e.type);
                     clipboard.textContent = extractText(clipboard.content);
                 });
@@ -1351,17 +1384,17 @@
                 if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    codeUpdate(e.type, function () {
+                    codeUpdate('paste', function () {
                         insertContents(currentSelection, content);
                     });
                 } else {
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
-                        codeUpdate(e.type, function () {
+                        codeUpdate('paste', function () {
                             insertContents(currentSelection, clipboard.content.cloneNode(true));
                         });
-                    } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
-                        codeUpdate(e.type, function () {
+                    } else if (!triggerDefaultPreventableEvent('paste', EVENT_ALL, 'textInput', textContent)) {
+                        codeUpdate('paste', function () {
                             insertContents(currentSelection, textContent);
                         });
                     }
@@ -1391,7 +1424,7 @@
                     currentSelection.select(node.widget.element);
                     if (activeWidget !== node.widget) {
                         activeWidget = node.widget;
-                        triggerEvent(node.widget, 'focusin');
+                        triggerEvent(null, node.widget, 'focusin');
                     }
                 }
             });
@@ -1409,15 +1442,21 @@
                     clientY: e.clientY,
                     target: e.target
                 };
-                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
+                triggerEvent('mouse', EVENT_HANDLER, getEventName(e, 'click'), null, props);
                 e.preventDefault();
             });
 
             $self.bind('dblclick', function (e) {
-                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
+                if (!triggerEvent('mouse', EVENT_HANDLER, 'dblclick')) {
                     currentSelection.select('word');
                 }
                 e.preventDefault();
+            });
+
+            $self.bind('mousewheel', function (e) {
+                if (typerFocused && triggerDefaultPreventableEvent('mouse', EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
+                    e.preventDefault();
+                }
             });
 
             $self.bind('focusin', function (e) {
@@ -1430,7 +1469,7 @@
                 windowFocusedOut = false;
                 if (!userFocus.has(typer)) {
                     typerFocused = true;
-                    triggerEvent(EVENT_ALL, 'focusin');
+                    triggerEvent(null, EVENT_ALL, 'focusin');
                     if (!mousedown) {
                         currentSelection.focus();
                     }
@@ -1440,6 +1479,11 @@
 
             $self.bind('focusout', function (e) {
                 if (document.activeElement !== topElement && typerFocused) {
+                    if (e.relatedTarget === undefined) {
+                        // Chrome triggers focusout event with relatedTarget equals undefined
+                        // after contextmenu event by right mouse click
+                        return;
+                    }
                     for (var element = e.relatedTarget; element; element = element.parentNode) {
                         if (relatedElements.has(element)) {
                             userFocus.set(typer, element);
@@ -1448,7 +1492,7 @@
                     }
                     typerFocused = false;
                     triggerWidgetFocusout();
-                    triggerEvent(EVENT_ALL, 'focusout');
+                    triggerEvent(null, EVENT_ALL, 'focusout');
                     normalize();
 
                     // prevent focus returns to current editor
@@ -1529,13 +1573,15 @@
 
         var retainFocusHandlers = {
             focusout: function (e) {
-                if (!containsOrEquals(e.currentTarget, document.activeElement) && userFocus.get(typer) === e.currentTarget) {
-                    userFocus.delete(typer);
-                }
-                if (topElement === e.relatedTarget) {
-                    currentSelection.focus();
-                } else {
-                    $self.trigger('focusout');
+                if (!containsOrEquals(e.currentTarget, e.relatedTarget)) {
+                    if (userFocus.get(typer) === e.currentTarget) {
+                        userFocus.delete(typer);
+                    }
+                    if (topElement === e.relatedTarget) {
+                        currentSelection.focus();
+                    } else {
+                        $self.trigger('focusout');
+                    }
                 }
             }
         };
@@ -1577,8 +1623,14 @@
                 return range && typerDocument.getNode(range.commonAncestorContainer);
             },
             retainFocus: function (element) {
-                relatedElements.set(element, true);
-                $(element).bind(retainFocusHandlers);
+                if (!relatedElements.has(element)) {
+                    relatedElements.set(element, true);
+                    $(element).bind(retainFocusHandlers);
+                }
+            },
+            releaseFocus: function (element) {
+                relatedElements.delete(element);
+                $(element).unbind(retainFocusHandlers);
             },
             invoke: function (command, value) {
                 var tx = new TyperTransaction();
@@ -1655,7 +1707,7 @@
 
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         normalize();
-        triggerEvent(EVENT_STATIC, 'init');
+        triggerEvent(null, EVENT_STATIC, 'init');
     }
 
     window.Typer = Typer;
@@ -1670,6 +1722,9 @@
         NODE_INLINE_EDITABLE: NODE_INLINE_EDITABLE,
         NODE_OUTER_PARAGRAPH: NODE_OUTER_PARAGRAPH,
         NODE_SHOW_EDITABLE: NODE_SHOW_EDITABLE,
+        NODE_ANY_ALLOWTEXT: NODE_ANY_ALLOWTEXT,
+        NODE_ANY_BLOCK_EDITABLE: NODE_ANY_BLOCK_EDITABLE,
+        NODE_ANY_INLINE: NODE_ANY_INLINE,
         ZWSP: ZWSP,
         ZWSP_ENTITIY: ZWSP_ENTITIY,
         is: is,
@@ -1687,28 +1742,33 @@
         rangeCovers: rangeCovers,
         rangeEquals: rangeEquals,
         rectEquals: rectEquals,
+        rectCovers: rectCovers,
         pointInRect: pointInRect,
         caretRangeFromPoint: caretRangeFromPoint,
-        innermost: function (elements) {
-            return $.grep(elements, function (v) {
-                return !any(elements, function (w) {
-                    return $.contains(v, w);
-                });
-            });
-        },
-        outermost: function (elements) {
-            return $.grep(elements, function (v) {
-                return !any(elements, function (w) {
-                    return $.contains(w, v);
-                });
-            });
-        },
         historyLevel: 100,
         defaultOptions: {
             disallowedWidgets: 'keepText',
             widgets: {}
         },
         widgets: {}
+    });
+
+    definePrototype(Typer, {
+        hasContent: function () {
+            return !!this.getValue();
+        },
+        setValue: function (value) {
+            this.selectAll();
+            this.invoke(function (tx) {
+                tx.insertHtml(value);
+            });
+        },
+        select: function (startNode, startOffset, endNode, endOffset) {
+            this.getSelection().select(startNode, startOffset, endNode, endOffset);
+        },
+        selectAll: function () {
+            this.getSelection().selectAll();
+        }
     });
 
     definePrototype(TyperNode, {
@@ -1854,7 +1914,7 @@
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
             return treeWalkerAcceptNode(iterator, typer.getNode(v), true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
-        defineProperty(inst, 'iterator', iterator2, false);
+        defineProperty(inst, 'iterator', iterator2);
     }
 
     definePrototype(TyperDOMNodeIterator, {
@@ -2012,13 +2072,16 @@
                 return this.baseCaret.moveTo(createRange(range, true)) + this.extendCaret.moveTo(createRange(range, false)) > 0;
             });
         },
+        selectAll: function () {
+            return this.select(this.typer.element, 'contents');
+        },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
                 permitFocusEvent = true;
                 applyRange(createRange(this));
                 // Firefox does not set focus on the host element automatically
                 // when selection is changed by JavaScript
-                if (document.activeElement !== this.typer.element) {
+                if (!IS_IE && document.activeElement !== this.typer.element) {
                     this.typer.element.focus();
                 }
             }
@@ -2291,7 +2354,6 @@
     });
 
     definePrototype(TyperChangeTracker, {
-        changes: [],
         track: function (node) {
             node = is(node, TyperNode) || this.typer.getNode(node);
             if (node && this.changes.indexOf(node.widget) < 0) {
@@ -2327,9 +2389,7 @@
     // simple and good enough as we only need to associate data to a DOM object
     if (typeof WeakMap === 'undefined') {
         WeakMap = function () {
-            Object.defineProperty(this, '__dataKey__', {
-                value: 'typer' + Math.random().toString(36).substr(2, 8)
-            });
+            defineProperty(this, '__dataKey__', 'typer' + Math.random().toString(36).substr(2, 8), true);
         };
         definePrototype(WeakMap, {
             get: function (key) {

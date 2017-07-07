@@ -1,9 +1,9 @@
 /*!
- * jQuery Typer Plugin v0.9.7
+ * jQuery Typer Plugin v0.10.0
  *
  * The MIT License (MIT)
  *
- * Copyright (c) 2016
+ * Copyright (c) 2017
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
     var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
     var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
+    var SOURCE_PRIORITY = 'keystroke textInput mouse cut paste'.split(' ');
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
@@ -54,9 +55,12 @@
     var EVENT_CURRENT = 4;
     var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined;
 
+    var caretRangeFromPoint_ = document.caretRangeFromPoint;
+    var compareDocumentPosition_ = document.compareDocumentPosition;
+    var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
+
     var isFunction = $.isFunction;
     var selection = window.getSelection();
-    var caretRangeFromPoint_ = document.caretRangeFromPoint;
     var clipboard = {};
     var userFocus;
     var caretNotification;
@@ -110,6 +114,7 @@
 
     function TyperChangeTracker(typer) {
         this.typer = typer;
+        this.changes = [];
     }
 
     function TyperCaret(typer, selection) {
@@ -136,10 +141,9 @@
         };
     }
 
-    function defineProperty(obj, name, value, enumerable) {
+    function defineProperty(obj, name, value, freeze) {
         Object.defineProperty(obj, name, {
-            enumerable: enumerable !== false,
-            configurable: true,
+            configurable: !freeze,
             writable: true,
             value: value
         });
@@ -147,7 +151,7 @@
 
     function definePrototype(fn, prototype) {
         fn.prototype = prototype;
-        defineProperty(prototype, 'constructor', fn, false);
+        defineProperty(prototype, 'constructor', fn);
     }
 
     function slice(arr, start, end) {
@@ -252,7 +256,7 @@
         if (a === b) {
             return 0;
         }
-        var v = a && b && a.compareDocumentPosition(b);
+        var v = a && b && compareDocumentPosition_.call(a, b);
         if (v & 2) {
             return (strict && v & 8) || (v & 1) ? NaN : 1;
         }
@@ -263,7 +267,7 @@
     }
 
     function connected(a, b) {
-        return a && b && !((a.commonAncestorContainer || a).compareDocumentPosition(b.commonAncestorContainer || b) & 1);
+        return a && b && !(compareDocumentPosition_.call(a.commonAncestorContainer || a, b.commonAncestorContainer || b) & 1);
     }
 
     function containsOrEquals(container, contained) {
@@ -271,7 +275,7 @@
     }
 
     function getCommonAncestor(a, b) {
-        for (b = b || a; a && a !== b && a.compareDocumentPosition(b) !== 20; a = a.parentNode);
+        for (b = b || a; a && a !== b && compareDocumentPosition_.call(a, b) !== 20; a = a.parentNode);
         return a;
     }
 
@@ -312,10 +316,10 @@
         }
         if (is(startOffset, Range) && connected(range, startOffset)) {
             var inverse = range.collapsed && startOffset.collapsed ? -1 : 1;
-            if (range.compareBoundaryPoints(0, startOffset) * inverse < 0) {
+            if (compareBoundaryPoints_.call(range, 0, startOffset) * inverse < 0) {
                 range.setStart(startOffset.startContainer, startOffset.startOffset);
             }
-            if (range.compareBoundaryPoints(2, startOffset) * inverse > 0) {
+            if (compareBoundaryPoints_.call(range, 2, startOffset) * inverse > 0) {
                 range.setEnd(startOffset.endContainer, startOffset.endOffset);
             }
         }
@@ -325,25 +329,25 @@
     function rangeIntersects(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(3, b) <= 0 && a.compareBoundaryPoints(1, b) >= 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 3, b) <= 0 && compareBoundaryPoints_.call(a, 1, b) >= 0;
     }
 
     function rangeCovers(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(0, b) <= 0 && a.compareBoundaryPoints(2, b) >= 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 0, b) <= 0 && compareBoundaryPoints_.call(a, 2, b) >= 0;
     }
 
     function rangeEquals(a, b) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        return connected(a, b) && a.compareBoundaryPoints(0, b) === 0 && a.compareBoundaryPoints(2, b) === 0;
+        return connected(a, b) && compareBoundaryPoints_.call(a, 0, b) === 0 && compareBoundaryPoints_.call(a, 2, b) === 0;
     }
 
     function compareRangePosition(a, b, strict) {
         a = is(a, Range) || createRange(a);
         b = is(b, Range) || createRange(b);
-        var value = !connected(a, b) ? NaN : a.compareBoundaryPoints(0, b) + a.compareBoundaryPoints(2, b);
+        var value = !connected(a, b) ? NaN : compareBoundaryPoints_.call(a, 0, b) + compareBoundaryPoints_.call(a, 2, b);
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
@@ -352,6 +356,10 @@
             return Math.abs(a[prop] - b[prop]) < 1;
         }
         return check('left') && check('top') && check('bottom') && check('right');
+    }
+
+    function rectCovers(a, b) {
+        return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
     function pointInRect(x, y, rect) {
@@ -402,11 +410,12 @@
 
     function caretRangeFromPoint(x, y, element) {
         var range = caretRangeFromPoint_.call(document, x, y);
-        if (element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
+        if (range && element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
             var elm = [];
             try {
-                while (comparePosition(element, range.commonAncestorContainer, true)) {
-                    var target = $(range.commonAncestorContainer).parentsUntil(getCommonAncestor(element, range.commonAncestorContainer)).slice(-1)[0] || range.commonAncestorContainer;
+                var container;
+                while (comparePosition(element, (container = range.commonAncestorContainer), true)) {
+                    var target = $(container).parentsUntil(getCommonAncestor(element, container)).slice(-1)[0] || container;
                     if (target === elm[elm.length - 1]) {
                         return null;
                     }
@@ -483,34 +492,39 @@
         var $self = $(topElement);
 
         var codeUpdate = (function () {
-            var currentSource;
+            var currentSource = 'script';
             var run = transaction(function () {
                 var source = currentSource;
                 if (codeUpdate.needSnapshot) {
                     undoable.snapshot();
                 }
-                currentSource = null;
+                currentSource = 'script';
                 setImmediate(function () {
                     codeUpdate.suppressTextEvent = false;
                     tracker.collect(function (changedWidgets) {
-                        codeUpdate('script', function () {
+                        codeUpdate(source, function () {
                             $.each(changedWidgets, function (i, v) {
                                 normalize(v.element);
                                 if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(v, 'contentChange', source);
+                                    triggerEvent(source, v, 'contentChange', source);
                                 }
                             });
-                            triggerEvent(EVENT_STATIC, 'contentChange', source);
+                            triggerEvent(source, EVENT_STATIC, 'contentChange', source);
                         });
                     });
                 });
             });
             return function (source, callback) {
-                currentSource = currentSource || source;
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
                 codeUpdate.suppressTextEvent = true;
-                return run(callback);
+                if (source !== currentSource && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource)) {
+                    currentSource = source || 'script';
+                }
+                var args = slice(arguments, 2);
+                return run(function () {
+                    return callback.apply(null, args);
+                });
             };
         } ());
 
@@ -545,11 +559,11 @@
             });
         }
 
-        function triggerEvent(eventMode, eventName, data, props) {
+        function triggerEvent(eventSource, eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
             var handlerCalled;
             if (eventListened(widgets, eventName)) {
-                codeUpdate('script', function () {
+                codeUpdate(eventSource, function () {
                     $.each(widgets, function (i, v) {
                         var options = widgetOptions[v.id];
                         if (!v.destroyed && isFunction(options[eventName])) {
@@ -562,7 +576,7 @@
             }
             if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
                 setTimeout(function () {
-                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
+                    triggerEvent(eventSource, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
                     });
                 });
@@ -570,9 +584,9 @@
             return handlerCalled;
         }
 
-        function triggerDefaultPreventableEvent(eventMode, eventName, data, eventObj) {
+        function triggerDefaultPreventableEvent(eventSource, eventMode, eventName, data, eventObj) {
             eventObj = eventObj || $.Event(eventName);
-            triggerEvent(eventMode, eventName, data, {
+            triggerEvent(eventSource, eventMode, eventName, data, {
                 preventDefault: eventObj.preventDefault.bind(eventObj),
                 isDefaultPrevented: function () {
                     return eventObj.isDefaultPrevented();
@@ -609,7 +623,7 @@
                     if (index >= 0) {
                         if (fireEvent && !suppressEvent && node.widget.element === node.element) {
                             node.widget.destroyed = true;
-                            triggerEvent(node.widget, 'destroy');
+                            triggerEvent(null, node.widget, 'destroy');
                         }
                         node.parentNode.childNodes.splice(index, 1);
                         node.parentNode = null;
@@ -625,7 +639,7 @@
                     if (fireEvent && node.widget && node.widget.element === node.element) {
                         node.widget.destroyed = true;
                         if (node.widget.id !== WIDGET_UNKNOWN) {
-                            triggerEvent(node.widget, 'destroy');
+                            triggerEvent(null, node.widget, 'destroy');
                         }
                     }
                     delete node.widget;
@@ -636,7 +650,7 @@
                         }
                     });
                     if (fireEvent && node.widget && node.widget.id !== WIDGET_UNKNOWN) {
-                        triggerEvent(node.widget, 'init');
+                        triggerEvent(null, node.widget, 'init');
                     }
                 }
                 if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
@@ -803,15 +817,20 @@
                     if (is(node, NODE_ANY_ALLOWTEXT)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
-                        var lastBr = $('br:last-child', node.element)[0];
+                        var lastBr = $('>br:last-child', node.element)[0];
                         if (lastBr && !lastBr.nextSibling) {
                             $(createTextNode()).insertBefore(lastBr);
                             removeNode(lastBr);
                         }
-                        var firstBr = $('br:first-child', node.element)[0];
+                        var firstBr = $('>br:first-child', node.element)[0];
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
+                        $('>br', node.element).each(function (i, v) {
+                            if (!v.nextSibling || v.nextSibling.nodeType === 1) {
+                                $(createTextNode()).insertAfter(v);
+                            }
+                        });
                         $(node.element).contents().each(function (i, v) {
                             if (v.nodeType === 3 && !textNodeFreezed(v)) {
                                 var nextNode = v.nextSibling;
@@ -954,7 +973,8 @@
                 while (content[0]) {
                     var nodeToInsert = content.shift();
                     var node = new TyperNode(NODE_INLINE, nodeToInsert);
-                    if (nodeToInsert.nodeType === 1 && tagName(nodeToInsert) !== 'br') {
+                    var isLineBreak = tagName(nodeToInsert) === 'br';
+                    if (nodeToInsert.nodeType === 1 && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
                         node = typerDocument.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
@@ -963,9 +983,9 @@
                             node = new TyperNode(NODE_INLINE, nodeToInsert);
                         }
                     }
-                    if (!is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
+                    if ((isLineBreak && !is(typerDocument.getEditableNode(caretPoint.startContainer), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
                         var splitLastNode = typerDocument.getEditableNode(caretPoint.startContainer);
-                        while (!is(splitLastNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
+                        while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
                         var splitEnd = createRange(splitLastNode.element, false);
@@ -992,25 +1012,30 @@
                             var n2 = iterateToArray(document.createNodeIterator(splitFirstNode, 4, null, false)).filter(mapFn('nodeValue'))[0];
                             n2.nodeValue = n2.nodeValue.slice(1);
                         }
-                        caretPoint = splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
+                        caretPoint = isLineBreak ? createRange(splitEnd, true) : splitFirstNode ? createRange(splitFirstNode, 0) : createRange(splitEnd, false);
                         endPoint = createRange(splitEnd, false);
-                        paragraphAsInline = true;
-                        hasInsertedBlock = true;
+                        if (!isLineBreak) {
+                            paragraphAsInline = true;
+                            hasInsertedBlock = true;
+                        }
                     }
                     insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
-                    if (is(node, NODE_ANY_INLINE)) {
-                        nodeToInsert = createDocumentFragment(wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes));
-                    } else if (insertAsInline && paragraphAsInline) {
-                        nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
+                    if (!isLineBreak) {
+                        if (is(node, NODE_ANY_INLINE)) {
+                            nodeToInsert = createDocumentFragment(wrapNode(nodeToInsert, insertAsInline ? formattingNodes.slice(0, -1) : formattingNodes));
+                        } else if (insertAsInline && paragraphAsInline) {
+                            nodeToInsert = createDocumentFragment(nodeToInsert.childNodes);
+                        }
                     }
                     var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.insertNode(nodeToInsert);
-                            if (is(node, NODE_INLINE_WIDGET)) {
+                            if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
                                 caretPoint = createRange(lastNode, false);
                                 caretPoint.insertNode(createTextNode());
+                                caretPoint.collapse(false);
                             } else {
                                 caretPoint = createRange(lastNode, -0);
                             }
@@ -1031,7 +1056,15 @@
                     tracker.track(caretPoint.startContainer);
                 }
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    caretPoint = caretPoint || createRange(state.startNode.element, -0);
+                    if (caretPoint) {
+                        var caretNode2 = typerDocument.getNode(caretPoint.startContainer);
+                        while (is(caretNode2, NODE_ANY_INLINE)) {
+                            caretNode2 = caretNode2.parentNode;
+                        }
+                        caretPoint = createRange(caretNode2.element, -0);
+                    } else {
+                        caretPoint = createRange(state.startNode.element, -0);
+                    }
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
@@ -1080,8 +1113,8 @@
 
             function triggerStateChange() {
                 setTimeout(function () {
-                    triggerEvent(EVENT_ALL, 'beforeStateChange');
-                    triggerEvent(EVENT_ALL, 'stateChange');
+                    triggerEvent(null, EVENT_ALL, 'beforeStateChange');
+                    triggerEvent(null, EVENT_ALL, 'stateChange');
                 });
             }
 
@@ -1141,7 +1174,7 @@
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     }
-                    return lastValue;
+                    return lastValue.slice(lastValue.indexOf('>') + 1, lastValue.lastIndexOf('<'));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
@@ -1192,7 +1225,7 @@
                 var widget = activeWidget;
                 if (activeWidget && !activeWidget.destroyed) {
                     activeWidget = null;
-                    triggerEvent(widget, 'focusout');
+                    triggerEvent(null, widget, 'focusout');
                 }
             }
 
@@ -1227,7 +1260,7 @@
             }
 
             function handleTextInput(inputText, compositionend) {
-                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
+                if (inputText && triggerDefaultPreventableEvent('textInput', EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
@@ -1239,9 +1272,9 @@
                 setImmediate(function () {
                     updateFromNativeInput();
                     if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
-                        triggerEvent(EVENT_CURRENT, 'contentChange', 'textInput');
+                        triggerEvent('textInput', EVENT_CURRENT, 'contentChange', 'textInput');
                     }
-                    triggerEvent(EVENT_STATIC, 'contentChange', 'textInput');
+                    triggerEvent('textInput', EVENT_STATIC, 'contentChange', 'textInput');
                 });
             }
 
@@ -1304,10 +1337,10 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
+                        if (triggerEvent('keystroke', EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
-                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                        if (triggerDefaultPreventableEvent('keystroke', EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
                             e.preventDefault();
                         }
                     }
@@ -1357,7 +1390,7 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                codeUpdate(e.type, function () {
+                codeUpdate('cut', function () {
                     clipboard.content = extractContents(currentSelection, e.type);
                     clipboard.textContent = extractText(clipboard.content);
                 });
@@ -1377,17 +1410,17 @@
                 if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    codeUpdate(e.type, function () {
+                    codeUpdate('paste', function () {
                         insertContents(currentSelection, content);
                     });
                 } else {
                     var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
-                        codeUpdate(e.type, function () {
+                        codeUpdate('paste', function () {
                             insertContents(currentSelection, clipboard.content.cloneNode(true));
                         });
-                    } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
-                        codeUpdate(e.type, function () {
+                    } else if (!triggerDefaultPreventableEvent('paste', EVENT_ALL, 'textInput', textContent)) {
+                        codeUpdate('paste', function () {
                             insertContents(currentSelection, textContent);
                         });
                     }
@@ -1417,7 +1450,7 @@
                     currentSelection.select(node.widget.element);
                     if (activeWidget !== node.widget) {
                         activeWidget = node.widget;
-                        triggerEvent(node.widget, 'focusin');
+                        triggerEvent(null, node.widget, 'focusin');
                     }
                 }
             });
@@ -1435,15 +1468,21 @@
                     clientY: e.clientY,
                     target: e.target
                 };
-                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
+                triggerEvent('mouse', EVENT_HANDLER, getEventName(e, 'click'), null, props);
                 e.preventDefault();
             });
 
             $self.bind('dblclick', function (e) {
-                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
+                if (!triggerEvent('mouse', EVENT_HANDLER, 'dblclick')) {
                     currentSelection.select('word');
                 }
                 e.preventDefault();
+            });
+
+            $self.bind('mousewheel', function (e) {
+                if (typerFocused && triggerDefaultPreventableEvent('mouse', EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
+                    e.preventDefault();
+                }
             });
 
             $self.bind('focusin', function (e) {
@@ -1456,7 +1495,7 @@
                 windowFocusedOut = false;
                 if (!userFocus.has(typer)) {
                     typerFocused = true;
-                    triggerEvent(EVENT_ALL, 'focusin');
+                    triggerEvent(null, EVENT_ALL, 'focusin');
                     if (!mousedown) {
                         currentSelection.focus();
                     }
@@ -1466,6 +1505,11 @@
 
             $self.bind('focusout', function (e) {
                 if (document.activeElement !== topElement && typerFocused) {
+                    if (e.relatedTarget === undefined) {
+                        // Chrome triggers focusout event with relatedTarget equals undefined
+                        // after contextmenu event by right mouse click
+                        return;
+                    }
                     for (var element = e.relatedTarget; element; element = element.parentNode) {
                         if (relatedElements.has(element)) {
                             userFocus.set(typer, element);
@@ -1474,7 +1518,7 @@
                     }
                     typerFocused = false;
                     triggerWidgetFocusout();
-                    triggerEvent(EVENT_ALL, 'focusout');
+                    triggerEvent(null, EVENT_ALL, 'focusout');
                     normalize();
 
                     // prevent focus returns to current editor
@@ -1555,13 +1599,15 @@
 
         var retainFocusHandlers = {
             focusout: function (e) {
-                if (!containsOrEquals(e.currentTarget, document.activeElement) && userFocus.get(typer) === e.currentTarget) {
-                    userFocus.delete(typer);
-                }
-                if (topElement === e.relatedTarget) {
-                    currentSelection.focus();
-                } else {
-                    $self.trigger('focusout');
+                if (!containsOrEquals(e.currentTarget, e.relatedTarget)) {
+                    if (userFocus.get(typer) === e.currentTarget) {
+                        userFocus.delete(typer);
+                    }
+                    if (topElement === e.relatedTarget) {
+                        currentSelection.focus();
+                    } else {
+                        $self.trigger('focusout');
+                    }
                 }
             }
         };
@@ -1603,8 +1649,14 @@
                 return range && typerDocument.getNode(range.commonAncestorContainer);
             },
             retainFocus: function (element) {
-                relatedElements.set(element, true);
-                $(element).bind(retainFocusHandlers);
+                if (!relatedElements.has(element)) {
+                    relatedElements.set(element, true);
+                    $(element).bind(retainFocusHandlers);
+                }
+            },
+            releaseFocus: function (element) {
+                relatedElements.delete(element);
+                $(element).unbind(retainFocusHandlers);
             },
             invoke: function (command, value) {
                 var tx = new TyperTransaction();
@@ -1681,7 +1733,7 @@
 
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         normalize();
-        triggerEvent(EVENT_STATIC, 'init');
+        triggerEvent(null, EVENT_STATIC, 'init');
     }
 
     window.Typer = Typer;
@@ -1696,6 +1748,9 @@
         NODE_INLINE_EDITABLE: NODE_INLINE_EDITABLE,
         NODE_OUTER_PARAGRAPH: NODE_OUTER_PARAGRAPH,
         NODE_SHOW_EDITABLE: NODE_SHOW_EDITABLE,
+        NODE_ANY_ALLOWTEXT: NODE_ANY_ALLOWTEXT,
+        NODE_ANY_BLOCK_EDITABLE: NODE_ANY_BLOCK_EDITABLE,
+        NODE_ANY_INLINE: NODE_ANY_INLINE,
         ZWSP: ZWSP,
         ZWSP_ENTITIY: ZWSP_ENTITIY,
         is: is,
@@ -1713,28 +1768,33 @@
         rangeCovers: rangeCovers,
         rangeEquals: rangeEquals,
         rectEquals: rectEquals,
+        rectCovers: rectCovers,
         pointInRect: pointInRect,
         caretRangeFromPoint: caretRangeFromPoint,
-        innermost: function (elements) {
-            return $.grep(elements, function (v) {
-                return !any(elements, function (w) {
-                    return $.contains(v, w);
-                });
-            });
-        },
-        outermost: function (elements) {
-            return $.grep(elements, function (v) {
-                return !any(elements, function (w) {
-                    return $.contains(w, v);
-                });
-            });
-        },
         historyLevel: 100,
         defaultOptions: {
             disallowedWidgets: 'keepText',
             widgets: {}
         },
         widgets: {}
+    });
+
+    definePrototype(Typer, {
+        hasContent: function () {
+            return !!this.getValue();
+        },
+        setValue: function (value) {
+            this.selectAll();
+            this.invoke(function (tx) {
+                tx.insertHtml(value);
+            });
+        },
+        select: function (startNode, startOffset, endNode, endOffset) {
+            this.getSelection().select(startNode, startOffset, endNode, endOffset);
+        },
+        selectAll: function () {
+            this.getSelection().selectAll();
+        }
     });
 
     definePrototype(TyperNode, {
@@ -1880,7 +1940,7 @@
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
             return treeWalkerAcceptNode(iterator, typer.getNode(v), true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
-        defineProperty(inst, 'iterator', iterator2, false);
+        defineProperty(inst, 'iterator', iterator2);
     }
 
     definePrototype(TyperDOMNodeIterator, {
@@ -2038,13 +2098,16 @@
                 return this.baseCaret.moveTo(createRange(range, true)) + this.extendCaret.moveTo(createRange(range, false)) > 0;
             });
         },
+        selectAll: function () {
+            return this.select(this.typer.element, 'contents');
+        },
         focus: function () {
             if (containsOrEquals(document, this.typer.element)) {
                 permitFocusEvent = true;
                 applyRange(createRange(this));
                 // Firefox does not set focus on the host element automatically
                 // when selection is changed by JavaScript
-                if (document.activeElement !== this.typer.element) {
+                if (!IS_IE && document.activeElement !== this.typer.element) {
                     this.typer.element.focus();
                 }
             }
@@ -2317,7 +2380,6 @@
     });
 
     definePrototype(TyperChangeTracker, {
-        changes: [],
         track: function (node) {
             node = is(node, TyperNode) || this.typer.getNode(node);
             if (node && this.changes.indexOf(node.widget) < 0) {
@@ -2353,9 +2415,7 @@
     // simple and good enough as we only need to associate data to a DOM object
     if (typeof WeakMap === 'undefined') {
         WeakMap = function () {
-            Object.defineProperty(this, '__dataKey__', {
-                value: 'typer' + Math.random().toString(36).substr(2, 8)
-            });
+            defineProperty(this, '__dataKey__', 'typer' + Math.random().toString(36).substr(2, 8), true);
         };
         definePrototype(WeakMap, {
             get: function (key) {
@@ -2534,9 +2594,14 @@
     Typer.preset = function (element, name, options) {
         var preset = Typer.presets[name];
         var presetDefinition = {};
+        var presetWidget;
+
         options = {
-            __preset__: options || {},
-            widgets: {}
+            inline: true,
+            defaultOptions: false,
+            disallowedElement: '*',
+            widgets: {},
+            __preset__: $.extend({}, options)
         };
         $.each(preset, function (i, v) {
             (typeof v === 'function' || i === 'options' ? presetDefinition : options)[i] = v;
@@ -2544,14 +2609,18 @@
         $.each(options.__preset__, function (i, v) {
             if (typeof v === 'function' || !presetDefinition.options || !(i in presetDefinition.options)) {
                 options[i] = v;
-                delete this[i];
+                delete options.__preset__[i];
             }
         });
 
         var originalInit = options.init;
         options.init = function (e) {
-            $.extend(e.typer, preset.overrides);
-            e.typer.presetOptions = e.typer.getStaticWidget('__preset__').options;
+            presetWidget = e.typer.getStaticWidget('__preset__');
+            $.each(preset.overrides, function (i, v) {
+                e.typer[i] = function (value) {
+                    return v.call(this, presetWidget, value);
+                };
+            });
             if (typeof originalInit === 'function') {
                 originalInit.call(options, e);
             }
@@ -2569,19 +2638,44 @@
 
 } (jQuery, window.Typer));
 
-(function ($, Typer) {
+(function ($, Typer, Object, window, document) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
     var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
+    var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
 
     var isFunction = $.isFunction;
-    var boolAttrs = 'checked selected disabled readonly multiple ismap'.split(' ');
+    var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+    var defineProperty = Object.defineProperty;
+
     var alwaysTrue = function () {
         return true;
     };
     var alwaysFalse = function () {
         return false;
+    };
+    var FLIP_POS = {
+        left: 'right',
+        right: 'left',
+        top: 'bottom',
+        bottom: 'top'
+    };
+    var ZERO_ORIGIN = {
+        percentX: 0,
+        percentY: 0,
+        offsetX: 0,
+        offsetY: 0
+    };
+    var ORIGIN_TO_PERCENT = {
+        center: 0.5,
+        right: 1,
+        bottom: 1
+    };
+    var MAC_CTRLKEY = {
+        ctrl: '\u2318',
+        alt: '\u2325',
+        shift: '\u8679'
     };
 
     var definedControls = {};
@@ -2589,13 +2683,66 @@
     var definedLabels = {};
     var definedThemes = {};
     var definedShortcuts = {};
-    var bindTransforms = {};
-    var expandCache = {};
+    var controlExtensions = {};
+    var wsDelimCache = {};
     var executionContext = [];
+    var currentPinnedElements = [];
+    var currentCallouts = [];
     var currentDialog;
+    var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
 
     function randomId() {
         return Math.random().toString(36).substr(2, 8);
+    }
+
+    function isString(v) {
+        return typeof v === 'string';
+    }
+
+    function capfirst(v) {
+        v = String(v || '');
+        return v.charAt(0).toUpperCase() + v.slice(1);
+    }
+
+    function exclude(haystack, needle) {
+        if (!needle || !needle.length) {
+            return haystack.slice(0);
+        }
+        return haystack.filter(function (v) {
+            return needle.indexOf(v) < 0;
+        });
+    }
+
+    function matchWSDelim(haystack, needle) {
+        var re = wsDelimCache[needle] || (wsDelimCache[needle] = new RegExp('(?:^|\\s)(' + needle.replace(/\s+/g, '|') + ')(?=$|\\s)'));
+        return re.test(String(haystack || '')) && RegExp.$1;
+    }
+
+    function matchParams(params, control) {
+        for (var i in params) {
+            if (!matchWSDelim(control[i], params[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function getPropertyDescriptor(obj, prop) {
+        if (prop in obj) {
+            for (var cur = obj; cur; cur = Object.getPrototypeOf(cur)) {
+                if (obj.hasOwnProperty(prop)) {
+                    return getOwnPropertyDescriptor(cur, prop);
+                }
+            }
+        }
+    }
+
+    function defineHiddenProperty(obj, prop, value) {
+        defineProperty(obj, prop, {
+            configurable: true,
+            writable: true,
+            value: value
+        });
     }
 
     function define(name, base, ctor) {
@@ -2609,74 +2756,36 @@
             if (!isFunction(ctor)) {
                 return $.extend(this, options);
             }
-            try {
-                this._super = base;
-                ctor.apply(this, arguments);
-            } finally {
-                delete this._super;
-            }
+            ctor.apply(this, arguments);
         });
-        if (isFunction(base)) {
-            fn.prototype = new base();
-        } else if (base) {
-            fn.prototype = base;
-            Object.defineProperty(base, 'constructor', {
-                enumerable: false,
-                configurable: true,
-                writable: true,
-                value: fn
-            });
-        }
-        fn.prototype = isFunction(base) ? new base() : $.extend(fn.prototype, base);
-        fn.extend = function (ctor) {
-            return define(null, fn, ctor);
-        };
+        fn.prototype = base || {};
+        defineHiddenProperty(base, 'constructor', fn);
+        Object.setPrototypeOf(fn.prototype, controlExtensions);
         return fn;
     }
 
     function listen(obj, prop, callback) {
-        var myValue = obj[prop];
-        Object.defineProperty(obj, prop, {
+        var desc = getPropertyDescriptor(obj, prop) || {
             enumerable: true,
-            configurable: true,
+            value: obj[prop]
+        };
+        defineProperty(obj, prop, {
+            enumerable: desc.enumerable,
+            configurable: false,
             get: function () {
-                return myValue;
+                return desc.get ? desc.get.apply(obj) : desc.value;
             },
             set: function (value) {
-                if (myValue !== value) {
-                    myValue = value;
+                if (value !== this[prop]) {
+                    if (desc.set) {
+                        desc.set.apply(obj, value);
+                    } else {
+                        desc.value = value;
+                    }
                     callback.call(this, prop, value);
                 }
             }
         });
-    }
-
-    function expandControls(ui, str, controls) {
-        controls = controls || definedControls;
-
-        var cacheKey = (str || '') + (controls.expandedFrom ? ' @ ' + controls.expandedFrom : '') + ' @ ' + (ui.type || '');
-        if (expandCache[cacheKey]) {
-            return expandCache[cacheKey].slice(0);
-        }
-
-        var tokens = (str || '').split(/\s+/);
-        var arr = [];
-        var allowed = function (name) {
-            return (!controls[name].context || controls[name].context.indexOf(ui.type) >= 0) && tokens.indexOf('-' + name) < 0 && arr.indexOf(name) < 0;
-        };
-        $.each(tokens, function (i, v) {
-            if (v.slice(-1) === '*') {
-                $.each(controls, function (i) {
-                    if (i.slice(0, v.length - 1) === v.slice(0, -1) && i.indexOf(':', v.length) < 0 && allowed(i)) {
-                        arr[arr.length] = i;
-                    }
-                });
-            } else if (v.charAt(0) !== '-' && controls[v] && allowed(v)) {
-                arr[arr.length] = v;
-            }
-        });
-        expandCache[cacheKey] = arr.slice(0);
-        return arr;
     }
 
     function parseCompactSyntax(str) {
@@ -2687,13 +2796,35 @@
         } catch (e) { }
         return {
             name: m[1],
-            params: params
+            params: params || {}
         };
     }
 
     function getZIndex(element, pseudo) {
         var style = window.getComputedStyle(element, pseudo || null);
-        return /absolute|fixed|relative/.test(style.position) && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+        return matchWSDelim(style.position, 'absolute fixed relative') && style.zIndex !== 'auto' ? parseInt(style.zIndex) : -1;
+    }
+
+    function getZIndexOver(over) {
+        var maxZIndex = -1;
+        var iterator = document.createTreeWalker(document.body, 1, function (v) {
+            if (Typer.comparePosition(v, over, true)) {
+                return 2;
+            }
+            var zIndex = getZIndex(v);
+            if (zIndex >= 0) {
+                maxZIndex = Math.max(maxZIndex, zIndex);
+                return 2;
+            }
+            maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
+            return 1;
+        }, false);
+        Typer.iterate(iterator);
+        return maxZIndex + 1;
+    }
+
+    function getBoundingClientRect(elm) {
+        return (elm || document.documentElement).getBoundingClientRect();
     }
 
     function toggleDisplay($elm, visible) {
@@ -2709,67 +2840,242 @@
         }
     }
 
-    function callFunction(ui, control, name, optArg) {
-        if (isFunction(control[name])) {
-            return control[name](ui, control, optArg);
+    function updatePinnedPositions() {
+        var windowSize = getBoundingClientRect();
+
+        $.each(currentPinnedElements, function (i, v) {
+            var dialog = $(v.element).find('.typer-ui-dialog')[0];
+            var dialogSize = getBoundingClientRect(dialog);
+            var rect = getBoundingClientRect(v.reference);
+            var stick = {};
+
+            var $r = $(v.element).css({
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height
+            });
+            if (v.direction === 'bottom' || v.direction === 'top') {
+                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
+                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
+            }
+            if (v.direction === 'left' || v.direction === 'right') {
+                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
+                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
+            }
+            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
+                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
+            });
+            callThemeFunction(v.dialog, 'positionUpdate', {
+                element: v.element,
+                position: rect,
+                stick: stick
+            });
+        });
+    }
+
+    function showCallout(control, element, ref, pos) {
+        for (var i = 0; i < currentCallouts.length; i++) {
+            if (currentCallouts[i].control !== control && !currentCallouts[i].control.parentOf(control)) {
+                hideCallout(currentCallouts[i].control);
+                break;
+            }
+        }
+        $(element).appendTo(document.body).css({
+            position: 'fixed',
+            zIndex: getZIndexOver(currentCallouts[0] ? currentCallouts[0].element : document.body)
+        });
+
+        var rect = {
+            control: control,
+            element: element
+        };
+        if (ref.getBoundingClientRect) {
+            var xrel = matchWSDelim(pos, 'left right') || 'left';
+            var yrel = matchWSDelim(pos, 'top bottom') || 'bottom';
+            var refRect = getBoundingClientRect(ref);
+            rect[xrel] = refRect.left;
+            rect[yrel] = refRect.top;
+            rect[FLIP_POS[xrel]] = refRect.right;
+            rect[FLIP_POS[yrel]] = refRect.bottom;
+        } else {
+            rect.left = rect.right = ref.x;
+            rect.top = rect.bottom = ref.y;
+        }
+        var winRect = getBoundingClientRect();
+        var elmRect = getBoundingClientRect(element);
+        $(element).css({
+            left: (rect.left + elmRect.width > winRect.width ? rect.right - elmRect.width : rect.left) + 'px',
+            top: (rect.top + elmRect.height > winRect.height ? rect.bottom - elmRect.height : rect.top) + 'px'
+        });
+        currentCallouts.unshift(rect);
+        callThemeFunction(control, 'afterShow', rect);
+    }
+
+    function hideCallout(control) {
+        var i = currentCallouts.length - 1;
+        if (control) {
+            for (; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
+        }
+        $.each(currentCallouts.splice(0, i + 1), function (i, v) {
+            $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
+                $(v.element).detach();
+            });
+        });
+    }
+
+    function callFunction(control, name, data) {
+        var holder = name.substr(0, 7) === 'control' ? control.ui : control;
+        if (isFunction(holder[name])) {
+            try {
+                executionContext.unshift(holder);
+                return holder[name](control.ui, control, data);
+            } finally {
+                executionContext.shift();
+            }
         }
     }
 
-    function triggerEvent(ui, control, name, optArg) {
-        callFunction(ui, control, name, optArg);
-        var themeEvent = ui === control ? name : control.type + name.charAt(0).toUpperCase() + name.slice(1);
-        if (isFunction(definedThemes[ui.theme][themeEvent])) {
-            definedThemes[ui.theme][themeEvent](ui, control, optArg);
+    function callThemeFunction(control, name, data) {
+        var theme = definedThemes[control.ui.theme];
+        if (isFunction(theme[name])) {
+            try {
+                executionContext.unshift(control);
+                return theme[name](control.ui, control, data);
+            } finally {
+                executionContext.shift();
+            }
         }
     }
 
-    function resolveControls(ui, control, contextualParent) {
-        control = control || ui;
-        contextualParent = control.type !== 'group' ? control : contextualParent || ui;
+    function triggerEvent(control, name, data) {
+        callFunction(control, name, data);
+        if (control.ui === control || name.substr(0, 7) === 'control') {
+            callThemeFunction(control, name, data);
+        } else {
+            callThemeFunction(control, control.type + capfirst(name), data);
+        }
+    }
+
+    function findControls(control, needle, defaultNS, haystack, exclusions) {
+        haystack = haystack || control.all || control.contextualParent.all;
+        if (!haystack._cache) {
+            defineHiddenProperty(haystack, '_cache', {});
+        }
+        defaultNS = defaultNS || control.defaultNS;
+        exclusions = exclusions || [];
+
+        var cacheKey = defaultNS + '/' + needle;
+        if (haystack === definedControls) {
+            cacheKey = [control.ui.type, control.type, cacheKey].join('/');
+        }
+        if (haystack._cache[cacheKey]) {
+            return exclude(haystack._cache[cacheKey], exclusions);
+        }
+
+        var result = [];
+        String(needle || '').replace(/(?:^|\s)(-?)((?:([\w-:]+|\*):)?(?:[\w-]+|\*|(?=\()))(\([^)]+\))?(?=$|\s)/g, function (v, minus, name, ns, params) {
+            var arr = [];
+            var startWith = (ns || defaultNS || '').replace(/.$/, '$&:');
+            if (!name || name.slice(-1) === '*') {
+                $.each(haystack, function (i) {
+                    if (ns === '*' || (i.substr(0, startWith.length) === startWith && i.indexOf(':', startWith.length) < 0)) {
+                        arr[arr.length] = i;
+                    }
+                });
+            } else {
+                name = name.indexOf(':') < 0 ? startWith + name : name;
+                if (haystack[name]) {
+                    arr[arr.length] = name;
+                }
+            }
+            if (params) {
+                params = parseCompactSyntax(params).params;
+                arr = arr.filter(function (v) {
+                    return matchParams(params, haystack[v]);
+                });
+            }
+            if (minus) {
+                exclusions.push.apply(exclusions, arr);
+                result = exclude(result, arr);
+            } else {
+                arr = exclude(arr, exclusions);
+                result.push.apply(result, exclude(arr, result));
+            }
+        });
+        haystack._cache[cacheKey] = result.slice(0);
+        return result;
+    }
+
+    function sortControls(controls) {
+        var defaultOrder = {};
+        $.each(controls, function (i, v) {
+            defaultOrder[v.name] = i;
+        });
+        controls.sort(function (a, b) {
+            function m(a, b, prop, mult) {
+                return !a[prop] ? 0 : findControls(a.contextualParent, a[prop], a.name.substr(0, a.name.lastIndexOf(':'))).indexOf(b.name) >= 0 ? mult : -mult;
+            }
+            var a1 = m(a, b, 'after', 1);
+            var a2 = m(a, b, 'before', -1);
+            var b1 = m(b, a, 'after', -1);
+            var b2 = m(b, a, 'before', 1);
+            if ((!a1 && !a2) ^ (!b1 && !b2)) {
+                return a1 || a2 || b1 || b2;
+            }
+            return (a1 + a2 + b1 + b2) || defaultOrder[a.name] - defaultOrder[b.name];
+        });
+    }
+
+    function createControls(control, contextualParent, exclusions) {
+        var ui = control.ui;
+        contextualParent = control instanceof typerUI.group ? contextualParent || ui : control;
+        contextualParent.all = contextualParent.all || {};
+        exclusions = exclusions || [];
+
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
-        if (typeof control.controls === 'string') {
-            control.controls = expandControls(ui, control.controls);
+        if (isString(control.controls)) {
+            control.controls = findControls(control, control.controls, null, definedControls, exclusions);
         }
-
-        var defaultOrder = {};
         control.controls = $.map(control.controls || [], function (v, i) {
-            var inst = Object.create(typeof v === 'string' ? definedControls[v] : v);
+            var inst = Object.create(isString(v) ? definedControls[v] : v);
             inst.ui = ui;
             inst.parent = control;
             inst.contextualParent = contextualParent;
-            inst.name = inst.name || (typeof v === 'string' ? v : 'noname:' + randomId());
-            if (inst.icon === undefined) {
+            inst.name = inst.name || (isString(v) ? v : control.defaultNS + ':' + randomId());
+            if (!isString(inst.defaultNS)) {
+                inst.defaultNS = inst.name;
+            }
+            if (!isString(inst.icon)) {
                 inst.icon = inst.name;
             }
-            if (inst.label === undefined) {
+            if (!isString(inst.label)) {
                 inst.label = inst.name;
             }
-            defaultOrder[inst.name] = i;
-            ui.all[inst.name] = inst;
-            resolveControls(ui, inst, contextualParent);
+            contextualParent.all[inst.name] = inst;
+            createControls(inst, contextualParent, contextualParent === control && exclusions.slice(0));
             return inst;
         });
-        control.controls.sort(function (a, b) {
-            function m(a, b, prop, mult) {
-                return !a[prop] || (b[prop] && b[prop].indexOf(a.name)) ? 0 : mult * (a[prop].indexOf(b.name) >= 0 ? 1 : -1);
-            }
-            return m(a, b, 'after', 1) || m(a, b, 'before', -1) || m(b, a, 'after', -1) || m(b, a, 'before', 1) || defaultOrder[a.name] - defaultOrder[b.name];
-        });
+        sortControls(control.controls);
         return control.controls;
     }
 
-    function renderControl(ui, control, params) {
-        control = control || ui;
+    function renderControls(control, params) {
+        var ui = control.ui;
         var bindedProperties = {};
 
         function propertyChanged(prop, value) {
-            value = (bindTransforms[prop] || bindTransforms.__default__)(value, ui);
+            if (isFunction(definedThemes[ui.theme]['bind' + capfirst(prop)])) {
+                value = callThemeFunction(control, 'bind' + capfirst(prop), value);
+            } else {
+                value = callThemeFunction(control, 'bind', value);
+            }
             $.each(bindedProperties[prop], function (i, v) {
                 if (v[1] === '_') {
-                    $(v[0]).text(value || '');
-                } else if (boolAttrs.indexOf(v[1]) >= 0) {
+                    $(v[0]).html(value || '');
+                } else if (matchWSDelim(v[1], BOOL_ATTRS)) {
                     $(v[0]).prop(v[1], !!value && value !== "false");
                 } else if (value) {
                     $(v[0]).attr(v[1], value);
@@ -2793,7 +3099,7 @@
         }
 
         function replacePlaceholder(name) {
-            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>')[0];
+            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>').attr('role', control.name)[0];
             bindPlaceholder(element);
             $('[x\\:t]', element).each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:t'));
@@ -2802,8 +3108,13 @@
                     element = $(definedThemes[ui.theme][t.name](ui, control, t.params));
                     bindPlaceholder(element);
                 } else if (t.name === 'children') {
-                    element = $.map(control.controls, function (v) {
-                        return renderControl(ui, v, t.params);
+                    var arr = control.controls;
+                    for (var j in t.params) {
+                        arr = arr.filter(matchParams.bind(null, t.params));
+                        break;
+                    }
+                    element = arr.map(function (v) {
+                        return renderControls(v, t.params);
                     });
                 } else {
                     element = replacePlaceholder(t.name);
@@ -2824,14 +3135,13 @@
             }
         }
 
-        control.element = replacePlaceholder((params || {})[control.type] || control.type);
-        $(control.element).attr('role', control.name);
+        control.element = replacePlaceholder(control.type);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
         });
 
         var executeEvent = definedThemes[ui.theme][control.type + 'ExecuteOn'];
-        if (typeof executeEvent === 'string') {
+        if (isString(executeEvent)) {
             $(control.element).bind(executeEvent, executeFromEvent);
         } else if (executeEvent) {
             $(executeEvent.of, control.element).bind(executeEvent.on, executeFromEvent);
@@ -2839,17 +3149,54 @@
         return control.element;
     }
 
-    function updateControl(ui, control) {
+    function resolveControls(control, name) {
+        var all = control.all || control.contextualParent.all;
+        var controls = findControls(control, name, null, all);
+        if (!controls.length) {
+            return $.map(control.controls, function (v) {
+                return resolveControls(v, name);
+            });
+        }
+        return $.map(controls, function (v) {
+            return all[v];
+        });
+    }
+
+    function isEnabled(control) {
+        var ui = control.ui;
+        if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
+            return false;
+        }
+        if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
+            (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
+            return false;
+        }
+        if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
+            (control.requireWidget && !control.widget)) {
+            return false;
+        }
+        if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
+            return false;
+        }
+        return callFunction(control, 'enabled') !== false;
+    }
+
+    function isActive(control) {
+        return !!callFunction(control, 'active');
+    }
+
+    function updateControl(control) {
+        var ui = control.ui;
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
             control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange) {
-            triggerEvent(ui, control, 'stateChange');
+            triggerEvent(control, 'stateChange');
         }
 
-        var disabled = !ui.enabled(control);
+        var disabled = !isEnabled(control);
         var visible = !control.hiddenWhenDisabled || !disabled;
 
         var $elm = $(control.element);
@@ -2861,7 +3208,7 @@
             $elm.toggleClass(theme.controlDisabledClass, disabled);
         }
         if (theme.controlActiveClass) {
-            $elm.toggleClass(theme.controlActiveClass, !!ui.active(control));
+            $elm.toggleClass(theme.controlActiveClass, isActive(control));
         }
         if (theme.controlHiddenClass) {
             $elm.toggleClass(theme.controlHiddenClass, !visible);
@@ -2870,7 +3217,8 @@
         }
     }
 
-    function executeControl(ui, control) {
+    function executeControl(control) {
+        var ui = control.ui;
         if (ui.typer) {
             if (isFunction(control.execute)) {
                 ui.typer.invoke(function (tx) {
@@ -2882,20 +3230,25 @@
         } else if (isFunction(control.execute)) {
             control.execute(ui, control, null, control.value);
         }
-        triggerEvent(ui, ui, 'controlExecuted', control);
+        triggerEvent(control, 'controlExecuted');
     }
 
-    function foreachControl(ui, fn, optArg, fnArg) {
-        $.each(Object.keys(ui.all).reverse(), function (i, v) {
-            fn(ui, ui.all[v], optArg, fnArg);
+    function foreachControl(control, fn, optArg, fnArg) {
+        $.each(Object.keys(control.all).reverse(), function (i, v) {
+            v = control.all[v];
+            if (v.all) {
+                foreachControl(v, fn, optArg, fnArg);
+            }
+            fn(v, optArg, fnArg);
         });
     }
 
-    function createForm(ui, control) {
+    function createForm(control) {
+        var ui = control.ui;
         var deferred = $.Deferred();
         var execute = function (value, submitControl) {
             if (ui.validate()) {
-                submitControl = submitControl || ui.resolve(control.resolve)[0];
+                submitControl = submitControl || control.resolve(control.resolveBy)[0];
                 var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
                 if (promise.state() === 'pending') {
                     ui.trigger(control, 'waiting', submitControl);
@@ -2906,23 +3259,23 @@
                 });
                 promise.fail(function (err) {
                     ui.trigger(control, 'error', err);
-                    Typer.ui.focus(control.element, true);
+                    typerUI.focus(control.element, true);
                 });
             } else {
                 ui.trigger(control, 'validateError');
-                Typer.ui.focus(control.element, true);
+                typerUI.focus(control.element, true);
             }
         };
         var defaultResolve = function () {
-            execute(ui.getValue(control.resolveValue || control), this);
+            execute(ui.getValue(control.resolveWith || control), this);
         };
         var defaultReject = function () {
             deferred.reject();
         };
-        $.each(ui.resolve(control.resolve), function (i, v) {
+        $.each(control.resolve(control.resolveBy), function (i, v) {
             v.execute = defaultResolve;
         });
-        $.each(ui.resolve(control.reject), function (i, v) {
+        $.each(control.resolve(control.rejectBy), function (i, v) {
             v.execute = defaultReject;
         });
         if (isFunction(control.setup)) {
@@ -2935,47 +3288,46 @@
         };
     }
 
-    Typer.ui = define('TyperUI', null, function (options, parentUI) {
-        if (typeof options === 'string') {
+    var typerUI = Typer.ui = define('TyperUI', {
+        language: 'en'
+    }, function (options) {
+        if (isString(options)) {
             options = {
                 controls: options
             };
         }
-        if (parentUI) {
+        if (executionContext[0]) {
+            var parentUI = executionContext[0].ui;
             $.extend(options, {
                 theme: parentUI.theme,
                 typer: parentUI.typer,
                 widget: parentUI.widget,
-                parentUI: parentUI
+                parent: parentUI,
+                parentControl: parentUI.getExecutingControl()
             });
         }
         var self = $.extend(this, options);
-        self.all = {};
-        Object.defineProperty(self.all, 'expandedFrom', {
-            value: self.controls
-        });
-        if (!self.theme) {
-            self.theme = Object.getOwnPropertyNames(definedThemes)[0];
-        }
-        self.controls = resolveControls(self);
-        self.element = renderControl(self);
+        self.ui = self;
+        self.theme = self.theme || Object.keys(definedThemes)[0];
+        self.controls = createControls(self);
+        self.element = renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
         foreachControl(self, triggerEvent, 'init');
-        triggerEvent(self, self, 'init');
+        triggerEvent(self, 'init');
     });
 
-    $.extend(Typer.ui.prototype, {
+    $.extend(typerUI.prototype, {
         update: function () {
             var self = this;
-            var obj = self._widgets = {};
+            self._widgets = {};
             if (self.widget) {
-                obj[self.widget.id] = self.widget;
+                self._widgets[self.widget.id] = self.widget;
             } else if (self.typer) {
                 $.each(self.typer.getSelection().getWidgets().concat(self.typer.getStaticWidgets()), function (i, v) {
-                    obj[v.id] = v;
+                    self._widgets[v.id] = v;
                 });
             }
             foreachControl(this, updateControl);
@@ -2983,74 +3335,93 @@
         destroy: function () {
             foreachControl(this, triggerEvent, 'destroy');
         },
-        trigger: function (control, event, optArg) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+        resolve: function (control) {
+            return resolveControls(this.getExecutingControl() || this, control);
+        },
+        trigger: function (control, event, data) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            triggerEvent(this, control, event, optArg);
+            triggerEvent(control, event, data);
+        },
+        show: function (control, element, ref, pos) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
+            }
+            if (control.ui === this) {
+                showCallout(control, element, ref, pos);
+            } else {
+                showCallout(this, this.element, control, element);
+            }
+        },
+        hide: function (control) {
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
+            }
+            hideCallout(control || this);
         },
         enabled: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            if (!this.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
-                return false;
-            }
-            if ((control.requireCommand && !this.typer.hasCommand(control.requireCommand)) ||
-                (control.requireWidgetEnabled && !this.typer.widgetEnabled(control.requireWidgetEnabled))) {
-                return false;
-            }
-            if ((control.requireWidget === true && !Object.getOwnPropertyNames(this._widgets)[0]) ||
-                (control.requireWidget && !control.widget)) {
-                return false;
-            }
-            if (control.requireChildControls === true && !control.controls[0]) {
-                return false;
-            }
-            return callFunction(this, control, 'enabled') !== false;
+            return isEnabled(control);
         },
         active: function (control) {
-            if (typeof control === 'string') {
-                control = this.all[control] || {};
+            if (isString(control)) {
+                control = this.resolve(control)[0] || {};
             }
-            return !!callFunction(this, control, 'active');
+            return isActive(control);
         },
-        resolve: function (control) {
-            var self = this;
-            return $.map(expandControls(this, control, self.all), function (v) {
-                return self.all[v];
-            });
+        getIcon: function (control) {
+            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[this.iconset || definedThemes[this.theme].iconset] || '';
         },
-        getValue: function (control) {
-            var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+        getLabel: function (control) {
+            control = (control || '').label || control;
+            if (definedLabels[control]) {
+                if (this.language in definedLabels[control]) {
+                    return definedLabels[control][this.language];
+                }
+                for (var i in definedLabels[control]) {
+                    return definedLabels[control][i];
+                }
             }
-            if (!control.valueMap) {
-                return control.value;
-            }
-            var value = {};
-            $.each(control.valueMap, function (i, v) {
-                value[i] = self.getValue(v);
-            });
-            return value;
+            return control;
         },
-        setValue: function (control, value) {
+        getValue: function (control, prop) {
             var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+            prop = prop || 'value';
+            if (isString(control)) {
+                control = self.resolve(control)[0];
             }
-            if (control.valueMap) {
-                var map = control.valueMap || {};
-                $.each(value, function (i, v) {
-                    $.each(self.resolve(map[i]), function (i, w) {
-                        self.setValue(w, v);
-                    });
+            if (control) {
+                if (!control.valueMap) {
+                    return control[prop];
+                }
+                var value = {};
+                $.each(control.valueMap, function (i, v) {
+                    value[i] = self.getValue(resolveControls(control, v)[0], prop);
                 });
-                return;
+                return value;
             }
-            control.value = value;
-            updateControl(self, control);
+        },
+        setValue: function (control, prop, value) {
+            var self = this;
+            if (arguments.length < 3) {
+                return self.setValue(control, 'value', prop);
+            }
+            if (isString(control)) {
+                control = self.resolve(control)[0];
+            }
+            if (control) {
+                if (control.valueMap) {
+                    $.each(value, function (i, v) {
+                        self.setValue(resolveControls(control, control.valueMap[i])[0], prop, v);
+                    });
+                    return;
+                }
+                control[prop] = value;
+                updateControl(control);
+            }
         },
         getExecutingControl: function () {
             for (var i = 0, length = executionContext.length; i < length; i++) {
@@ -3071,18 +3442,19 @@
         },
         execute: function (control) {
             var self = this;
-            if (typeof control === 'string') {
-                control = self.all[control] || {};
+            if (isString(control)) {
+                control = self.resolve(control)[0];
             } else if (!control) {
                 control = self.controls[0];
             }
-            if (executionContext.indexOf(control) < 0 && self.enabled(control)) {
+            if (control && executionContext.indexOf(control) < 0 && isEnabled(control)) {
                 executionContext.unshift(control);
+                triggerEvent(control, 'controlExecuting');
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         self.setValue(control, value);
-                        executeControl(self, control);
+                        executeControl(control);
                     });
                     promise.always(function () {
                         executionContext.shift(control);
@@ -3090,64 +3462,63 @@
                     return promise;
                 }
                 try {
-                    executeControl(self, control);
+                    executeControl(control);
                 } finally {
                     executionContext.shift(control);
                 }
             }
-        },
-        openDialog: function (control, value, pin) {
-            var ui = Typer.ui(control, this);
-            ui.setValue(control, value);
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        alert: function (message, pin) {
-            var ui = Typer.ui('ui:alert', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        confirm: function (message, pin) {
-            var ui = Typer.ui('ui:confirm', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
-            return ui.execute();
-        },
-        prompt: function (message, value, pin) {
-            var ui = Typer.ui('ui:prompt', this);
-            ui.all['ui:prompt-message'].label = message;
-            ui.all['ui:prompt'].value = value;
-            ui.pinToParent = pin;
-            return ui.execute();
         }
     });
 
-    $.extend(Typer.ui, {
+    $.extend(typerUI, {
         controls: definedControls,
         themes: definedThemes,
         themeExtensions: {},
-        getIcon: function (control, iconSet) {
-            return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[iconSet] || '';
+        controlExtensions: controlExtensions,
+        matchWSDelim: matchWSDelim,
+        define: function (name, base, ctor) {
+            if (typeof name === 'object') {
+                $.each(name, typerUI.define);
+                return;
+            }
+            base = base || {};
+            ctor = ctor || (getOwnPropertyDescriptor(base, 'constructor') || '').value;
+            base.type = name;
+            typerUI[name] = define('TyperUI' + capfirst(name), base, ctor);
         },
         getShortcut: function (command) {
             var current = definedShortcuts._map[command];
             return current && current[0];
         },
-        addIcons: function (iconSet, values) {
-            $.each(values, function (i, v) {
+        addControls: function (ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                definedControls[prefix + i] = v;
+            });
+        },
+        addIcons: function (iconSet, ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                i = prefix + i;
                 if (!definedIcons[i]) {
                     definedIcons[i] = {};
                 }
                 definedIcons[i][iconSet] = v;
             });
         },
-        addLabels: function (language, values) {
-            $.extend(definedLabels, values);
+        addLabels: function (language, ns, values) {
+            var prefix = isString(ns) ? ns + ':' : '';
+            $.each(values || ns, function (i, v) {
+                i = prefix + i;
+                if (!definedLabels[i]) {
+                    definedLabels[i] = {};
+                }
+                definedLabels[i][language] = v;
+            });
         },
         addHook: function (keystroke, hook) {
             if (typeof keystroke === 'object') {
-                $.each(keystroke, Typer.ui.addHook);
+                $.each(keystroke, typerUI.addHook);
                 return;
             }
             (keystroke || '').replace(/\S+/g, function (v) {
@@ -3159,7 +3530,7 @@
         },
         setShortcut: function (command, keystroke) {
             if (typeof command === 'object') {
-                $.each(command, Typer.ui.setShortcut);
+                $.each(command, typerUI.setShortcut);
                 return;
             }
             command = parseCompactSyntax(command);
@@ -3191,24 +3562,27 @@
             });
         },
         setZIndex: function (element, over) {
-            var maxZIndex = -1;
-            var iterator = document.createTreeWalker(document.body, 1, function (v) {
-                if (Typer.comparePosition(v, over, true)) {
-                    return 2;
-                }
-                var zIndex = getZIndex(v);
-                if (zIndex >= 0) {
-                    maxZIndex = Math.max(maxZIndex, zIndex);
-                    return 2;
-                }
-                maxZIndex = Math.max(maxZIndex, getZIndex(v, '::before'), getZIndex(v, '::after'));
-                return 1;
-            }, false);
-            Typer.iterate(iterator);
-            element.style.zIndex = maxZIndex + 1;
+            element.style.zIndex = getZIndexOver(over);
             if ($(element).css('position') === 'static') {
                 element.style.position = 'relative';
             }
+        },
+        pin: function (control, element, reference, direction) {
+            currentPinnedElements.push({
+                control: control,
+                element: element,
+                reference: reference,
+                direction: direction
+            });
+            updatePinnedPositions();
+        },
+        unpin: function (control) {
+            $.each(currentPinnedElements, function (i, v) {
+                if (v.control === control) {
+                    currentPinnedElements.splice(i, 1);
+                    return false;
+                }
+            });
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
@@ -3216,29 +3590,85 @@
             }
         },
         openDialog: function (control, value, pin) {
-            var ui = Typer.ui(control);
+            var ui = typerUI(control);
             ui.setValue(control, value);
-            ui.pinToParent = pin;
             return ui.execute();
         },
         alert: function (message, pin) {
-            var ui = Typer.ui('ui:alert');
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:alert');
+            ui.setValue('message', message);
             return ui.execute();
         },
         confirm: function (message, pin) {
-            var ui = Typer.ui('ui:confirm');
-            ui.all['ui:prompt-message'].label = message;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:confirm');
+            ui.setValue('message', message);
             return ui.execute();
         },
         prompt: function (message, value, pin) {
-            var ui = Typer.ui('ui:prompt');
-            ui.all['ui:prompt-message'].label = message;
-            ui.all['ui:prompt'].value = value;
-            ui.pinToParent = pin;
+            var ui = typerUI('dialog:prompt');
+            ui.setValue('message', message);
+            ui.setValue('prompt', value);
             return ui.execute();
+        },
+        getWheelDelta: function (e) {
+            e = e.originalEvent || e;
+            var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
+            return dir / Math.abs(dir);
+        },
+        parseOrigin: function (value) {
+            if (/(left|center|right)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?(?:\s+(top|center|bottom)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?)?/g.test(value)) {
+                return {
+                    percentX: (ORIGIN_TO_PERCENT[RegExp.$1] || 0) + (RegExp.$3 === '%' && +RegExp.$2),
+                    percentY: (ORIGIN_TO_PERCENT[RegExp.$4 || (!RegExp.$5 && RegExp.$1)] || 0) + (RegExp.$6 === '%' && +RegExp.$5),
+                    offsetX: +(RegExp.$3 === 'px' && +RegExp.$2),
+                    offsetY: +(RegExp.$6 === 'px' && +RegExp.$5)
+                };
+            }
+            return $.extend({}, ZERO_ORIGIN);
+        }
+    });
+
+    $.extend(controlExtensions, {
+        buttonsetGroup: 'left',
+        markdown: false,
+        showButtonLabel: true,
+        is: function (type) {
+            return matchWSDelim(this.type, type);
+        },
+        resolve: function (control) {
+            return resolveControls(this, control);
+        },
+        parentOf: function (control) {
+            for (; control; control = control.parent) {
+                if (this === control) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    });
+
+    $.extend(typerUI.themeExtensions, {
+        bind: function (ui, control, value) {
+            value = ui.getLabel(value) || '';
+            if (control.markdown) {
+                return new showdown.Converter({
+                    simplifiedAutoLink: true,
+                    excludeTrailingPunctuationFromURLs: true,
+                    simpleLineBreaks: true
+                }).makeHtml(String(value));
+            }
+            var elm = document.createElement('div');
+            elm.textContent = value;
+            return elm.innerHTML;
+        },
+        bindIcon: function (ui, control, value) {
+            return ui.getIcon(value);
+        },
+        bindShortcut: function (ui, control, value) {
+            return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+                return IS_MAC ? MAC_CTRLKEY[v.toLowerCase()] : capfirst(v) + '+';
+            });
         }
     });
 
@@ -3246,23 +3676,35 @@
      * Built-in Control Types
      * ********************************/
 
-    $.extend(Typer.ui, {
-        theme: define('TyperUITheme', Typer.ui.themeExtensions),
-        button: define('TyperUIButton', {
-            type: 'button'
-        }),
-        file: define('TyperUIFile', {
-            type: 'file'
-        }),
-        dropdown: define('TyperUIDropdown', {
-            type: 'dropdown',
+    typerUI.define({
+        theme: typerUI.themeExtensions,
+        group: {
+            hiddenWhenDisabled: true,
             requireChildControls: true,
+            controls: '*',
+            constructor: function (controls, params) {
+                if (isString(controls)) {
+                    this.controls = controls;
+                    if (isString(params)) {
+                        this.type = params;
+                    } else {
+                        $.extend(this, params);
+                    }
+                } else {
+                    $.extend(this, controls);
+                }
+            }
+        },
+        dropdown: {
+            requireChildControls: true,
+            controls: '*',
             get value() {
                 return this.selectedValue;
             },
             set value(value) {
                 var self = this;
-                $.each(self.controls, function (i, v) {
+                self.selectedIndex = -1;
+                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
                     if (v.value === value) {
                         self.selectedIndex = i;
                         self.selectedText = v.label || v.name;
@@ -3270,12 +3712,14 @@
                         return false;
                     }
                 });
-                $.each(self.controls, function (i, v) {
-                    updateControl(self.ui, v);
-                });
+                if (self.selectedIndex === -1) {
+                    self.selectedValue = '';
+                    self.selectedText = self.label || self.name;
+                }
+                foreachControl(self, updateControl);
             },
             init: function (ui, self) {
-                $.each(self.controls, function (i, v) {
+                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
                     v.active = function () {
                         return self.selectedIndex === i;
                     };
@@ -3285,39 +3729,29 @@
                     };
                 });
             }
-        }),
-        group: define('TyperUIGroup', {
-            type: 'group',
-            hiddenWhenDisabled: true,
-            requireChildControls: true,
-            enabled: function (ui, self) {
-                return !!$.grep(self.controls, function (v) {
-                    return ui.enabled(v);
-                })[0];
+        },
+        callout: {
+            controls: '*'
+        },
+        label: {
+            get value() {
+                return this.label;
+            },
+            set value(value) {
+                this.label = value;
             }
-        }, function (controls, params) {
-            this.controls = controls;
-            $.extend(this, params);
-        }),
-        label: define('TyperUILabel', {
-            type: 'label'
-        }, function (label) {
-            this.label = label;
-        }),
-        callout: define('TyperUICallout', {
-            type: 'callout'
-        }),
-        textbox: define('TyperUITextbox', {
-            type: 'textbox',
+        },
+        button: {},
+        file: {},
+        textbox: {
             preset: 'textbox'
-        }),
-        textboxCombo: define('TyperUITextboxCombo', {
-            type: 'textboxCombo',
+        },
+        textboxCombo: {
             controls: function (ui, self) {
                 var controls = [];
                 self.valueMap = {};
                 (self.format || '').replace(/\{([^}]+)\}|[^{]+/g, function (v, property) {
-                    var control = property ? Typer.ui.textbox(self[property]) : Typer.ui.label(v);
+                    var control = property ? typerUI.textbox(self[property]) : typerUI.label(v);
                     control.name = self.name + ':' + (property || randomId());
                     controls.push(control);
                     if (property) {
@@ -3326,23 +3760,21 @@
                 });
                 return controls;
             }
-        }),
-        checkbox: define('TyperUICheckbox', {
-            type: 'checkbox'
-        }),
-        dialog: define('TyperUIDialog', {
-            type: 'dialog',
+        },
+        checkbox: {},
+        dialog: {
+            pinnable: false,
             keyboardResolve: true,
             keyboardReject: true,
-            resolve: 'ui:button-ok',
-            reject: 'ui:button-cancel',
+            resolveBy: 'dialog:buttonOK',
+            rejectBy: 'dialog:buttonCancel',
             dialog: function (ui, self) {
                 var previousDialog = currentDialog;
                 var previousActiveElement = document.activeElement;
-                var form = createForm(ui, self);
+                var form = createForm(self);
                 ui.update();
                 ui.trigger(self, 'open');
-                setImmediate(Typer.ui.focus, self.element);
+                setImmediate(typerUI.focus, self.element);
                 form.promise.always(function () {
                     ui.trigger(self, 'close');
                     ui.destroy();
@@ -3351,7 +3783,7 @@
                         previousActiveElement.focus();
                     }
                 });
-                Typer.ui.setZIndex(ui.element, document.body);
+                typerUI.setZIndex(ui.element, document.body);
                 currentDialog = {
                     element: self.element,
                     keyboardResolve: self.keyboardResolve && form.resolve,
@@ -3359,55 +3791,59 @@
                 };
                 return form.promise;
             }
-        })
+        }
     });
 
     /* ********************************
      * Built-in Controls and Resources
      * ********************************/
 
-    $.extend(definedControls, {
-        'ui:button-ok': Typer.ui.button(),
-        'ui:button-cancel': Typer.ui.button(),
-        'ui:prompt-message': {
-            type: 'label'
-        },
-        'ui:prompt-input': Typer.ui.textbox({
-            label: '',
-            executeOnSetValue: false
+    typerUI.addControls('dialog', {
+        buttonset: typerUI.group('(type:button)', {
+            type: 'buttonset',
+            defaultNS: 'dialog'
         }),
-        'ui:prompt-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
-        'ui:prompt': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:prompt-input ui:prompt-buttonset',
-            resolveValue: 'ui:prompt-input',
+        buttonOK: typerUI.button({
+            buttonsetGroup: 'right'
+        }),
+        buttonCancel: typerUI.button({
+            buttonsetGroup: 'right'
+        }),
+        message: typerUI.label({
+            markdown: true
+        }),
+        input: typerUI.textbox({
+            label: '',
+        }),
+        prompt: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message input buttonset',
+            resolveWith: 'input',
             setup: function (ui, self) {
-                ui.setValue('ui:prompt-input', self.value);
+                ui.setValue('input', self.value);
             }
         }),
-        'ui:confirm-buttonset': Typer.ui.group('ui:button-ok ui:button-cancel', { type: 'buttonset' }),
-        'ui:confirm': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:confirm-buttonset'
+        confirm: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message buttonset'
         }),
-        'ui:alert-buttonset': Typer.ui.group('ui:button-ok', { type: 'buttonset' }),
-        'ui:alert': Typer.ui.dialog({
-            keyboardResolve: true,
-            keyboardReject: true,
-            controls: 'ui:prompt-message ui:alert-buttonset'
-        }),
+        alert: typerUI.dialog({
+            pinnable: true,
+            defaultNS: 'dialog',
+            controls: 'message buttonset -buttonCancel'
+        })
     });
 
-    Typer.ui.addLabels('en', {
-        'ui:button-ok': 'OK',
-        'ui:button-cancel': 'Cancel'
+    typerUI.addLabels('en', 'dialog', {
+        buttonOK: 'OK',
+        buttonCancel: 'Cancel'
     });
 
-    Typer.ui.addIcons('material', {
-        'ui:button-ok': '\ue876',
-        'ui:button-cancel': '\ue5cd'
+    typerUI.addIcons('material', 'dialog', {
+        buttonOK: '\ue876',
+        buttonCancel: '\ue5cd'
     });
 
     Typer.defaultOptions.shortcut = true;
@@ -3430,30 +3866,30 @@
         }
     };
 
-    bindTransforms.__default__ = function (value) {
-        return typeof value === 'string' && value in definedLabels ? definedLabels[value] : value;
-    };
-    bindTransforms.shortcut = function (value) {
-        return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
-            return v.charAt(0).toUpperCase() + v.slice(1) + '+';
+    $(function () {
+        $(window).keydown(function (e) {
+            if (currentDialog && (e.which === 13 || e.which === 27)) {
+                (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
+            }
         });
-    };
-    bindTransforms.icon = function (value, ui) {
-        return Typer.ui.getIcon(value, definedThemes[ui.theme].iconset);
-    };
-
-    $(window).keydown(function (e) {
-        if (currentDialog && (e.which === 13 || e.which === 27)) {
-            (currentDialog[e.which === 13 ? 'keyboardResolve' : 'keyboardReject'] || $.noop)();
-        }
+        $(window).focusin(function (e) {
+            if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
+                typerUI.focus(currentDialog.element);
+            }
+        });
+        $(window).bind('resize scroll orientationchange', function (e) {
+            updatePinnedPositions();
+        });
+        $(document.body).mousedown(function (e) {
+            $.each(currentCallouts.slice(0), function (i, v) {
+                if (!Typer.containsOrEquals(v.element, e.target)) {
+                    hideCallout(v.control);
+                }
+            });
+        });
     });
-    $(window).focusin(function (e) {
-        if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
-            Typer.ui.focus(currentDialog.element);
-        }
-    });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer, Object, window, document));
 
 (function ($, Typer) {
     'use strict';
@@ -3483,6 +3919,14 @@
     var reFormat = /^([a-z\d]*)(?:\.(.+))?/i;
     var reCompatFormat = /^(p|h[1-6])(?:\.(.+))?$/i;
 
+    function outermost(elements) {
+        return elements.filter(function (v) {
+            return !elements.some(function (w) {
+                return $.contains(w, v);
+            });
+        });
+    }
+
     function getTextAlign(element) {
         var textAlign = $(element).css('text-align');
         var direction = $(element).css('direction');
@@ -3507,7 +3951,7 @@
             if (property === 'textAlign') {
                 my = getTextAlign(v);
             } else if (property === 'inlineClass') {
-                my = $(v).filter('span').attr('class') || '';
+                my = $(v).attr('class') || '';
             } else {
                 my = $(v).css(property);
             }
@@ -3579,7 +4023,7 @@
     }
 
     function indentCommand(tx, elements) {
-        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        elements = elements || outermost(tx.selection.getParagraphElements());
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0] || $(v).prev('ul,ol')[0] || $('<ul>').insertBefore(v)[0];
             var newList = list;
@@ -3598,7 +4042,7 @@
     }
 
     function outdentCommand(tx, elements) {
-        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        elements = elements || outermost(tx.selection.getParagraphElements());
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0];
             var parentList = $(list).parent('li')[0];
@@ -3628,10 +4072,9 @@
     Typer.widgets.inlineStyle = {
         inline: true,
         beforeStateChange: function (e) {
-            var selection = e.typer.getSelection();
-            var elements = selection.getSelectedElements();
+            var elements = e.typer.getSelection().getSelectedElements();
             $.extend(e.widget, {
-                bold: /bold|700/.test(computePropertyValue(elements, 'fontWeight')),
+                bold: Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
                 italic: computePropertyValue(elements, 'fontStyle') === 'italic',
                 underline: computePropertyValue(elements, 'textDecoration') === 'underline',
                 strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
@@ -3648,14 +4091,30 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var paragraphs = tx.selection.getParagraphElements();
-                $(tx.selection.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
-                $('span:has(span)', paragraphs).each(function (i, v) {
+                var isCaret = tx.selection.isCaret;
+                var span = createElementWithClassName('span', className);
+                if (tx.selection.isCaret) {
+                    tx.insertHtml(span);
+                    span.appendChild(Typer.createTextNode());
+                } else {
+                    $(tx.selection.getSelectedTextNodes()).wrap(span);
+                }
+                var $elm = $(tx.selection.getSelectedElements());
+                $elm.filter('span:has(span)').each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
                         return v.nodeType === 3;
                     }).wrap(createElementWithClassName('span', v.className));
                 });
-                $('span[class=""]', paragraphs).contents().unwrap();
+                $elm.filter('span[class=""],span:not([class])').contents().unwrap();
+                $elm.filter('span+span').each(function (i, v) {
+                    if (Typer.is(v.previousSibling, 'span.' + v.className)) {
+                        $(v).contents().appendTo(v.previousSibling);
+                        $(v).remove();
+                    }
+                });
+                if (isCaret) {
+                    tx.selection.select(span, -0);
+                }
                 tx.trackChange(tx.selection.focusNode.element);
             }
         }
@@ -3697,7 +4156,7 @@
                         if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
-                            v.className = m[2];
+                            v.className = m[2] || '';
                             tx.trackChange(v);
                         }
                     });
@@ -3765,8 +4224,8 @@
         return !!(inline ? (selection.startNode.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE)) : selection.getParagraphElements()[0]);
     }
 
-    var simpleCommandButton = Typer.ui.button.extend(function (command, widget) {
-        this._super({
+    function simpleCommandButton(command, widget) {
+        return Typer.ui.button({
             requireWidget: widget,
             requireCommand: command,
             execute: command,
@@ -3777,10 +4236,11 @@
                 return isEnabled(toolbar, widget === 'inlineStyle');
             }
         });
-    });
-    var orderedListButton = Typer.ui.button.extend(function (type, annotation) {
-        this._super({
-            name: 'formatting:orderedList:' + type,
+    }
+
+    function orderedListButton(type, annotation) {
+        return Typer.ui.button({
+            name: 'formatting:listtype:' + LIST_STYLE_TYPE[type],
             annotation: annotation,
             requireWidgetEnabled: 'list',
             value: type,
@@ -3791,13 +4251,17 @@
                 return self.widget && $(self.widget.element).attr('type') === type;
             }
         });
+    }
+
+    Typer.ui.addControls('typer:toolbar', {
+        formatting: Typer.ui.group('* -inlineStyleOptions -inlineStyleClear', {
+            requireTyper: true,
+            defaultNS: 'typer:formatting'
+        })
     });
 
-    $.extend(Typer.ui.controls, {
-        'toolbar:formatting': Typer.ui.group('formatting:*', {
-            requireTyper: true
-        }),
-        'formatting:paragraph': Typer.ui.dropdown({
+    Typer.ui.addControls('typer:formatting', {
+        paragraph: Typer.ui.dropdown({
             requireWidget: 'formatting',
             requireCommand: 'formatting',
             hiddenWhenDisabled: true,
@@ -3810,8 +4274,7 @@
                         enabled: function (toolbar, self) {
                             var selection = toolbar.typer.getSelection();
                             var curElm = (selection.startNode === selection.endNode ? selection.startNode : selection.focusNode).element;
-                            var myElm = (reFormat.exec(self.value) || [])[1];
-                            return !myElm || compatibleFormatting(curElm.tagName, myElm);
+                            return !reFormat.test(self.value) || compatibleFormatting(curElm.tagName, RegExp.$1);
                         }
                     });
                 });
@@ -3824,7 +4287,7 @@
                                 return false;
                             }
                         }
-                        self.label = 'formatting:name:' + (reFormat.exec(self.widget.formatting) || [])[1];
+                        self.label = 'typer:formatting:tagname:' + (reFormat.exec(self.widget.formatting) || [])[1];
                         self.value = self.widget.formatting;
                         return true;
                     }
@@ -3845,10 +4308,21 @@
                 self.value = self.widget.formatting;
             }
         }),
-        'formatting:inlineStyle': Typer.ui.dropdown({
+        inlineStyle: Typer.ui.dropdown({
             requireWidget: 'inlineStyle',
             requireCommand: 'applyClass',
             hiddenWhenDisabled: true,
+            defaultNS: 'typer:formatting',
+            controls: 'inlineStyleOptions inlineStyleClear',
+            execute: 'applyClass',
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, true);
+            },
+            stateChange: function (toolbar, self) {
+                self.value = self.widget.inlineClass;
+            }
+        }),
+        inlineStyleOptions: Typer.ui.group({
             controls: function (toolbar) {
                 return $.map(Object.keys(toolbar.options.inlineClass || {}), function (v) {
                     return Typer.ui.button({
@@ -3856,17 +4330,18 @@
                         label: toolbar.options.inlineClass[v]
                     });
                 });
-            },
-            execute: 'applyClass',
-            enabled: function (toolbar) {
-                return isEnabled(toolbar, true);
             }
         }),
-        'formatting:bold': simpleCommandButton('bold', 'inlineStyle'),
-        'formatting:italic': simpleCommandButton('italic', 'inlineStyle'),
-        'formatting:underline': simpleCommandButton('underline', 'inlineStyle'),
-        'formatting:strikeThrough': simpleCommandButton('strikeThrough', 'inlineStyle'),
-        'formatting:unorderedList': Typer.ui.button({
+        inlineStyleClear: Typer.ui.button({
+            dropdownOption: 'exclude',
+            requireWidget: 'inlineStyle',
+            execute: 'applyClass'
+        }),
+        bold: simpleCommandButton('bold', 'inlineStyle'),
+        italic: simpleCommandButton('italic', 'inlineStyle'),
+        underline: simpleCommandButton('underline', 'inlineStyle'),
+        strikeThrough: simpleCommandButton('strikeThrough', 'inlineStyle'),
+        unorderedList: Typer.ui.button({
             requireWidgetEnabled: 'list',
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('list', '');
@@ -3878,7 +4353,7 @@
                 return isEnabled(toolbar, false);
             }
         }),
-        'formatting:orderedList': Typer.ui.callout({
+        orderedList: Typer.ui.callout({
             requireWidgetEnabled: 'list',
             controls: [
                 orderedListButton('1', '1, 2, 3, 4'),
@@ -3894,66 +4369,70 @@
                 return isEnabled(toolbar, false);
             }
         }),
-        'formatting:indent': simpleCommandButton('indent', 'list'),
-        'formatting:outdent': simpleCommandButton('outdent', 'list'),
-        'formatting:justifyLeft': simpleCommandButton('justifyLeft', 'formatting'),
-        'formatting:justifyCenter': simpleCommandButton('justifyCenter', 'formatting'),
-        'formatting:justifyRight': simpleCommandButton('justifyRight', 'formatting'),
-        'formatting:justifyFull': simpleCommandButton('justifyFull', 'formatting')
+        indent: simpleCommandButton('indent', 'list'),
+        outdent: simpleCommandButton('outdent', 'list'),
+        justifyLeft: simpleCommandButton('justifyLeft', 'formatting'),
+        justifyCenter: simpleCommandButton('justifyCenter', 'formatting'),
+        justifyRight: simpleCommandButton('justifyRight', 'formatting'),
+        justifyFull: simpleCommandButton('justifyFull', 'formatting')
     });
 
-    /* ********************************
-     * Resources
-     * ********************************/
-
-    Typer.ui.addLabels('en', {
-        'formatting:bold': 'Bold',
-        'formatting:italic': 'Italic',
-        'formatting:underline': 'Underlined',
-        'formatting:strikeThrough': 'Strikethrough',
-        'formatting:unorderedList': 'Bullet list',
-        'formatting:orderedList': 'Numbered list',
-        'formatting:indent': 'Indent',
-        'formatting:outdent': 'Outdent',
-        'formatting:justifyLeft': 'Align left',
-        'formatting:justifyCenter': 'Align center',
-        'formatting:justifyRight': 'Align right',
-        'formatting:justifyFull': 'Align justified',
-        'formatting:paragraph': 'Formatting',
-        'formatting:inlineStyle': 'Text style',
-        'formatting:orderedList:1': 'Decimal numbers',
-        'formatting:orderedList:a': 'Alphabetically ordered list, lowercase',
-        'formatting:orderedList:A': 'Alphabetically ordered list, uppercase',
-        'formatting:orderedList:i': 'Roman numbers, lowercase',
-        'formatting:orderedList:I': 'Roman numbers, uppercase',
-        'formatting:name:p': 'Paragraph',
-        'formatting:name:h1': 'Header 1',
-        'formatting:name:h2': 'Header 2',
-        'formatting:name:h3': 'Header 3',
-        'formatting:name:h4': 'Header 4',
-        'formatting:name:h5': 'Header 5',
-        'formatting:name:h6': 'Header 6',
-        'formatting:name:td': 'Table cell',
-        'formatting:name:th': 'Table header',
-        'formatting:name:ul': 'Unordered list',
-        'formatting:name:ol': 'Ordered list',
-        'formatting:name:li': 'List item',
-        'formatting:name:blockquote': 'Blockquote'
+    Typer.ui.addLabels('en', 'typer:formatting', {
+        bold: 'Bold',
+        italic: 'Italic',
+        underline: 'Underlined',
+        strikeThrough: 'Strikethrough',
+        unorderedList: 'Bullet list',
+        orderedList: 'Numbered list',
+        indent: 'Indent',
+        outdent: 'Outdent',
+        justifyLeft: 'Align left',
+        justifyCenter: 'Align center',
+        justifyRight: 'Align right',
+        justifyFull: 'Align justified',
+        paragraph: 'Formatting',
+        inlineStyle: 'Text style',
+        inlineStyleClear: 'Clear style'
     });
 
-    Typer.ui.addIcons('material', {
-        'formatting:bold': '\ue238',          // format_bold
-        'formatting:italic': '\ue23f',        // format_italic
-        'formatting:underline': '\ue249',     // format_underlined
-        'formatting:strikeThrough': '\ue257', // strikethrough_s
-        'formatting:unorderedList': '\ue241', // format_list_bulleted
-        'formatting:orderedList': '\ue242',   // format_list_numbered
-        'formatting:indent': '\ue23e',        // format_indent_increase
-        'formatting:outdent': '\ue23d',       // format_indent_decrease
-        'formatting:justifyLeft': '\ue236',   // format_align_left
-        'formatting:justifyCenter': '\ue234', // format_align_center
-        'formatting:justifyRight': '\ue237',  // format_align_right
-        'formatting:justifyFull': '\ue235'    // format_align_justify
+    Typer.ui.addLabels('en', 'typer:formatting:listtype', {
+        'decimal': 'Decimal numbers',
+        'lower-alpha': 'Alphabetically ordered list, lowercase',
+        'upper-alpha': 'Alphabetically ordered list, uppercase',
+        'lower-roman': 'Roman numbers, lowercase',
+        'upper-roman': 'Roman numbers, uppercase'
+    });
+
+    Typer.ui.addLabels('en', 'typer:formatting:tagname', {
+        p: 'Paragraph',
+        h1: 'Header 1',
+        h2: 'Header 2',
+        h3: 'Header 3',
+        h4: 'Header 4',
+        h5: 'Header 5',
+        h6: 'Header 6',
+        table: 'Table',
+        td: 'Table cell',
+        th: 'Table header',
+        ul: 'Unordered list',
+        ol: 'Ordered list',
+        li: 'List item',
+        blockquote: 'Blockquote'
+    });
+
+    Typer.ui.addIcons('material', 'typer:formatting', {
+        bold: '\ue238', // format_bold
+        italic: '\ue23f', // format_italic
+        underline: '\ue249', // format_underlined
+        strikeThrough: '\ue257', // strikethrough_s
+        unorderedList: '\ue241', // format_list_bulleted
+        orderedList: '\ue242', // format_list_numbered
+        indent: '\ue23e', // format_indent_increase
+        outdent: '\ue23d', // format_indent_decrease
+        justifyLeft: '\ue236', // format_align_left
+        justifyCenter: '\ue234', // format_align_center
+        justifyRight: '\ue237', // format_align_right
+        justifyFull: '\ue235' // format_align_justify
     });
 
     Typer.ui.setShortcut({
@@ -3972,7 +4451,7 @@
         }
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -3999,6 +4478,7 @@
             } else {
                 tx.execCommand('createLink', value);
                 tx.selection.collapse('end');
+                tx.trackChange(tx.selection.startElement);
             }
         },
         remove: 'keepText',
@@ -4018,9 +4498,9 @@
 
     Typer.defaultOptions.link = true;
 
-    $.extend(Typer.ui.controls, {
+    Typer.ui.addControls('typer', {
         'toolbar:link': Typer.ui.button({
-            after: 'toolbar:insert',
+            after: 'insert',
             requireWidgetEnabled: 'link',
             hiddenWhenDisabled: true,
             dialog: function (toolbar, self) {
@@ -4033,7 +4513,7 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return toolbar.openDialog('dialog:selectLink', currentValue);
+                return Typer.ui.openDialog('typer:link:selectLink', currentValue);
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
@@ -4049,6 +4529,7 @@
                     } else {
                         $(self.widget.element).removeAttr('target');
                     }
+                    tx.trackChange(self.widget.element);
                 } else {
                     var textNode = Typer.createTextNode(text);
                     tx.insertHtml(textNode);
@@ -4062,14 +4543,13 @@
                         }
                     }
                 }
-                tx.trackChange(self.widget.element);
             },
             active: function (toolbar, self) {
                 return self.widget;
             }
         }),
+        'contextmenu:link': Typer.ui.group('typer:link:*(type:button)'),
         'link:open': Typer.ui.button({
-            context: 'contextmenu',
             requireWidget: 'link',
             hiddenWhenDisabled: true,
             shortcut: 'ctrlClick',
@@ -4082,33 +4562,32 @@
             requireWidget: 'link',
             execute: 'unlink'
         }),
-        'contextmenu:link': Typer.ui.group('link:*'),
-        'dialog:selectLink:text': Typer.ui.textbox(),
-        'dialog:selectLink:url': Typer.ui.textbox(),
-        'dialog:selectLink:blank': Typer.ui.checkbox(),
-        'dialog:selectLink': Typer.ui.dialog({
-            controls: 'dialog:selectLink:* ui:prompt-buttonset',
+        'link:selectLink:text': Typer.ui.textbox(),
+        'link:selectLink:url': Typer.ui.textbox(),
+        'link:selectLink:blank': Typer.ui.checkbox(),
+        'link:selectLink': Typer.ui.dialog({
+            controls: '* dialog:buttonset',
             valueMap: {
-                text: 'dialog:selectLink:text',
-                href: 'dialog:selectLink:url',
-                blank: 'dialog:selectLink:blank'
+                text: 'text',
+                href: 'url',
+                blank: 'blank'
             }
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'toolbar:link': 'Insert hyperlink',
         'link:url': 'Link URL',
         'link:blank': 'Open in new window',
         'link:open': 'Open hyperlink',
         'link:unlink': 'Remove hyperlink',
-        'dialog:selectLink': 'Create hyperlink',
-        'dialog:selectLink:text': 'Text',
-        'dialog:selectLink:url': 'URL',
-        'dialog:selectLink:blank': 'Open in new window',
+        'link:selectLink': 'Create hyperlink',
+        'link:selectLink:text': 'Text',
+        'link:selectLink:url': 'URL',
+        'link:selectLink:blank': 'Open in new window',
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'toolbar:link': '\ue250',  // insert_link
         'link:url': '\ue250'       // insert_link
     });
@@ -4151,24 +4630,24 @@
 
     Typer.defaultOptions.media = true;
 
-    var insertMediaButton = Typer.ui.button.extend(function (type) {
-        this._super({
+    function insertMediaButton(type) {
+        return Typer.ui.button({
             requireWidgetEnabled: 'media',
             hiddenWhenDisabled: true,
             dialog: function (toolbar) {
                 if (typeof toolbar.options.selectMedia === 'function') {
                     return toolbar.options.selectMedia(type);
                 }
-                return toolbar.prompt('dialog:selectImage');
+                return toolbar.prompt('typer:media:selectImage');
             },
             execute: function (toolbar, self, tx, value) {
                 tx.insertWidget('media', value);
             }
         });
-    });
+    }
 
-    $.extend(Typer.ui.controls, {
-        'widget:media': Typer.ui.group('media:* widget:delete'),
+    Typer.ui.addControls('typer', {
+        'widget:media': Typer.ui.group('typer:media:*'),
         'insert:image': insertMediaButton('image'),
         'insert:video': insertMediaButton('video'),
         'media:filePicker': Typer.ui.button({
@@ -4182,7 +4661,7 @@
                     var mediaType = reMediaType.exec(self.label) && (RegExp.$1 ? 'image' : RegExp.$2 ? 'video' : 'audio');
                     return toolbar.options.selectMedia(mediaType, self.value);
                 }
-                return toolbar.prompt('dialog:selectImage', self.value);
+                return Typer.ui.prompt('dialog:selectImage', self.value);
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
@@ -4202,20 +4681,20 @@
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'insert:image': 'Image',
         'insert:video': 'Video',
         'media:altText': 'Alternate text',
-        'dialog:selectImage': 'Enter image URL'
+        'media:selectImage': 'Enter image URL'
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'insert:image': '\ue251',  // insert_photo
         'insert:video': '\ue04b',  // videocam
         'media:altText': '\ue0b9'  // comment
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -4258,6 +4737,10 @@
             minWidth: '3em'
         });
     }
+
+    Typer.ui.define('tableGrid', {
+        type: 'tableGrid'
+    });
 
     Typer.widgets.table = {
         element: 'table',
@@ -4356,27 +4839,25 @@
                 $(self.element).find('.typer-ui-grid-cell').removeClass('active');
                 $(self.element).find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
             });
-            self.label = '';
+            self.label = '0 \u00d7 0';
             self.value = {};
         }
     });
 
-    $.extend(Typer.ui.controls, {
+    Typer.ui.addControls('typer', {
         'insert:table': Typer.ui.callout({
-            controls: 'insert:table:*',
             requireWidgetEnabled: 'table',
             hiddenWhenDisabled: true
         }),
-        'insert:table:callout': {
-            type: 'tableGrid',
+        'insert:table:create': Typer.ui.tableGrid({
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('table', self.value);
             }
-        },
+        }),
         'contextmenu:table': Typer.ui.callout({
-            controls: 'table:*',
             requireWidget: 'table',
-            hiddenWhenDisabled: true
+            hiddenWhenDisabled: true,
+            defaultNS: 'typer:table'
         }),
         'selection:selectTable': Typer.ui.button({
             requireWidget: 'table',
@@ -4409,7 +4890,7 @@
                 });
                 var fallbackOption = Typer.ui.button({
                     requireWidget: 'table',
-                    label: 'table:styleDefault',
+                    label: 'typer:table:styleDefault',
                     execute: function (toolbar, self) {
                         self.widget.element.className = '';
                     }
@@ -4417,55 +4898,47 @@
                 return definedOptions.concat(fallbackOption);
             }
         }),
-        'table:tableWidth': Typer.ui.callout({
-            controls: 'table-width:*'
-        }),
-        'table:columnWidth': Typer.ui.button({
-            hiddenWhenDisabled: true,
-            enabled: function () {
-                return false;
-            }
-        }),
-        'table:addRemoveCell': Typer.ui.group('table-cell:*'),
-        'table-width:fitContent': Typer.ui.button({
+        'table:tableWidth': Typer.ui.callout(),
+        'table:tableWidth:fitContent': Typer.ui.button({
             requireWidget: 'table',
             execute: function (toolbar, self) {
                 $(self.widget.element).removeAttr('width');
             }
         }),
-        'table-width:fullWidth': Typer.ui.button({
+        'table:tableWidth:fullWidth': Typer.ui.button({
             requireWidget: 'table',
             execute: function (toolbar, self) {
                 $(self.widget.element).attr('width', '100%');
             }
         }),
-        'table-cell:addColumnBefore': Typer.ui.button({
+        'table:addRemoveCell': Typer.ui.group(),
+        'table:addRemoveCell:addColumnBefore': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addColumnBefore'
         }),
-        'table-cell:addColumnAfter': Typer.ui.button({
+        'table:addRemoveCell:addColumnAfter': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addColumnAfter'
         }),
-        'table-cell:addRowAbove': Typer.ui.button({
+        'table:addRemoveCell:addRowAbove': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addRowAbove'
         }),
-        'table-cell:addRowBelow': Typer.ui.button({
+        'table:addRemoveCell:addRowBelow': Typer.ui.button({
             requireWidget: 'table',
             execute: 'addRowBelow'
         }),
-        'table-cell:removeColumn': Typer.ui.button({
+        'table:addRemoveCell:removeColumn': Typer.ui.button({
             requireWidget: 'table',
             execute: 'removeColumn'
         }),
-        'table-cell:removeRow': Typer.ui.button({
+        'table:addRemoveCell:removeRow': Typer.ui.button({
             requireWidget: 'table',
             execute: 'removeRow'
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'insert:table': 'Table',
         'contextmenu:table': 'Modify table',
         'selection:selectTable': 'Select table',
@@ -4474,17 +4947,17 @@
         'table:tableWidth': 'Set table width',
         'table:style': 'Set table style',
         'table:styleDefault': 'Default',
-        'table-cell:addColumnBefore': 'Add column before',
-        'table-cell:addColumnAfter': 'Add column after',
-        'table-cell:addRowAbove': 'Add row above',
-        'table-cell:addRowBelow': 'Add row below',
-        'table-cell:removeColumn': 'Remove column',
-        'table-cell:removeRow': 'Remove row',
-        'table-width:fitContent': 'Fit to content',
-        'table-width:fullWidth': 'Full width'
+        'table:addRemoveCell:addColumnBefore': 'Add column before',
+        'table:addRemoveCell:addColumnAfter': 'Add column after',
+        'table:addRemoveCell:addRowAbove': 'Add row above',
+        'table:addRemoveCell:addRowBelow': 'Add row below',
+        'table:addRemoveCell:removeColumn': 'Remove column',
+        'table:addRemoveCell:removeRow': 'Remove row',
+        'table:tableWidth:fitContent': 'Fit to content',
+        'table:tableWidth:fullWidth': 'Full width'
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -4566,10 +5039,12 @@
             typer: typer,
             widget: widget || null,
             theme: options.theme,
-            controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'toolbar:widget' : 'toolbar',
+            defaultNS: 'typer',
+            controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'widget' : 'toolbar',
             options: options,
-            controlExecuted: function (ui, self, control) {
-                if (/button|dropdown/.test(control.type)) {
+            showButtonLabel: type === 'contextmenu',
+            controlExecuted: function (ui, control) {
+                if (control.is('button dropdown')) {
                     ui.typer.getSelection().focus();
                 }
             }
@@ -4599,7 +5074,7 @@
             $(typer.element).bind('contextmenu', function (e) {
                 e.preventDefault();
                 toolbar.update();
-                toolbar.trigger(toolbar, 'show', {
+                toolbar.show({
                     x: e.clientX,
                     y: e.clientY
                 });
@@ -4625,14 +5100,7 @@
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
-            e.widget.widgetbars = {};
-        },
-        widgetInit: function (e) {
-            if (Typer.ui.controls['widget:' + e.targetWidget.id]) {
-                if (!e.widget.widgetbars[e.targetWidget.id]) {
-                    e.widget.widgetbars[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
-                }
-            }
+            e.widget.widgets = {};
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
@@ -4641,9 +5109,14 @@
             hideToolbar(e.widget.toolbar);
         },
         widgetFocusin: function (e) {
-            if (e.widget.widgetbars[e.targetWidget.id]) {
-                e.widget.widgetbars[e.targetWidget.id].widget = e.targetWidget;
-                showToolbar(e.widget.widgetbars[e.targetWidget.id]);
+            if (!e.widget.widgets[e.targetWidget.id]) {
+                if (Typer.ui.controls['typer:widget:' + e.targetWidget.id]) {
+                    e.widget.widgets[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
+                }
+            }
+            if (e.widget.widgets[e.targetWidget.id]) {
+                e.widget.widgets[e.targetWidget.id].widget = e.targetWidget;
+                showToolbar(e.widget.widgets[e.targetWidget.id]);
             }
         },
         widgetFocusout: function (e) {
@@ -4671,25 +5144,27 @@
      * Built-in Controls
      * ********************************/
 
-    $.extend(Typer.ui.controls, {
-        'contextmenu': Typer.ui.group('contextmenu:*'),
-        'contextmenu:history': Typer.ui.group('history:*'),
-        'contextmenu:selection': Typer.ui.group('selection:*'),
-        'contextmenu:clipboard': Typer.ui.group('clipboard:*'),
-        'toolbar': Typer.ui.group('toolbar:insert toolbar:* -toolbar:widget'),
+    Typer.ui.addControls('typer', {
+        'contextmenu': Typer.ui.group('history selection clipboard *'),
+        'contextmenu:history': Typer.ui.group('typer:history:*'),
+        'contextmenu:selection': Typer.ui.group('typer:selection:*'),
+        'contextmenu:clipboard': Typer.ui.group('typer:clipboard:*'),
+        'toolbar': Typer.ui.group(),
         'toolbar:insert': Typer.ui.callout({
-            controls: 'insert:*',
+            before: '*',
+            controls: 'typer:insert:*',
             enabled: function (toolbar) {
                 return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
             }
         }),
-        'toolbar:widget': Typer.ui.group('', {
+        'widget': Typer.ui.group({
             requireWidget: true,
             controls: function (toolbar, self) {
-                return toolbar.widget && ('widget:' + toolbar.widget.id);
+                return toolbar.widget.id + ' delete';
             }
         }),
         'history:undo': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlZ',
             execute: function (toolbar) {
                 toolbar.typer.undo();
@@ -4699,6 +5174,7 @@
             }
         }),
         'history:redo': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlShiftZ',
             execute: function (toolbar) {
                 toolbar.typer.redo();
@@ -4708,12 +5184,14 @@
             }
         }),
         'widget:delete': Typer.ui.button({
+            after: '*',
             requireWidget: true,
             execute: function (toolbar) {
                 toolbar.widget.remove();
             }
         }),
         'selection:selectAll': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlA',
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
@@ -4722,6 +5200,7 @@
             }
         }),
         'selection:selectParagraph': Typer.ui.button({
+            before: '*',
             hiddenWhenDisabled: true,
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
@@ -4733,6 +5212,7 @@
             }
         }),
         'clipboard:cut': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlX',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
@@ -4740,6 +5220,7 @@
             }
         }),
         'clipboard:copy': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlC',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
@@ -4747,18 +5228,19 @@
             }
         }),
         'clipboard:paste': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlV',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
                 document.execCommand('paste');
                 detectClipboardInaccessible(function () {
-                   toolbar.alert('clipboard:inaccessible');
+                    Typer.ui.alert('typer:clipboard:inaccessible');
                 });
             }
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'toolbar:insert': 'Insert widget',
         'history:undo': 'Undo',
         'history:redo': 'Redo',
@@ -4771,7 +5253,7 @@
         'widget:delete': 'Delete'
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'toolbar:insert': '\ue1bd',      // widgets
         'history:undo': '\ue166',        // undo
         'history:redo': '\ue15a',        // redo
@@ -4782,7 +5264,7 @@
         'widget:delete': '\ue872'        // delete
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -4824,13 +5306,15 @@
 
 } (jQuery, window.Typer));
 
-(function ($, Typer) {
+(function ($, Typer, window, document) {
 
     var INVALID = {
         left: 10000,
         right: -10000
     };
-    var NODE_ANY_ALLOWTEXT = Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE | Typer.NODE_INLINE_WIDGET | Typer.NODE_INLINE_EDITABLE;
+
+    var rectEquals = Typer.rectEquals;
+    var rectCovers = Typer.rectCovers;
 
     var supported = !window.ActiveXObject;
     var selectionLayers = [];
@@ -4838,37 +5322,35 @@
     var freeDiv = [];
     var windowWidth = $(window).width();
     var windowHeight = $(window).height();
+    var lastClientX;
+    var lastClientY;
     var container;
     var activeTyper;
     var activeWidget;
     var previousRect;
 
     function init() {
-        var style = '\
-            .has-typer-visualizer:focus { outline:none; }\
-            .has-typer-visualizer::selection,.has-typer-visualizer ::selection { background-color:transparent; }\
-            .has-typer-visualizer::-moz-selection,.has-typer-visualizer ::-moz-selection { background-color:transparent; }\
-            .typer-visualizer { position:fixed;pointer-events:none;width:100%;height:100%; }\
-            .typer-visualizer > div { position:fixed;box-sizing:border-box; }\
-            .typer-visualizer .border { border:1px solid rgba(0,31,81,0.2); }\
-            .typer-visualizer .fill { background-color:rgba(0,31,81,0.2); }\
-            .typer-visualizer .fill-margin { border:solid rgba(255,158,98,0.2); }\
-            @supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)) { .typer-visualizer .bl-r:before,.typer-visualizer .tl-r:before,.typer-visualizer .br-r:after,.typer-visualizer .tr-r:after { content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%); } }\
-            .typer-visualizer .line-n,.typer-visualizer .line-s { border-top:1px solid rgba(0,31,81,0.2);left:0;right:0;height:1px; }\
-            .typer-visualizer .line-w,.typer-visualizer .line-e { border-left:1px solid rgba(0,31,81,0.2);top:0;bottom:0;width:1px; }\
-            .typer-visualizer .line-s { margin-top:-1px; }\
-            .typer-visualizer .line-e { margin-left:-1px; }\
-            .typer-visualizer .bl { border-bottom-left-radius:4px; }\
-            .typer-visualizer .tl { border-top-left-radius:4px; }\
-            .typer-visualizer .br { border-bottom-right-radius:4px; }\
-            .typer-visualizer .tr { border-top-right-radius:4px; }\
-            .typer-visualizer .bl-r:before { right:100%;bottom:0; }\
-            .typer-visualizer .tl-r:before { right:100%;top:0;-webkit-transform:flipY();transform:flipY(); }\
-            .typer-visualizer .br-r:after { left:100%;bottom:0;-webkit-transform:flipX();transform:flipX(); }\
-            .typer-visualizer .tr-r:after { left:100%;top:0;-webkit-transform:rotate(180deg);transform:rotate(180deg); }\
-            .typer-visualizer [elm]:before { content:attr(elm);box-shadow:0 0 1px white;font-family:monospace;background-color:rgba(0,31,81,0.8);color:white;font-size:10px;padding:0 0.25em;position:absolute;bottom:100%;}\
-        ';
-        $(document.body).append('<style>' + style + '</style>');
+        var style =
+            '.has-N:focus{outline:none;}' +
+            '.has-N::selection,.has-N ::selection{background-color:transparent;}' +
+            '.has-N::-moz-selection,.has-N ::-moz-selection{background-color:transparent;}' +
+            '.N{position:fixed;pointer-events:none;width:100%;height:100%;font-family:monospace;font-size:10px;}' +
+            '.N>div{position:fixed;box-sizing:border-box;}' +
+            '.N>.border{border:1px solid rgba(0,31,81,0.2);}' +
+            '.N>.fill{background-color:rgba(0,31,81,0.2);}' +
+            '.N>.fill-margin{border:solid rgba(255,158,98,0.2);}' +
+            '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:before,.N>.tl-r:before,.N>.br-r:after,.N>.tr-r:after{content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);}}' +
+            '.N>.bl{border-bottom-left-radius:4px;}' +
+            '.N>.tl{border-top-left-radius:4px;}' +
+            '.N>.br{border-bottom-right-radius:4px;}' +
+            '.N>.tr{border-top-right-radius:4px;}' +
+            '.N>.bl-r:before{right:100%;bottom:0;}' +
+            '.N>.tl-r:before{right:100%;top:0;-webkit-transform:flipY();transform:flipY();}' +
+            '.N>.br-r:after{left:100%;bottom:0;-webkit-transform:flipX();transform:flipX();}' +
+            '.N>.tr-r:after{left:100%;top:0;-webkit-transform:rotate(180deg);transform:rotate(180deg);}' +
+            '.N>.newline:before{content:"\\0021a9";position:absolute;top:50%;left:2px;margin-top:-0.5em;line-height:1;background-color:white;box-shadow:0 0 1px black;opacity:0.5;padding:0 0.25em;}' +
+            '.N>.elm:before{content:attr(elm);box-shadow:0 0 1px white;background-color:rgba(0,31,81,0.8);color:white;padding:0 0.25em;position:absolute;bottom:100%;white-space:nowrap}';
+        $(document.body).append('<style>' + style.replace(/N/g, 'typer-visualizer') + '</style>');
         container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
 
         $(window).bind('scroll resize orientationchange focus', function () {
@@ -4878,16 +5360,10 @@
         });
         $(document.body).bind('mousewheel', redrawSelection);
         $(document.body).bind('mousemove', function (e) {
-            updateHover(e.clientX, e.clientY);
+            lastClientX = e.clientX;
+            lastClientY = e.clientY;
+            updateHover(lastClientX, lastClientY);
         });
-    }
-
-    function rectEquals(a, b) {
-        return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
-    }
-
-    function rectCovers(a, b) {
-        return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
     function toRightBottom(v) {
@@ -4908,10 +5384,27 @@
         };
     }
 
-    function computeTextRects(element) {
-        var bRect = element.getBoundingClientRect();
-        var range = window.getSelection().rangeCount && window.getSelection().getRangeAt(0);
-        var rects = !range ? [] : $.map(Typer.createRange(range, Typer.createRange(element)).getClientRects(), toRightBottom);
+    function getElementMarker(element) {
+        var node = activeTyper.getNode(element);
+        var arr = [];
+        do {
+            arr.unshift(node.element.tagName.toLowerCase() + node.element.className.replace(/^(?=.)|\s+/, '.'));
+            node = node.parentNode;
+        } while (Typer.is(node, Typer.NODE_ANY_ALLOWTEXT));
+        return arr.join(' > ');
+    }
+
+    function getParagraphNode(node) {
+        if (Typer.is(node, Typer.NODE_ANY_INLINE)) {
+            for (; !Typer.is(node, Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH) && node.parentNode; node = node.parentNode);
+        }
+        return node;
+    }
+
+    function computeTextRects(range) {
+        var container = range.commonAncestorContainer;
+        var bRect = (container.nodeType === 1 ? container : container.parentNode).getBoundingClientRect();
+        var rects = $.map(range.getClientRects(), toRightBottom);
         var result = [];
         rects.sort(function (a, b) {
             return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
@@ -4943,13 +5436,6 @@
             result.unshift(v);
         });
         return result;
-    }
-
-    function getParagraphNode(node) {
-        if (node.nodeType & (Typer.NODE_INLINE | Typer.NODE_INLINE_EDITABLE | Typer.NODE_INLINE_WIDGET)) {
-            for (; !(node.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) && node.parentNode; node = node.parentNode);
-        }
-        return node;
     }
 
     function addLayer(layers, element, type) {
@@ -4992,41 +5478,56 @@
             function drawLayer(className, css, value) {
                 var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
                 d.className = className;
-                d.setAttribute('style', '');
-                d.removeAttribute('elm');
+                d.removeAttribute('style');
                 $(d).css(css || '', value);
                 domCount++;
                 return d;
             }
 
-            if (v.type === 'text') {
-                var rects = computeTextRects(v.element);
+            if (v.type.substr(0, 4) === 'text') {
+                var range = Typer.createRange(v.element);
+                if (v.type === 'text-fill' && window.getSelection().rangeCount) {
+                    range = Typer.createRange(range, window.getSelection().getRangeAt(0));
+                }
+                var rects = computeTextRects(range);
+                var type = v.type;
                 $.each(rects, function (i, v) {
                     var prev = rects[i - 1] || INVALID;
                     var next = rects[i + 1] || INVALID;
-                    var dom = drawLayer('fill', toScreenRightBottom(v));
+                    var dom = drawLayer(type === 'text-fill' ? 'fill' : 'border', toScreenRightBottom(v));
                     dom.className += [
                         v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
                         v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
                         v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
                         v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
                 });
-            } else if (v.type === 'layout' || v.type === 'layout-fill' || v.type === 'layout-margin') {
+                if (v.type === 'text') {
+                    drawLayer('elm', rects[rects.length - 1]).setAttribute('elm', getElementMarker(v.element));
+                }
+            } else if (v.type.substr(0, 5) === 'block') {
                 var bRect = v.element.getBoundingClientRect();
                 drawLayer('border', bRect);
-                if (v.type !== 'layout-margin') {
-                    var elmSpec = v.element.tagName.toLowerCase() + v.element.className.replace(/^(?=.)|\s+/, '.');
-                    drawLayer('', bRect).setAttribute('elm', elmSpec);
-                }
-                if (v.type === 'layout-margin' || v.type === 'layout-fill') {
+                if (v.type === 'block') {
+                    drawLayer('elm', bRect).setAttribute('elm', getElementMarker(v.element));
+                } else if (v.type === 'block-fill') {
+                    drawLayer('fill', bRect);
+                } else if (v.type === 'block-margin') {
                     var style = window.getComputedStyle(v.element);
                     var s = toScreenRightBottom(bRect);
-                    s.margin = [-parseFloat(style.marginTop), -parseFloat(style.marginRight), -parseFloat(style.marginBottom), -parseFloat(style.marginLeft), ''].join('px ');
-                    s.borderWidth = [style.marginTop, style.marginRight, style.marginBottom, style.marginLeft].join(' ');
+                    s.margin = [
+                        -parseFloat(style.marginTop),
+                        -parseFloat(style.marginRight),
+                        -parseFloat(style.marginBottom),
+                        -parseFloat(style.marginLeft), ''].join('px ');
+                    s.borderWidth = [
+                        style.marginTop,
+                        style.marginRight,
+                        style.marginBottom,
+                        style.marginLeft].join(' ');
                     drawLayer('fill-margin', s);
-                }
-                if (v.type === 'layout-fill') {
-                    drawLayer('fill', bRect);
+                    $('br', v.element).each(function (i, v) {
+                        drawLayer('newline', v.getBoundingClientRect());
+                    });
                 }
             }
             if (dom.length > domCount) {
@@ -5052,11 +5553,10 @@
         if (activeTyper) {
             var node = activeTyper.nodeFromPoint(x, y);
             if (node && node.element !== activeTyper.element) {
-                if (node.nodeType & (Typer.NODE_WIDGET)) {
-                    addLayer(hoverLayers, node.widget.element, 'layout');
+                if (Typer.is(node, Typer.NODE_WIDGET)) {
+                    addLayer(hoverLayers, node.widget.element, 'block');
                 } else {
-                    node = getParagraphNode(node);
-                    addLayer(hoverLayers, node.element, 'layout');
+                    addLayer(hoverLayers, node.element, Typer.is(node, Typer.NODE_ANY_INLINE) ? 'text' : 'block');
                 }
             }
         }
@@ -5068,13 +5568,13 @@
         resetLayers(selectionLayers);
         if (!selection.isCaret) {
             Typer.iterate(selection.createTreeWalker(-1, function (v) {
-                if ((v.nodeType & NODE_ANY_ALLOWTEXT) || (options.layout && activeWidget && v.element === activeWidget.element)) {
-                    addLayer(selectionLayers, v.element, v.nodeType & NODE_ANY_ALLOWTEXT ? 'text' : 'layout-fill');
+                if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT) || (options.layout && activeWidget && v.element === activeWidget.element)) {
+                    addLayer(selectionLayers, v.element, v.nodeType & Typer.NODE_ANY_ALLOWTEXT ? 'text-fill' : 'block-fill');
                     return 2;
                 }
             }));
-        } else if (options.layout && selection.startNode && (selection.startNode.nodeType & NODE_ANY_ALLOWTEXT)) {
-            addLayer(selectionLayers, (getParagraphNode(selection.startNode) || selection.startNode).element, 'layout-margin');
+        } else if (options.layout && selection.startNode && Typer.is(selection.startNode, Typer.NODE_ANY_ALLOWTEXT)) {
+            addLayer(selectionLayers, getParagraphNode(selection.startNode).element, 'block-margin');
         }
         draw(selectionLayers);
     }
@@ -5113,13 +5613,299 @@
         stateChange: function (e) {
             if (supported && e.typer === activeTyper) {
                 updateSelection(e.widget.options);
+                updateHover(lastClientX, lastClientY);
             }
         }
     };
 
     Typer.defaultOptions.visualizer = supported;
 
-})(jQuery, window.Typer);
+})(jQuery, window.Typer, window, document);
+
+(function ($, Typer) {
+    'use strict';
+
+    var MS_PER_DAY = 86400000;
+    var monthstr = 'January February March April May June July August September October November December'.split(' ');
+    var shortWeekday = 'Su Mo Tu We Th Fr Sa'.split(' ');
+    var activeTyper;
+    var datepickerMenuUI;
+
+    function repeat(str, count) {
+        return new Array(count + 1).join(str);
+    }
+
+    function normalizeDate(mode, date) {
+        date = new Date(+date);
+        switch (mode) {
+            case 'week':
+                date.setDate(date.getDate() - date.getDay());
+                break;
+            case 'month':
+                date.setDate(1);
+                break;
+        }
+        return date;
+    }
+
+    function stepDate(mode, date, dir) {
+        switch (mode) {
+            case 'day':
+                return new Date(+date + MS_PER_DAY * dir);
+            case 'week':
+                return new Date(+date + MS_PER_DAY * 7 * dir);
+            case 'month':
+                return new Date(date.getFullYear(), date.getMonth() + dir, date.getDate());
+            case 'year':
+                return new Date(date.getFullYear() + dir, date.getMonth(), date.getDate());
+        }
+    }
+
+    function formatDate(mode, date) {
+        switch (mode) {
+            case 'month':
+                return monthstr[date.getMonth()] + ' ' + date.getFullYear();
+            case 'week':
+                var end = stepDate('day', date, 6);
+                return monthstr[date.getMonth()] + ' ' + date.getDate() + ' - ' + (end.getMonth() !== date.getMonth() ? monthstr[end.getMonth()] + ' ' : '') + end.getDate() + ', ' + date.getFullYear();
+        }
+        return monthstr[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+    }
+
+    function initDatapicker() {
+        datepickerMenuUI = Typer.ui({
+            type: 'contextmenu',
+            controls: [Typer.ui.calendar({
+                name: 'calendar'
+            })],
+            controlExecuted: function (ui, control) {
+                if (control.is('calendar')) {
+                    activeTyper.setValue(ui.getValue(control));
+                }
+            }
+        });
+    }
+
+    Typer.ui.define('calendar', {
+        type: 'calendar',
+        defaultNS: 'calendar',
+        controls: '*',
+        showButtonLabel: false,
+        get value() {
+            return normalizeDate(this.mode, this.selectedDate);
+        },
+        set value(value) {
+            this.selectedDate = normalizeDate(this.mode, value);
+            this.ui.trigger(this, 'showMonth', this.selectedDate);
+        },
+        init: function (ui, self) {
+            var $table = $('table', self.element);
+            $(repeat('<tr></tr>', 7)).appendTo($table);
+            $(repeat('<th></th>', 7)).appendTo($table.find('tr:first'));
+            $(repeat('<td></td>', 7)).appendTo($table.find('tr+tr'));
+            $('<button>').appendTo($table.find('td'));
+            $table.find('th').text(function (i) {
+                return shortWeekday[i];
+            });
+            $table.bind('mousewheel', function (e) {
+                ui.trigger(self, 'showMonth', Typer.ui.getWheelDelta(e));
+            });
+            $table.find('td').click(function () {
+                var monthDelta = $(this).hasClass('prev') ? -1 : $(this).hasClass('next') ? 1 : 0;
+                ui.setValue(self, new Date(self.currentMonth.getFullYear(), self.currentMonth.getMonth() + monthDelta, +this.textContent));
+                ui.execute(self);
+            });
+        },
+        stateChange: function (ui, self) {
+            ui.trigger(self, 'showMonth', self.currentMonth || self.value || new Date());
+        },
+        showMonth: function (ui, self, date) {
+            if (isNaN(+date)) {
+                return;
+            }
+            if (typeof date === 'number') {
+                date = stepDate('month', self.currentMonth, date);
+            }
+            var y = date.getFullYear();
+            var m = date.getMonth();
+            var currentMonth = new Date(y, m);
+            var firstDay = currentMonth.getDay();
+            var $buttons = $('td', self.element).removeClass('selected');
+
+            if (currentMonth !== self.currentMonth) {
+                var numDays = new Date(y, m + 1, 0).getDate();
+                var numDaysLast = new Date(y, m, 0).getDate();
+                $buttons.removeClass('prev cur next today');
+                $buttons.each(function (i, v) {
+                    if (i < firstDay) {
+                        $(v).children().text(i + 1 - firstDay + numDaysLast).end().addClass('prev');
+                    } else if (i >= numDays + firstDay) {
+                        $(v).children().text(i + 1 - firstDay - numDays).end().addClass('next');
+                    } else {
+                        $(v).children().text(i + 1 - firstDay).end().addClass('cur');
+                    }
+                });
+                var today = new Date();
+                if (today.getFullYear() === y && today.getMonth() === m) {
+                    $buttons.filter('.cur').eq(today.getDate() - 1).addClass('today');
+                }
+                $('tr:last', self.element).toggle(firstDay + numDays > 35);
+
+                var cy = self.resolve('year')[0];
+                var cm = self.resolve('month')[0];
+                $.each(cy.controls, function (i, v) {
+                    v.label = v.value = y + i - 5;
+                });
+                cy.value = y;
+                cm.value = m;
+                self.currentMonth = currentMonth;
+            }
+            if (self.value.getFullYear() === y && self.value.getMonth() === m) {
+                switch (self.mode) {
+                    case 'day':
+                        $buttons.eq(self.value.getDate() + firstDay - 1).addClass('selected');
+                        break;
+                    case 'week':
+                        $buttons.slice(self.value.getDate() + firstDay - 1, self.value.getDate() + firstDay + 6).addClass('selected');
+                        break;
+                    case 'month':
+                        $buttons.filter('td.cur').addClass('selected');
+                        break;
+                }
+            }
+            $(self.element).toggleClass('select-range', self.mode !== 'day');
+        }
+    });
+
+    Typer.ui.addControls('calendar', {
+        year: Typer.ui.dropdown({
+            controls: function () {
+                var arr = [];
+                for (var i = 0; i < 11; i++) {
+                    arr[i] = Typer.ui.button();
+                }
+                return arr;
+            },
+            execute: function (ui, self) {
+                ui.trigger(self.contextualParent, 'showMonth', new Date(self.value, ui.getValue('calendar:month')));
+            }
+        }),
+        month: Typer.ui.dropdown({
+            execute: function (ui, self) {
+                ui.trigger(self.contextualParent, 'showMonth', new Date(ui.getValue('calendar:year'), self.value));
+            }
+        }),
+        prev: Typer.ui.button({
+            buttonsetGroup: 'right',
+            execute: function (ui, self) {
+                ui.trigger(self.contextualParent, 'showMonth', -1);
+            }
+        }),
+        today: Typer.ui.button({
+            buttonsetGroup: 'right',
+            execute: function (ui, self) {
+                ui.setValue(self.contextualParent, new Date());
+            }
+        }),
+        next: Typer.ui.button({
+            buttonsetGroup: 'right',
+            execute: function (ui, self) {
+                ui.trigger(self.contextualParent, 'showMonth', 1);
+            }
+        })
+    });
+
+    Typer.ui.addIcons('material', 'calendar', {
+        today: '\ue8df', // today
+        prev: '\ue314', // keyboard_arrow_left
+        next: '\ue315', // keyboard_arrow_right
+    });
+
+    Typer.ui.addLabels('en', 'calendar', {
+        today: 'Today',
+        prev: 'Previous month',
+        next: 'Next month'
+    });
+
+    var monthLabels = {};
+    var monthControls = {};
+    for (var i = 0; i < 12; i++) {
+        monthLabels[monthstr[i].toLowerCase()] = monthstr[i];
+        monthControls[monthstr[i].toLowerCase()] = Typer.ui.button({
+            value: i
+        });
+    }
+    Typer.ui.addControls('calendar:month', monthControls);
+    Typer.ui.addLabels('en', 'calendar:month', monthLabels);
+
+    $.extend(Typer.ui.themeExtensions, {
+        calendar: '<div class="typer-ui-calendar"><div class="typer-ui-calendar-header"><br x:t="buttonset"/></div><div class="typer-ui-calendar-body"><table></table></div></div>'
+    });
+
+    Typer.presets.datepicker = {
+        options: {
+            mode: 'day'
+        },
+        overrides: {
+            getValue: function (preset) {
+                return normalizeDate(preset.options.mode, preset.selectedDate || new Date());
+            },
+            setValue: function (preset, date) {
+                preset.selectedDate = normalizeDate(preset.options.mode, date);
+                this.selectAll();
+                this.invoke(function (tx) {
+                    tx.insertText(formatDate(preset.options.mode, preset.selectedDate));
+                });
+                if (this === activeTyper) {
+                    datepickerMenuUI.setValue('calendar', preset.selectedDate);
+                }
+            },
+            hasContent: function (preset) {
+                return !!preset.selectedDate;
+            }
+        },
+        contentChange: function (e) {
+            if (e.typer === activeTyper && e.data !== 'script') {
+                var date = new Date(e.typer.extractText());
+                if (!isNaN(+date)) {
+                    datepickerMenuUI.setValue('calendar', normalizeDate(e.widget.options.mode, date));
+                }
+            }
+        },
+        click: function (e) {
+            if (e.typer === activeTyper) {
+                datepickerMenuUI.show(e.typer.element);
+            }
+        },
+        mousewheel: function (e) {
+            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), e.data));
+            e.preventDefault();
+        },
+        upArrow: function (e) {
+            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), -1));
+        },
+        downArrow: function (e) {
+            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), 1));
+        },
+        focusin: function (e) {
+            if (!datepickerMenuUI) {
+                initDatapicker();
+            }
+            e.typer.retainFocus(datepickerMenuUI.element);
+            activeTyper = e.typer;
+            datepickerMenuUI.setValue('calendar', 'mode', e.widget.options.mode);
+            datepickerMenuUI.setValue('calendar', e.typer.getValue());
+            datepickerMenuUI.show(e.typer.element);
+        },
+        focusout: function (e) {
+            if (e.typer === activeTyper) {
+                e.typer.setValue(datepickerMenuUI.getValue('calendar'));
+            }
+            datepickerMenuUI.hide();
+        }
+    };
+
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -5172,9 +5958,6 @@
     }
 
     Typer.presets.keyword = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         options: {
             allowFreeInput: true,
             suggestionCount: 5,
@@ -5184,15 +5967,15 @@
             }
         },
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return $('span', this.element).map(function (i, v) {
                     return v.childNodes[0].data;
                 }).get();
             },
-            setValue: function (values) {
+            setValue: function (preset, values) {
                 this.invoke(function (tx) {
                     function validateAndAdd(v) {
-                        if (tx.typer.presetOptions.validate(v)) {
+                        if (preset.options.validate(v)) {
                             tx.insertWidget('tag', v);
                         }
                     }
@@ -5208,9 +5991,9 @@
             hasContent: function () {
                 return !!($('span', this.element)[0] || this.extractText());
             },
-            validate: function () {
+            validate: function (preset) {
                 var value = this.getValue();
-                if (this.presetOptions.required && !value.length) {
+                if (preset.options.required && !value.length) {
                     return false;
                 }
                 return !$('.invalid', this.element)[0];
@@ -5350,9 +6133,6 @@
     'use strict';
 
     Typer.presets.number = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         validation: {
             allowChars: '0-9'
         },
@@ -5363,20 +6143,20 @@
             step: 1
         },
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return parseInt(this.extractText());
             },
-            setValue: function (value) {
+            setValue: function (preset, value) {
                 value = +value || 0;
-                if (this.presetOptions.max !== null && value > this.presetOptions.max) {
-                    value = this.presetOptions.max;
+                if (preset.options.max !== null && value > preset.options.max) {
+                    value = preset.options.max;
                 }
-                if (this.presetOptions.min !== null && value < this.presetOptions.min) {
-                    value = this.presetOptions.min;
+                if (preset.options.min !== null && value < preset.options.min) {
+                    value = preset.options.min;
                 }
                 value = String(+value || 0);
-                if (this.presetOptions.digits === 'fixed') {
-                    var numOfDigits = String(+this.presetOptions.max || 0).length;
+                if (preset.options.digits === 'fixed') {
+                    var numOfDigits = String(+preset.options.max || 0).length;
                     value = (new Array(numOfDigits + 1).join('0') + value).substr(-numOfDigits);
                 }
                 if (value !== this.extractText()) {
@@ -5390,20 +6170,13 @@
                 return !!this.extractText();
             }
         },
-        init: function (e) {
-            $(e.typer.element).bind('mousewheel', function (ex) {
-                if (e.typer.focused()) {
-                    var dir = ex.originalEvent.wheelDeltaY || ex.originalEvent.wheelDelta || -ex.originalEvent.detail;
-                    if (dir) {
-                        e.typer.setValue(e.typer.getValue() + (dir / Math.abs(dir)) * e.widget.options.step);
-                    }
-                    ex.preventDefault();
-                }
-            });
-        },
         focusout: function (e) {
             var value = parseInt(e.typer.extractText()) || 0;
             e.typer.setValue(value);
+        },
+        mousewheel: function (e) {
+            e.typer.setValue(e.typer.getValue() - e.data * e.widget.options.step);
+            e.preventDefault();
         },
         upArrow: function (e) {
             var value = parseInt(e.typer.extractText()) || 0;
@@ -5427,15 +6200,12 @@
     'use strict';
 
     Typer.presets.textbox = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         accept: 'text',
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return this.extractText();
             },
-            setValue: function (value) {
+            setValue: function (preset, value) {
                 if (value !== this.getValue()) {
                     this.invoke(function (tx) {
                         tx.selection.select(this.element, 'contents');
@@ -5446,9 +6216,9 @@
             hasContent: function () {
                 return !!this.getValue();
             },
-            validate: function () {
+            validate: function (preset) {
                 var value = this.getValue();
-                if (this.presetOptions.required && !value) {
+                if (preset.options.required && !value) {
                     return false;
                 }
                 return true;
@@ -5461,51 +6231,11 @@
 
 } (jQuery, window.Typer));
 
-(function ($, Typer) {
+(function ($, Typer, window, document) {
     'use strict';
 
     var ANIMATION_END = 'animationend oanimationend webkitAnimationEnd';
     var TRANSITION_END = 'transitionend otransitionend webkitTransitionEnd';
-    var FLIP_POS = {
-        left: 'right',
-        right: 'left',
-        top: 'bottom',
-        bottom: 'top'
-    };
-
-    var currentMenu;
-    var currentDialogPositions = [];
-
-    function showContextMenu(element, node, pos) {
-        if (currentMenu !== element) {
-            hideContextMenu();
-            currentMenu = element;
-            $(element).appendTo(document.body).css('position', 'fixed');
-            Typer.ui.setZIndex(element, document.body);
-        }
-        var rect = {};
-        if (node.getBoundingClientRect) {
-            var xrel = /\b(left|right)\b/.test(pos) ? RegExp.$1 : 'left';
-            var yrel = /\b(top|bottom)\b/.test(pos) ? RegExp.$1 : 'bottom';
-            var rectb = node.getBoundingClientRect();
-            rect[xrel] = rectb.left;
-            rect[yrel] = rectb.top;
-            rect[FLIP_POS[xrel]] = rectb.right;
-            rect[FLIP_POS[yrel]] = rectb.bottom;
-        } else {
-            rect.left = rect.right = node.x;
-            rect.top = rect.bottom = node.y;
-        }
-        $(element).css({
-            left: rect.left + $(element).outerWidth() > $(window).width() ? rect.right - $(element).outerWidth() : rect.left,
-            top: rect.top + $(element).outerHeight() > $(window).height() ? rect.bottom - $(element).outerHeight() : rect.top
-        });
-    }
-
-    function hideContextMenu() {
-        $(currentMenu).detach();
-        currentMenu = null;
-    }
 
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
@@ -5523,33 +6253,13 @@
         }
     }
 
-    function updateDialogPositions() {
-        var windowSize = document.documentElement.getBoundingClientRect();
-
-        $.each(currentDialogPositions, function (i, v) {
-            var dialog = $(v.target).find('.typer-ui-dialog')[0];
-            var dialogSize = dialog.getBoundingClientRect();
-            var rect = v.reference.getBoundingClientRect();
-            var stick = {};
-
-            var $r = $(v.target).css({
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height
-            });
-            if (v.pinToParent === 'bottom' || v.pinToParent === 'top') {
-                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
-                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
-            }
-            if (v.pinToParent === 'left' || v.pinToParent === 'right') {
-                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
-                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
-            }
-            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
-                $r.toggleClass('stick-' + v, !!stick[v]);
-                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
-            });
+    function detachCallout(control) {
+        var callout = $('<div class="typer-ui typer-ui-material">').append($(control.element).children('.typer-ui-float').addClass('is-' + control.type))[0];
+        if (control.ui.typer) {
+            control.ui.typer.retainFocus(callout);
+        }
+        $(control.element).click(function (e) {
+            control.ui.show(control, callout, control.element, 'left bottom');
         });
     }
 
@@ -5562,24 +6272,32 @@
         controlActiveClass: 'active',
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
+        controlPinActiveClass: 'pin-active',
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
-            var hasIcon = !!Typer.ui.getIcon(control, 'material');
-            return (control.type === 'textbox' || (hasIcon && ui.type === 'toolbar' && !ui.showButtonLabel && (control.parent || '').type !== 'callout')) ? '' : '<span x:bind="(_:label)"></span>';
+            if (control.is('textbox')) {
+                return '';
+            }
+            if ((control.contextualParent || ui).type !== 'callout' && ui.getIcon(control)) {
+                if (!control.showButtonLabel || !control.contextualParent.showButtonLabel || !ui.showButtonLabel) {
+                    return '';
+                }
+            }
+            return '<span x:bind="(_:label)"></span>';
         },
         labelIcon: function (ui, control) {
-            if ((control.parent || ui).type === 'dropdown' || control.type === 'checkbox' || !Typer.ui.getIcon(control, 'material')) {
+            if ((control.contextualParent || ui).is('dropdown') || control.is('checkbox') || !ui.getIcon(control)) {
                 return '';
             }
             return '<i class="material-icons" x:bind="(_:icon)"></i>';
         },
-        buttonset: '<div class="typer-ui-buttonset"><div class="typer-ui-buttonset-pad"></div><br x:t="children"/></div>',
+        buttonset: '<div class="typer-ui-buttonset"><br x:t="children(buttonsetGroup:left)"/><div class="typer-ui-buttonset-pad"></div><br x:t="children(buttonsetGroup:right)"/></div>',
         buttonlist: '<div class="typer-ui-buttonlist"><br x:t="children"/></div>',
         form: '<div class="typer-ui-form"><br x:t="children"/></div>',
         menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
-        toolbar: '<div class="typer-ui-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-float typer-ui-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
+        toolbar: '<div class="typer-ui-buttonset is-toolbar"><br x:t="children"/></div>',
+        contextmenu: '<div class="typer-ui-float is-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
             setImmediate(function () {
@@ -5602,10 +6320,20 @@
                 });
             });
         },
-        callout: '<label class="typer-ui-callout has-clickeffect" x:bind="(title:label)"><br x:t="label"/><br x:t="menupane"/></label>',
+        callout: '<label class="typer-ui-callout" x:bind="(title:label)"><br x:t="button"/><br x:t="menupane"/></label>',
         calloutExecuteOn: 'click',
+        calloutInit: function (ui, control) {
+            if (!control.contextualParent.is('callout contextmenu')) {
+                detachCallout(control);
+            }
+        },
         dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
-        checkbox: '<label class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></label>',
+        dropdownInit: function (ui, control) {
+            if (!control.contextualParent.is('callout contextmenu')) {
+                detachCallout(control);
+            }
+        },
+        checkbox: '<button class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></button>',
         checkboxInit: function (ui, control) {
             $(control.element).click(function () {
                 control.value = $(this).toggleClass('checked').hasClass('checked');
@@ -5635,6 +6363,7 @@
                     }
                 }
             }));
+            control.preset.parentControl = control;
             $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
@@ -5647,10 +6376,9 @@
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
         },
-        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content"><br x:t="children"></div></div></div>',
+        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
-            var resolveButton = ui.resolve(control.resolve)[0];
-            var parentControl = ui.parentUI && ui.parentUI.getExecutingControl();
+            var resolveButton = control.resolve(control.resolveBy)[0];
             var $wrapper = $(ui.element).find('.typer-ui-dialog-wrapper');
             var $content = $(ui.element).find('.typer-ui-dialog-content');
 
@@ -5668,19 +6396,10 @@
             }
             setImmediate(function () {
                 $(control.element).addClass('open');
-                if (/top|bottom|left|right/.test(ui.pinToParent) && document.activeElement !== document.body) {
-                    var pinElement = parentControl ? parentControl.element : document.activeElement;
-                    $wrapper.addClass('pinned pinned-' + ui.pinToParent);
-                    if (parentControl) {
-                        $(pinElement).addClass('pin-active');
-                    }
-                    currentDialogPositions.push({
-                        dialog: ui,
-                        reference: pinElement,
-                        target: $wrapper[0],
-                        pinToParent: ui.pinToParent
-                    });
-                    updateDialogPositions();
+                if (ui.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
+                    $wrapper.addClass('pinned pinned-' + ui.parentControl.pinDirection);
+                    $(ui.parentControl.element).addClass('pin-active');
+                    Typer.ui.pin(control, $wrapper[0], ui.parentControl.element, ui.parentControl.pinDirection);
                 }
             });
         },
@@ -5693,45 +6412,44 @@
         dialogClose: function (ui, control) {
             $(control.element).addClass('closing').one(TRANSITION_END, function () {
                 $(ui.element).remove();
-                $.each(currentDialogPositions, function (i, v) {
-                    if (v.dialog === ui) {
-                        $(v.reference).removeClass('pin-active');
-                        currentDialogPositions.splice(i, 1);
-                        return false;
-                    }
-                });
-            });
-        },
-        init: function (ui) {
-            $(ui.element).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
-                setMenuPosition(e.currentTarget);
-            });
-            $.each(ui.all, function (i, v) {
-                if (/callout|dropdown/.test(v.type) && v.contextualParent.type !== 'callout' && v.contextualParent.type !== 'contextmenu') {
-                    var callout = $('<div class="typer-ui typer-ui-material">').append($(v.element).children('.typer-ui-float').addClass('parent-is-' + v.type))[0];
-                    if (ui.typer) {
-                        ui.typer.retainFocus(callout);
-                    }
-                    $(v.element).click(function (e) {
-                        showContextMenu(callout, v.element, 'left bottom');
-                    });
+                if (ui.pinnable && ui.parentControl) {
+                    $(ui.parentControl.element).removeClass('pin-active');
+                    Typer.ui.unpin(control);
                 }
             });
         },
-        show: function (ui, control, pos) {
-            if (ui.type === 'contextmenu') {
-                showContextMenu(ui.element, pos);
+        afterShow: function (ui, control, data) {
+            if (control.is('dialog contextmenu')) {
+                $(data.element).removeClass('closing').addClass('open');
             }
         },
-        controlExecuted: function (ui, control, executed) {
-            if (/callout|dropdown|contextmenu/.test(executed.contextualParent.type)) {
-                hideContextMenu();
+        beforeHide: function (ui, control, data) {
+            if (control.is('dialog contextmenu')) {
+                var deferred = $.Deferred();
+                $(data.element).addClass('closing').one(TRANSITION_END, function () {
+                    if ($(this).hasClass('closing')) {
+                        $(this).removeClass('open closing');
+                        deferred.resolve();
+                    }
+                });
+                return deferred.promise();
+            }
+        },
+        positionUpdate: function (ui, control, data) {
+            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
+                $(data.element).toggleClass('stick-' + v, !!data.stick[v]);
+            });
+        },
+        controlExecuted: function (ui, control) {
+            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu')) {
+                ui.hide(control.contextualParent);
             }
         }
     });
 
     $(function () {
-        $(document.body).on('mousedown', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+        var SELECT_EFFECT = '.typer-ui-material button:not(.typer-ui-checkbox), .typer-ui-material .has-clickeffect';
+        $(document.body).on('mousedown', SELECT_EFFECT, function (e) {
             var pos = e.currentTarget.getBoundingClientRect();
             var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget).children().css({
                 top: e.clientY - pos.top,
@@ -5741,30 +6459,24 @@
             var p2 = Math.pow(e.clientY - pos.top, 2) + Math.pow(e.clientX - pos.right, 2);
             var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
             var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
-            var scalePercent = 0.5 + 2 * Math.sqrt(Math.max.call(null, p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
+            var scalePercent = 0.5 + 2 * Math.sqrt(Math.max(p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
             setImmediate(function () {
                 $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
             $overlay.parent().css('border-radius', $(e.currentTarget).css('border-radius'));
-            e.stopPropagation();
         });
-        $(document.body).on('mouseup mouseleave', '.typer-ui-material button, .typer-ui-material .has-clickeffect', function (e) {
+        $(document.body).on('mouseup mouseleave', SELECT_EFFECT, function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
             $overlay.children().addClass('animate-out').bind(TRANSITION_END, function () {
                 $overlay.remove();
             });
         });
-        $(document.body).mousedown(function (e) {
-            if (currentMenu && !Typer.containsOrEquals(currentMenu, e.target)) {
-                hideContextMenu();
-            }
-        });
-        $(window).bind('resize scroll orientationchange', function (e) {
-            updateDialogPositions();
+        $(document.body).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
+            setMenuPosition(e.currentTarget);
         });
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer, window, document));
 
 (function (global, undefined) {
     "use strict";
@@ -5952,3 +6664,9 @@
     attachTo.setImmediate = setImmediate;
     attachTo.clearImmediate = clearImmediate;
 }(typeof self === "undefined" ? typeof global === "undefined" ? this : global : self));
+
+/*! showdown 02-06-2017 */
+
+(function(){function a(a){"use strict";var b={omitExtraWLInCodeBlocks:{defaultValue:!1,describe:"Omit the default extra whiteline added to code blocks",type:"boolean"},noHeaderId:{defaultValue:!1,describe:"Turn on/off generated header id",type:"boolean"},prefixHeaderId:{defaultValue:!1,describe:"Specify a prefix to generated header ids",type:"string"},ghCompatibleHeaderId:{defaultValue:!1,describe:"Generate header ids compatible with github style (spaces are replaced with dashes, a bunch of non alphanumeric chars are removed)",type:"boolean"},headerLevelStart:{defaultValue:!1,describe:"The header blocks level start",type:"integer"},parseImgDimensions:{defaultValue:!1,describe:"Turn on/off image dimension parsing",type:"boolean"},simplifiedAutoLink:{defaultValue:!1,describe:"Turn on/off GFM autolink style",type:"boolean"},excludeTrailingPunctuationFromURLs:{defaultValue:!1,describe:"Excludes trailing punctuation from links generated with autoLinking",type:"boolean"},literalMidWordUnderscores:{defaultValue:!1,describe:"Parse midword underscores as literal underscores",type:"boolean"},literalMidWordAsterisks:{defaultValue:!1,describe:"Parse midword asterisks as literal asterisks",type:"boolean"},strikethrough:{defaultValue:!1,describe:"Turn on/off strikethrough support",type:"boolean"},tables:{defaultValue:!1,describe:"Turn on/off tables support",type:"boolean"},tablesHeaderId:{defaultValue:!1,describe:"Add an id to table headers",type:"boolean"},ghCodeBlocks:{defaultValue:!0,describe:"Turn on/off GFM fenced code blocks support",type:"boolean"},tasklists:{defaultValue:!1,describe:"Turn on/off GFM tasklist support",type:"boolean"},smoothLivePreview:{defaultValue:!1,describe:"Prevents weird effects in live previews due to incomplete input",type:"boolean"},smartIndentationFix:{defaultValue:!1,description:"Tries to smartly fix indentation in es6 strings",type:"boolean"},disableForced4SpacesIndentedSublists:{defaultValue:!1,description:"Disables the requirement of indenting nested sublists by 4 spaces",type:"boolean"},simpleLineBreaks:{defaultValue:!1,description:"Parses simple line breaks as <br> (GFM Style)",type:"boolean"},requireSpaceBeforeHeadingText:{defaultValue:!1,description:"Makes adding a space between `#` and the header text mandatory (GFM Style)",type:"boolean"},ghMentions:{defaultValue:!1,description:"Enables github @mentions",type:"boolean"},ghMentionsLink:{defaultValue:"https://github.com/{u}",description:"Changes the link generated by @mentions. Only applies if ghMentions option is enabled.",type:"string"},encodeEmails:{defaultValue:!0,description:"Encode e-mail addresses through the use of Character Entities, transforming ASCII e-mail addresses into its equivalent decimal entities",type:"boolean"},openLinksInNewWindow:{defaultValue:!1,description:"Open all links in new windows",type:"boolean"}};if(!1===a)return JSON.parse(JSON.stringify(b));var c={};for(var d in b)b.hasOwnProperty(d)&&(c[d]=b[d].defaultValue);return c}function b(a,b){"use strict";var c=b?"Error in "+b+" extension->":"Error in unnamed extension",e={valid:!0,error:""};d.helper.isArray(a)||(a=[a]);for(var f=0;f<a.length;++f){var g=c+" sub-extension "+f+": ",h=a[f];if("object"!=typeof h)return e.valid=!1,e.error=g+"must be an object, but "+typeof h+" given",e;if(!d.helper.isString(h.type))return e.valid=!1,e.error=g+'property "type" must be a string, but '+typeof h.type+" given",e;var i=h.type=h.type.toLowerCase();if("language"===i&&(i=h.type="lang"),"html"===i&&(i=h.type="output"),"lang"!==i&&"output"!==i&&"listener"!==i)return e.valid=!1,e.error=g+"type "+i+' is not recognized. Valid values: "lang/language", "output/html" or "listener"',e;if("listener"===i){if(d.helper.isUndefined(h.listeners))return e.valid=!1,e.error=g+'. Extensions of type "listener" must have a property called "listeners"',e}else if(d.helper.isUndefined(h.filter)&&d.helper.isUndefined(h.regex))return e.valid=!1,e.error=g+i+' extensions must define either a "regex" property or a "filter" method',e;if(h.listeners){if("object"!=typeof h.listeners)return e.valid=!1,e.error=g+'"listeners" property must be an object but '+typeof h.listeners+" given",e;for(var j in h.listeners)if(h.listeners.hasOwnProperty(j)&&"function"!=typeof h.listeners[j])return e.valid=!1,e.error=g+'"listeners" property must be an hash of [event name]: [callback]. listeners.'+j+" must be a function but "+typeof h.listeners[j]+" given",e}if(h.filter){if("function"!=typeof h.filter)return e.valid=!1,e.error=g+'"filter" must be a function, but '+typeof h.filter+" given",e}else if(h.regex){if(d.helper.isString(h.regex)&&(h.regex=new RegExp(h.regex,"g")),!(h.regex instanceof RegExp))return e.valid=!1,e.error=g+'"regex" property must either be a string or a RegExp object, but '+typeof h.regex+" given",e;if(d.helper.isUndefined(h.replace))return e.valid=!1,e.error=g+'"regex" extensions must implement a replace string or function',e}}return e}function c(a,b){"use strict";return"¨E"+b.charCodeAt(0)+"E"}var d={},e={},f={},g=a(!0),h="vanilla",i={github:{omitExtraWLInCodeBlocks:!0,simplifiedAutoLink:!0,excludeTrailingPunctuationFromURLs:!0,literalMidWordUnderscores:!0,strikethrough:!0,tables:!0,tablesHeaderId:!0,ghCodeBlocks:!0,tasklists:!0,disableForced4SpacesIndentedSublists:!0,simpleLineBreaks:!0,requireSpaceBeforeHeadingText:!0,ghCompatibleHeaderId:!0,ghMentions:!0},original:{noHeaderId:!0,ghCodeBlocks:!1},ghost:{omitExtraWLInCodeBlocks:!0,parseImgDimensions:!0,simplifiedAutoLink:!0,excludeTrailingPunctuationFromURLs:!0,literalMidWordUnderscores:!0,strikethrough:!0,tables:!0,tablesHeaderId:!0,ghCodeBlocks:!0,tasklists:!0,smoothLivePreview:!0,simpleLineBreaks:!0,requireSpaceBeforeHeadingText:!0,ghMentions:!1,encodeEmails:!0},vanilla:a(!0),allOn:function(){"use strict";var b=a(!0),c={};for(var d in b)b.hasOwnProperty(d)&&(c[d]=!0);return c}()};d.helper={},d.extensions={},d.setOption=function(a,b){"use strict";return g[a]=b,this},d.getOption=function(a){"use strict";return g[a]},d.getOptions=function(){"use strict";return g},d.resetOptions=function(){"use strict";g=a(!0)},d.setFlavor=function(a){"use strict";if(!i.hasOwnProperty(a))throw Error(a+" flavor was not found");d.resetOptions();var b=i[a];h=a;for(var c in b)b.hasOwnProperty(c)&&(g[c]=b[c])},d.getFlavor=function(){"use strict";return h},d.getFlavorOptions=function(a){"use strict";if(i.hasOwnProperty(a))return i[a]},d.getDefaultOptions=function(b){"use strict";return a(b)},d.subParser=function(a,b){"use strict";if(d.helper.isString(a)){if(void 0===b){if(e.hasOwnProperty(a))return e[a];throw Error("SubParser named "+a+" not registered!")}e[a]=b}},d.extension=function(a,c){"use strict";if(!d.helper.isString(a))throw Error("Extension 'name' must be a string");if(a=d.helper.stdExtName(a),d.helper.isUndefined(c)){if(!f.hasOwnProperty(a))throw Error("Extension named "+a+" is not registered!");return f[a]}"function"==typeof c&&(c=c()),d.helper.isArray(c)||(c=[c]);var e=b(c,a);if(!e.valid)throw Error(e.error);f[a]=c},d.getAllExtensions=function(){"use strict";return f},d.removeExtension=function(a){"use strict";delete f[a]},d.resetExtensions=function(){"use strict";f={}},d.validateExtension=function(a){"use strict";var c=b(a,null);return!!c.valid||(console.warn(c.error),!1)},d.hasOwnProperty("helper")||(d.helper={}),d.helper.isString=function(a){"use strict";return"string"==typeof a||a instanceof String},d.helper.isFunction=function(a){"use strict";var b={};return a&&"[object Function]"===b.toString.call(a)},d.helper.isArray=function(a){"use strict";return a.constructor===Array},d.helper.isUndefined=function(a){"use strict";return void 0===a},d.helper.forEach=function(a,b){"use strict";if(d.helper.isUndefined(a))throw new Error("obj param is required");if(d.helper.isUndefined(b))throw new Error("callback param is required");if(!d.helper.isFunction(b))throw new Error("callback param must be a function/closure");if("function"==typeof a.forEach)a.forEach(b);else if(d.helper.isArray(a))for(var c=0;c<a.length;c++)b(a[c],c,a);else{if("object"!=typeof a)throw new Error("obj does not seem to be an array or an iterable object");for(var e in a)a.hasOwnProperty(e)&&b(a[e],e,a)}},d.helper.stdExtName=function(a){"use strict";return a.replace(/[_?*+\/\\.^-]/g,"").replace(/\s/g,"").toLowerCase()},d.helper.escapeCharactersCallback=c,d.helper.escapeCharacters=function(a,b,d){"use strict";var e="(["+b.replace(/([\[\]\\])/g,"\\$1")+"])";d&&(e="\\\\"+e);var f=new RegExp(e,"g");return a=a.replace(f,c)};var j=function(a,b,c,d){"use strict";var e,f,g,h,i,j=d||"",k=j.indexOf("g")>-1,l=new RegExp(b+"|"+c,"g"+j.replace(/g/g,"")),m=new RegExp(b,j.replace(/g/g,"")),n=[];do{for(e=0;g=l.exec(a);)if(m.test(g[0]))e++||(f=l.lastIndex,h=f-g[0].length);else if(e&&!--e){i=g.index+g[0].length;var o={left:{start:h,end:f},match:{start:f,end:g.index},right:{start:g.index,end:i},wholeMatch:{start:h,end:i}};if(n.push(o),!k)return n}}while(e&&(l.lastIndex=f));return n};d.helper.matchRecursiveRegExp=function(a,b,c,d){"use strict";for(var e=j(a,b,c,d),f=[],g=0;g<e.length;++g)f.push([a.slice(e[g].wholeMatch.start,e[g].wholeMatch.end),a.slice(e[g].match.start,e[g].match.end),a.slice(e[g].left.start,e[g].left.end),a.slice(e[g].right.start,e[g].right.end)]);return f},d.helper.replaceRecursiveRegExp=function(a,b,c,e,f){"use strict";if(!d.helper.isFunction(b)){var g=b;b=function(){return g}}var h=j(a,c,e,f),i=a,k=h.length;if(k>0){var l=[];0!==h[0].wholeMatch.start&&l.push(a.slice(0,h[0].wholeMatch.start));for(var m=0;m<k;++m)l.push(b(a.slice(h[m].wholeMatch.start,h[m].wholeMatch.end),a.slice(h[m].match.start,h[m].match.end),a.slice(h[m].left.start,h[m].left.end),a.slice(h[m].right.start,h[m].right.end))),m<k-1&&l.push(a.slice(h[m].wholeMatch.end,h[m+1].wholeMatch.start));h[k-1].wholeMatch.end<a.length&&l.push(a.slice(h[k-1].wholeMatch.end)),i=l.join("")}return i},d.helper.regexIndexOf=function(a,b,c){"use strict";if(!d.helper.isString(a))throw"InvalidArgumentError: first parameter of showdown.helper.regexIndexOf function must be a string";if(b instanceof RegExp==!1)throw"InvalidArgumentError: second parameter of showdown.helper.regexIndexOf function must be an instance of RegExp";var e=a.substring(c||0).search(b);return e>=0?e+(c||0):e},d.helper.splitAtIndex=function(a,b){"use strict";if(!d.helper.isString(a))throw"InvalidArgumentError: first parameter of showdown.helper.regexIndexOf function must be a string";return[a.substring(0,b),a.substring(b)]},d.helper.encodeEmailAddress=function(a){"use strict";var b=[function(a){return"&#"+a.charCodeAt(0)+";"},function(a){return"&#x"+a.charCodeAt(0).toString(16)+";"},function(a){return a}];return a=a.replace(/./g,function(a){if("@"===a)a=b[Math.floor(2*Math.random())](a);else{var c=Math.random();a=c>.9?b[2](a):c>.45?b[1](a):b[0](a)}return a})},"undefined"==typeof console&&(console={warn:function(a){"use strict";alert(a)},log:function(a){"use strict";alert(a)},error:function(a){"use strict";throw a}}),d.helper.regexes={asteriskAndDash:/([*_])/g},d.Converter=function(a){"use strict";function c(a,c){if(c=c||null,d.helper.isString(a)){if(a=d.helper.stdExtName(a),c=a,d.extensions[a])return console.warn("DEPRECATION WARNING: "+a+" is an old extension that uses a deprecated loading method.Please inform the developer that the extension should be updated!"),void e(d.extensions[a],a);if(d.helper.isUndefined(f[a]))throw Error('Extension "'+a+'" could not be loaded. It was either not found or is not a valid extension.');a=f[a]}"function"==typeof a&&(a=a()),d.helper.isArray(a)||(a=[a]);var g=b(a,c);if(!g.valid)throw Error(g.error);for(var h=0;h<a.length;++h){switch(a[h].type){case"lang":m.push(a[h]);break;case"output":n.push(a[h])}if(a[h].hasOwnProperty("listeners"))for(var i in a[h].listeners)a[h].listeners.hasOwnProperty(i)&&j(i,a[h].listeners[i])}}function e(a,c){"function"==typeof a&&(a=a(new d.Converter)),d.helper.isArray(a)||(a=[a]);var e=b(a,c);if(!e.valid)throw Error(e.error);for(var f=0;f<a.length;++f)switch(a[f].type){case"lang":m.push(a[f]);break;case"output":n.push(a[f]);break;default:throw Error("Extension loader error: Type unrecognized!!!")}}function j(a,b){if(!d.helper.isString(a))throw Error("Invalid argument in converter.listen() method: name must be a string, but "+typeof a+" given");if("function"!=typeof b)throw Error("Invalid argument in converter.listen() method: callback must be a function, but "+typeof b+" given");o.hasOwnProperty(a)||(o[a]=[]),o[a].push(b)}function k(a){var b=a.match(/^\s*/)[0].length,c=new RegExp("^\\s{0,"+b+"}","gm");return a.replace(c,"")}var l={},m=[],n=[],o={},p=h;!function(){a=a||{};for(var b in g)g.hasOwnProperty(b)&&(l[b]=g[b]);if("object"!=typeof a)throw Error("Converter expects the passed parameter to be an object, but "+typeof a+" was passed instead.");for(var e in a)a.hasOwnProperty(e)&&(l[e]=a[e]);l.extensions&&d.helper.forEach(l.extensions,c)}(),this._dispatch=function(a,b,c,d){if(o.hasOwnProperty(a))for(var e=0;e<o[a].length;++e){var f=o[a][e](a,b,this,c,d);f&&void 0!==f&&(b=f)}return b},this.listen=function(a,b){return j(a,b),this},this.makeHtml=function(a){if(!a)return a;var b={gHtmlBlocks:[],gHtmlMdBlocks:[],gHtmlSpans:[],gUrls:{},gTitles:{},gDimensions:{},gListLevel:0,hashLinkCounts:{},langExtensions:m,outputModifiers:n,converter:this,ghCodeBlocks:[]};return a=a.replace(/¨/g,"¨T"),a=a.replace(/\$/g,"¨D"),a=a.replace(/\r\n/g,"\n"),a=a.replace(/\r/g,"\n"),a=a.replace(/\u00A0/g," "),l.smartIndentationFix&&(a=k(a)),a="\n\n"+a+"\n\n",a=d.subParser("detab")(a,l,b),a=a.replace(/^[ \t]+$/gm,""),d.helper.forEach(m,function(c){a=d.subParser("runExtension")(c,a,l,b)}),a=d.subParser("hashPreCodeTags")(a,l,b),a=d.subParser("githubCodeBlocks")(a,l,b),a=d.subParser("hashHTMLBlocks")(a,l,b),a=d.subParser("hashCodeTags")(a,l,b),a=d.subParser("stripLinkDefinitions")(a,l,b),a=d.subParser("blockGamut")(a,l,b),a=d.subParser("unhashHTMLSpans")(a,l,b),a=d.subParser("unescapeSpecialChars")(a,l,b),a=a.replace(/¨D/g,"$$"),a=a.replace(/¨T/g,"¨"),d.helper.forEach(n,function(c){a=d.subParser("runExtension")(c,a,l,b)}),a},this.setOption=function(a,b){l[a]=b},this.getOption=function(a){return l[a]},this.getOptions=function(){return l},this.addExtension=function(a,b){b=b||null,c(a,b)},this.useExtension=function(a){c(a)},this.setFlavor=function(a){if(!i.hasOwnProperty(a))throw Error(a+" flavor was not found");var b=i[a];p=a;for(var c in b)b.hasOwnProperty(c)&&(l[c]=b[c])},this.getFlavor=function(){return p},this.removeExtension=function(a){d.helper.isArray(a)||(a=[a]);for(var b=0;b<a.length;++b){for(var c=a[b],e=0;e<m.length;++e)m[e]===c&&m[e].splice(e,1);for(;0<n.length;++e)n[0]===c&&n[0].splice(e,1)}},this.getAllExtensions=function(){return{language:m,output:n}}},d.subParser("anchors",function(a,b,c){"use strict";a=c.converter._dispatch("anchors.before",a,b,c);var e=function(a,e,f,g,h,i,j){if(d.helper.isUndefined(j)&&(j=""),f=f.toLowerCase(),a.search(/\(<?\s*>? ?(['"].*['"])?\)$/m)>-1)g="";else if(!g){if(f||(f=e.toLowerCase().replace(/ ?\n/g," ")),g="#"+f,d.helper.isUndefined(c.gUrls[f]))return a;g=c.gUrls[f],d.helper.isUndefined(c.gTitles[f])||(j=c.gTitles[f])}g=g.replace(d.helper.regexes.asteriskAndDash,d.helper.escapeCharactersCallback);var k='<a href="'+g+'"';return""!==j&&null!==j&&(j=j.replace(/"/g,"&quot;"),j=j.replace(d.helper.regexes.asteriskAndDash,d.helper.escapeCharactersCallback),k+=' title="'+j+'"'),b.openLinksInNewWindow&&(k+=' target="¨E95Eblank"'),k+=">"+e+"</a>"};return a=a.replace(/\[((?:\[[^\]]*]|[^\[\]])*)] ?(?:\n *)?\[(.*?)]()()()()/g,e),a=a.replace(/\[((?:\[[^\]]*]|[^\[\]])*)]()[ \t]*\([ \t]?<([^>]*)>(?:[ \t]*((["'])([^"]*?)\5))?[ \t]?\)/g,e),a=a.replace(/\[((?:\[[^\]]*]|[^\[\]])*)]()[ \t]*\([ \t]?<?([\S]+?(?:\([\S]*?\)[\S]*?)?)>?(?:[ \t]*((["'])([^"]*?)\5))?[ \t]?\)/g,e),a=a.replace(/\[([^\[\]]+)]()()()()()/g,e),b.ghMentions&&(a=a.replace(/(^|\s)(\\)?(@([a-z\d\-]+))(?=[.!?;,[\]()]|\s|$)/gim,function(a,c,e,f,g){if("\\"===e)return c+f;if(!d.helper.isString(b.ghMentionsLink))throw new Error("ghMentionsLink option must be a string");return c+'<a href="'+b.ghMentionsLink.replace(/\{u}/g,g)+'">'+f+"</a>"})),a=c.converter._dispatch("anchors.after",a,b,c)});var k=/\b(((https?|ftp|dict):\/\/|www\.)[^'">\s]+\.[^'">\s]+)()(?=\s|$)(?!["<>])/gi,l=/\b(((https?|ftp|dict):\/\/|www\.)[^'">\s]+\.[^'">\s]+?)([.!?,()\[\]]?)(?=\s|$)(?!["<>])/gi,m=/<(((https?|ftp|dict):\/\/|www\.)[^'">\s]+)()>/gi,n=/(^|\s)(?:mailto:)?([A-Za-z0-9!#$%&'*+-\/=?^_`{|}~.]+@[-a-z0-9]+(\.[-a-z0-9]+)*\.[a-z]+)(?=$|\s)/gim,o=/<()(?:mailto:)?([-.\w]+@[-a-z0-9]+(\.[-a-z0-9]+)*\.[a-z]+)>/gi,p=function(a){"use strict";return function(b,c,d,e,f){var g=c,h="",i="";return/^www\./i.test(c)&&(c=c.replace(/^www\./i,"http://www.")),a.excludeTrailingPunctuationFromURLs&&f&&(h=f),a.openLinksInNewWindow&&(i=' target="¨E95Eblank"'),'<a href="'+c+'"'+i+">"+g+"</a>"+h}},q=function(a,b){"use strict";return function(c,e,f){var g="mailto:";return e=e||"",f=d.subParser("unescapeSpecialChars")(f,a,b),a.encodeEmails?(g=d.helper.encodeEmailAddress(g+f),f=d.helper.encodeEmailAddress(f)):g+=f,e+'<a href="'+g+'">'+f+"</a>"}};d.subParser("autoLinks",function(a,b,c){"use strict";return a=c.converter._dispatch("autoLinks.before",a,b,c),a=a.replace(m,p(b)),a=a.replace(o,q(b,c)),a=c.converter._dispatch("autoLinks.after",a,b,c)}),d.subParser("simplifiedAutoLinks",function(a,b,c){"use strict";return b.simplifiedAutoLink?(a=c.converter._dispatch("simplifiedAutoLinks.before",a,b,c),a=b.excludeTrailingPunctuationFromURLs?a.replace(l,p(b)):a.replace(k,p(b)),a=a.replace(n,q(b,c)),a=c.converter._dispatch("simplifiedAutoLinks.after",a,b,c)):a}),d.subParser("blockGamut",function(a,b,c){"use strict";return a=c.converter._dispatch("blockGamut.before",a,b,c),a=d.subParser("blockQuotes")(a,b,c),a=d.subParser("headers")(a,b,c),a=d.subParser("horizontalRule")(a,b,c),a=d.subParser("lists")(a,b,c),a=d.subParser("codeBlocks")(a,b,c),a=d.subParser("tables")(a,b,c),a=d.subParser("hashHTMLBlocks")(a,b,c),a=d.subParser("paragraphs")(a,b,c),a=c.converter._dispatch("blockGamut.after",a,b,c)}),d.subParser("blockQuotes",function(a,b,c){"use strict";return a=c.converter._dispatch("blockQuotes.before",a,b,c),a=a.replace(/((^ {0,3}>[ \t]?.+\n(.+\n)*\n*)+)/gm,function(a,e){var f=e;return f=f.replace(/^[ \t]*>[ \t]?/gm,"¨0"),f=f.replace(/¨0/g,""),f=f.replace(/^[ \t]+$/gm,""),f=d.subParser("githubCodeBlocks")(f,b,c),f=d.subParser("blockGamut")(f,b,c),f=f.replace(/(^|\n)/g,"$1  "),f=f.replace(/(\s*<pre>[^\r]+?<\/pre>)/gm,function(a,b){var c=b;return c=c.replace(/^  /gm,"¨0"),c=c.replace(/¨0/g,"")}),d.subParser("hashBlock")("<blockquote>\n"+f+"\n</blockquote>",b,c)}),a=c.converter._dispatch("blockQuotes.after",a,b,c)}),d.subParser("codeBlocks",function(a,b,c){"use strict";a=c.converter._dispatch("codeBlocks.before",a,b,c),a+="¨0";var e=/(?:\n\n|^)((?:(?:[ ]{4}|\t).*\n+)+)(\n*[ ]{0,3}[^ \t\n]|(?=¨0))/g;return a=a.replace(e,function(a,e,f){var g=e,h=f,i="\n";return g=d.subParser("outdent")(g,b,c),g=d.subParser("encodeCode")(g,b,c),g=d.subParser("detab")(g,b,c),g=g.replace(/^\n+/g,""),g=g.replace(/\n+$/g,""),b.omitExtraWLInCodeBlocks&&(i=""),g="<pre><code>"+g+i+"</code></pre>",d.subParser("hashBlock")(g,b,c)+h}),a=a.replace(/¨0/,""),a=c.converter._dispatch("codeBlocks.after",a,b,c)}),d.subParser("codeSpans",function(a,b,c){"use strict";return a=c.converter._dispatch("codeSpans.before",a,b,c),void 0===a&&(a=""),a=a.replace(/(^|[^\\])(`+)([^\r]*?[^`])\2(?!`)/gm,function(a,e,f,g){var h=g;return h=h.replace(/^([ \t]*)/g,""),h=h.replace(/[ \t]*$/g,""),h=d.subParser("encodeCode")(h,b,c),e+"<code>"+h+"</code>"}),a=c.converter._dispatch("codeSpans.after",a,b,c)}),d.subParser("detab",function(a,b,c){"use strict";return a=c.converter._dispatch("detab.before",a,b,c),a=a.replace(/\t(?=\t)/g,"    "),a=a.replace(/\t/g,"¨A¨B"),a=a.replace(/¨B(.+?)¨A/g,function(a,b){for(var c=b,d=4-c.length%4,e=0;e<d;e++)c+=" ";return c}),a=a.replace(/¨A/g,"    "),a=a.replace(/¨B/g,""),a=c.converter._dispatch("detab.after",a,b,c)}),d.subParser("encodeAmpsAndAngles",function(a,b,c){"use strict";return a=c.converter._dispatch("encodeAmpsAndAngles.before",a,b,c),a=a.replace(/&(?!#?[xX]?(?:[0-9a-fA-F]+|\w+);)/g,"&amp;"),a=a.replace(/<(?![a-z\/?$!])/gi,"&lt;"),a=a.replace(/</g,"&lt;"),a=a.replace(/>/g,"&gt;"),a=c.converter._dispatch("encodeAmpsAndAngles.after",a,b,c)}),d.subParser("encodeBackslashEscapes",function(a,b,c){"use strict";return a=c.converter._dispatch("encodeBackslashEscapes.before",a,b,c),a=a.replace(/\\(\\)/g,d.helper.escapeCharactersCallback),a=a.replace(/\\([`*_{}\[\]()>#+.!~=|-])/g,d.helper.escapeCharactersCallback),a=c.converter._dispatch("encodeBackslashEscapes.after",a,b,c)}),d.subParser("encodeCode",function(a,b,c){"use strict";return a=c.converter._dispatch("encodeCode.before",a,b,c),a=a.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/([*_{}\[\]\\=~-])/g,d.helper.escapeCharactersCallback),a=c.converter._dispatch("encodeCode.after",a,b,c)}),d.subParser("escapeSpecialCharsWithinTagAttributes",function(a,b,c){"use strict";a=c.converter._dispatch("escapeSpecialCharsWithinTagAttributes.before",a,b,c);var e=/(<[a-z\/!$]("[^"]*"|'[^']*'|[^'">])*>|<!(--.*?--\s*)+>)/gi;return a=a.replace(e,function(a){return a.replace(/(.)<\/?code>(?=.)/g,"$1`").replace(/([\\`*_~=|])/g,d.helper.escapeCharactersCallback)}),a=c.converter._dispatch("escapeSpecialCharsWithinTagAttributes.after",a,b,c)}),d.subParser("githubCodeBlocks",function(a,b,c){"use strict";return b.ghCodeBlocks?(a=c.converter._dispatch("githubCodeBlocks.before",a,b,c),a+="¨0",a=a.replace(/(?:^|\n)```(.*)\n([\s\S]*?)\n```/g,function(a,e,f){var g=b.omitExtraWLInCodeBlocks?"":"\n";return f=d.subParser("encodeCode")(f,b,c),f=d.subParser("detab")(f,b,c),f=f.replace(/^\n+/g,""),f=f.replace(/\n+$/g,""),f="<pre><code"+(e?' class="'+e+" language-"+e+'"':"")+">"+f+g+"</code></pre>",f=d.subParser("hashBlock")(f,b,c),"\n\n¨G"+(c.ghCodeBlocks.push({text:a,codeblock:f})-1)+"G\n\n"}),a=a.replace(/¨0/,""),c.converter._dispatch("githubCodeBlocks.after",a,b,c)):a}),d.subParser("hashBlock",function(a,b,c){"use strict";return a=c.converter._dispatch("hashBlock.before",a,b,c),a=a.replace(/(^\n+|\n+$)/g,""),a="\n\n¨K"+(c.gHtmlBlocks.push(a)-1)+"K\n\n",a=c.converter._dispatch("hashBlock.after",a,b,c)}),d.subParser("hashCodeTags",function(a,b,c){"use strict";a=c.converter._dispatch("hashCodeTags.before",a,b,c);var e=function(a,e,f,g){var h=f+d.subParser("encodeCode")(e,b,c)+g;return"¨C"+(c.gHtmlSpans.push(h)-1)+"C"};return a=d.helper.replaceRecursiveRegExp(a,e,"<code\\b[^>]*>","</code>","gim"),a=c.converter._dispatch("hashCodeTags.after",a,b,c)}),d.subParser("hashElement",function(a,b,c){"use strict";return function(a,b){var d=b;return d=d.replace(/\n\n/g,"\n"),d=d.replace(/^\n/,""),d=d.replace(/\n+$/g,""),d="\n\n¨K"+(c.gHtmlBlocks.push(d)-1)+"K\n\n"}}),d.subParser("hashHTMLBlocks",function(a,b,c){"use strict";a=c.converter._dispatch("hashHTMLBlocks.before",a,b,c);for(var e=["pre","div","h1","h2","h3","h4","h5","h6","blockquote","table","dl","ol","ul","script","noscript","form","fieldset","iframe","math","style","section","header","footer","nav","article","aside","address","audio","canvas","figure","hgroup","output","video","p"],f=function(a,b,d,e){var f=a;return-1!==d.search(/\bmarkdown\b/)&&(f=d+c.converter.makeHtml(b)+e),"\n\n¨K"+(c.gHtmlBlocks.push(f)-1)+"K\n\n"},g=0;g<e.length;++g)for(var h,i=new RegExp("^ {0,3}<"+e[g]+"\\b[^>]*>","im"),j="<"+e[g]+"\\b[^>]*>",k="</"+e[g]+">";-1!==(h=d.helper.regexIndexOf(a,i));){var l=d.helper.splitAtIndex(a,h),m=d.helper.replaceRecursiveRegExp(l[1],f,j,k,"im");if(m===l[1])break;a=l[0].concat(m)}return a=a.replace(/(\n {0,3}(<(hr)\b([^<>])*?\/?>)[ \t]*(?=\n{2,}))/g,d.subParser("hashElement")(a,b,c)),a=d.helper.replaceRecursiveRegExp(a,function(a){return"\n\n¨K"+(c.gHtmlBlocks.push(a)-1)+"K\n\n"},"^ {0,3}\x3c!--","--\x3e","gm"),a=a.replace(/(?:\n\n)( {0,3}(?:<([?%])[^\r]*?\2>)[ \t]*(?=\n{2,}))/g,d.subParser("hashElement")(a,b,c)),a=c.converter._dispatch("hashHTMLBlocks.after",a,b,c)}),d.subParser("hashHTMLSpans",function(a,b,c){"use strict";function d(a){return"¨C"+(c.gHtmlSpans.push(a)-1)+"C"}return a=c.converter._dispatch("hashHTMLSpans.before",a,b,c),a=a.replace(/<[^>]+?\/>/gi,function(a){return d(a)}),a=a.replace(/<([^>]+?)>[\s\S]*?<\/\1>/g,function(a){return d(a)}),a=a.replace(/<([^>]+?)\s[^>]+?>[\s\S]*?<\/\1>/g,function(a){return d(a)}),a=a.replace(/<[^>]+?>/gi,function(a){return d(a)}),a=c.converter._dispatch("hashHTMLSpans.after",a,b,c)}),d.subParser("unhashHTMLSpans",function(a,b,c){"use strict";a=c.converter._dispatch("unhashHTMLSpans.before",a,b,c);for(var d=0;d<c.gHtmlSpans.length;++d){for(var e=c.gHtmlSpans[d],f=0;/¨C(\d+)C/.test(e);){var g=RegExp.$1;if(e=e.replace("¨C"+g+"C",c.gHtmlSpans[g]),10===f)break;++f}a=a.replace("¨C"+d+"C",e)}return a=c.converter._dispatch("unhashHTMLSpans.after",a,b,c)}),d.subParser("hashPreCodeTags",function(a,b,c){"use strict";a=c.converter._dispatch("hashPreCodeTags.before",a,b,c);var e=function(a,e,f,g){var h=f+d.subParser("encodeCode")(e,b,c)+g;return"\n\n¨G"+(c.ghCodeBlocks.push({text:a,codeblock:h})-1)+"G\n\n"};return a=d.helper.replaceRecursiveRegExp(a,e,"^ {0,3}<pre\\b[^>]*>\\s*<code\\b[^>]*>","^ {0,3}</code>\\s*</pre>","gim"),a=c.converter._dispatch("hashPreCodeTags.after",a,b,c)}),d.subParser("headers",function(a,b,c){"use strict";function e(a){var e;if(b.customizedHeaderId){var f=a.match(/\{([^{]+?)}\s*$/);f&&f[1]&&(a=f[1])}return e=d.helper.isString(b.prefixHeaderId)?b.prefixHeaderId+a:!0===b.prefixHeaderId?"section "+a:a,e=g?e.replace(/ /g,"-").replace(/&amp;/g,"").replace(/¨T/g,"").replace(/¨D/g,"").replace(/[&+$,\/:;=?@"#{}|^¨~\[\]`\\*)(%.!'<>]/g,"").toLowerCase():e.replace(/[^\w]/g,"").toLowerCase(),c.hashLinkCounts[e]?e=e+"-"+c.hashLinkCounts[e]++:c.hashLinkCounts[e]=1,e}a=c.converter._dispatch("headers.before",a,b,c);var f=isNaN(parseInt(b.headerLevelStart))?1:parseInt(b.headerLevelStart),g=b.ghCompatibleHeaderId,h=b.smoothLivePreview?/^(.+)[ \t]*\n={2,}[ \t]*\n+/gm:/^(.+)[ \t]*\n=+[ \t]*\n+/gm,i=b.smoothLivePreview?/^(.+)[ \t]*\n-{2,}[ \t]*\n+/gm:/^(.+)[ \t]*\n-+[ \t]*\n+/gm;a=a.replace(h,function(a,g){var h=d.subParser("spanGamut")(g,b,c),i=b.noHeaderId?"":' id="'+e(g)+'"',j=f,k="<h"+j+i+">"+h+"</h"+j+">";return d.subParser("hashBlock")(k,b,c)}),a=a.replace(i,function(a,g){var h=d.subParser("spanGamut")(g,b,c),i=b.noHeaderId?"":' id="'+e(g)+'"',j=f+1,k="<h"+j+i+">"+h+"</h"+j+">";return d.subParser("hashBlock")(k,b,c)});var j=b.requireSpaceBeforeHeadingText?/^(#{1,6})[ \t]+(.+?)[ \t]*#*\n+/gm:/^(#{1,6})[ \t]*(.+?)[ \t]*#*\n+/gm;return a=a.replace(j,function(a,g,h){var i=h;b.customizedHeaderId&&(i=h.replace(/\s?\{([^{]+?)}\s*$/,""));var j=d.subParser("spanGamut")(i,b,c),k=b.noHeaderId?"":' id="'+e(h)+'"',l=f-1+g.length,m="<h"+l+k+">"+j+"</h"+l+">";return d.subParser("hashBlock")(m,b,c)}),a=c.converter._dispatch("headers.after",a,b,c)}),d.subParser("horizontalRule",function(a,b,c){"use strict";a=c.converter._dispatch("horizontalRule.before",a,b,c);var e=d.subParser("hashBlock")("<hr />",b,c);return a=a.replace(/^ {0,2}( ?-){3,}[ \t]*$/gm,e),a=a.replace(/^ {0,2}( ?\*){3,}[ \t]*$/gm,e),a=a.replace(/^ {0,2}( ?_){3,}[ \t]*$/gm,e),a=c.converter._dispatch("horizontalRule.after",a,b,c)}),d.subParser("images",function(a,b,c){"use strict";function e(a,b,e,f,g,h,i,j){var k=c.gUrls,l=c.gTitles,m=c.gDimensions;if(e=e.toLowerCase(),j||(j=""),a.search(/\(<?\s*>? ?(['"].*['"])?\)$/m)>-1)f="";else if(""===f||null===f){if(""!==e&&null!==e||(e=b.toLowerCase().replace(/ ?\n/g," ")),f="#"+e,d.helper.isUndefined(k[e]))return a;f=k[e],d.helper.isUndefined(l[e])||(j=l[e]),d.helper.isUndefined(m[e])||(g=m[e].width,h=m[e].height)}b=b.replace(/"/g,"&quot;").replace(d.helper.regexes.asteriskAndDash,d.helper.escapeCharactersCallback),f=f.replace(d.helper.regexes.asteriskAndDash,d.helper.escapeCharactersCallback);var n='<img src="'+f+'" alt="'+b+'"';return j&&(j=j.replace(/"/g,"&quot;").replace(d.helper.regexes.asteriskAndDash,d.helper.escapeCharactersCallback),n+=' title="'+j+'"'),g&&h&&(g="*"===g?"auto":g,h="*"===h?"auto":h,n+=' width="'+g+'"',n+=' height="'+h+'"'),n+=" />"}a=c.converter._dispatch("images.before",a,b,c);var f=/!\[([^\]]*?)][ \t]*()\([ \t]?<?([\S]+?(?:\([\S]*?\)[\S]*?)?)>?(?: =([*\d]+[A-Za-z%]{0,4})x([*\d]+[A-Za-z%]{0,4}))?[ \t]*(?:(["'])([^"]*?)\6)?[ \t]?\)/g,g=/!\[([^\]]*?)][ \t]*()\([ \t]?<([^>]*)>(?: =([*\d]+[A-Za-z%]{0,4})x([*\d]+[A-Za-z%]{0,4}))?[ \t]*(?:(?:(["'])([^"]*?)\6))?[ \t]?\)/g,h=/!\[([^\]]*?)] ?(?:\n *)?\[(.*?)]()()()()()/g,i=/!\[([^\[\]]+)]()()()()()/g;return a=a.replace(h,e),a=a.replace(g,e),a=a.replace(f,e),a=a.replace(i,e),a=c.converter._dispatch("images.after",a,b,c)}),d.subParser("italicsAndBold",function(a,b,c){"use strict";function e(a,e,f){return b.simplifiedAutoLink&&(a=d.subParser("simplifiedAutoLinks")(a,b,c)),e+a+f}return a=c.converter._dispatch("italicsAndBold.before",a,b,c),b.literalMidWordUnderscores?(a=a.replace(/\b___(\S[\s\S]*)___\b/g,function(a,b){return e(b,"<strong><em>","</em></strong>")}),a=a.replace(/\b__(\S[\s\S]*)__\b/g,function(a,b){return e(b,"<strong>","</strong>")}),a=a.replace(/\b_(\S[\s\S]*?)_\b/g,function(a,b){return e(b,"<em>","</em>")})):(a=a.replace(/___(\S[\s\S]*?)___/g,function(a,b){return/\S$/.test(b)?e(b,"<strong><em>","</em></strong>"):a}),a=a.replace(/__(\S[\s\S]*?)__/g,function(a,b){return/\S$/.test(b)?e(b,"<strong>","</strong>"):a}),a=a.replace(/_([^\s_][\s\S]*?)_/g,function(a,b){return/\S$/.test(b)?e(b,"<em>","</em>"):a})),b.literalMidWordAsterisks?(a=a.trim().replace(/(?:^| +)\*{3}(\S[\s\S]*?)\*{3}(?: +|$)/g,function(a,b){return e(b," <strong><em>","</em></strong> ")}),a=a.trim().replace(/(?:^| +)\*{2}(\S[\s\S]*?)\*{2}(?: +|$)/g,function(a,b){return e(b," <strong>","</strong> ")}),a=a.trim().replace(/(?:^| +)\*{1}(\S[\s\S]*?)\*{1}(?: +|$)/g,function(a,b){return e(b," <em>","</em>"+(" "===a.slice(-1)?" ":""))})):(a=a.replace(/\*\*\*(\S[\s\S]*?)\*\*\*/g,function(a,b){return/\S$/.test(b)?e(b,"<strong><em>","</em></strong>"):a}),a=a.replace(/\*\*(\S[\s\S]*?)\*\*/g,function(a,b){return/\S$/.test(b)?e(b,"<strong>","</strong>"):a}),a=a.replace(/\*([^\s*][\s\S]*?)\*/g,function(a,b){return/\S$/.test(b)?e(b,"<em>","</em>"):a})),a=c.converter._dispatch("italicsAndBold.after",a,b,c)}),d.subParser("lists",function(a,b,c){"use strict";function e(a,e){c.gListLevel++,a=a.replace(/\n{2,}$/,"\n"),a+="¨0";var f=/(\n)?(^ {0,3})([*+-]|\d+[.])[ \t]+((\[(x|X| )?])?[ \t]*[^\r]+?(\n{1,2}))(?=\n*(¨0| {0,3}([*+-]|\d+[.])[ \t]+))/gm,g=/\n[ \t]*\n(?!¨0)/.test(a);return b.disableForced4SpacesIndentedSublists&&(f=/(\n)?(^ {0,3})([*+-]|\d+[.])[ \t]+((\[(x|X| )?])?[ \t]*[^\r]+?(\n{1,2}))(?=\n*(¨0|\2([*+-]|\d+[.])[ \t]+))/gm),a=a.replace(f,function(a,e,f,h,i,j,k){k=k&&""!==k.trim();var l=d.subParser("outdent")(i,b,c),m="";return j&&b.tasklists&&(m=' class="task-list-item" style="list-style-type: none;"',l=l.replace(/^[ \t]*\[(x|X| )?]/m,function(){var a='<input type="checkbox" disabled style="margin: 0px 0.35em 0.25em -1.6em; vertical-align: middle;"';return k&&(a+=" checked"),a+=">"})),l=l.replace(/^([-*+]|\d\.)[ \t]+[\S\n ]*/g,function(a){return"¨A"+a}),e||l.search(/\n{2,}/)>-1?(l=d.subParser("githubCodeBlocks")(l,b,c),l=d.subParser("blockGamut")(l,b,c)):(l=d.subParser("lists")(l,b,c),l=l.replace(/\n$/,""),l=d.subParser("hashHTMLBlocks")(l,b,c),l=l.replace(/\n\n+/g,"\n\n"),l=l.replace(/\n\n/g,"¨B"),l=g?d.subParser("paragraphs")(l,b,c):d.subParser("spanGamut")(l,b,c),l=l.replace(/¨B/g,"\n\n")),l=l.replace("¨A",""),l="<li"+m+">"+l+"</li>\n"}),a=a.replace(/¨0/g,""),c.gListLevel--,e&&(a=a.replace(/\s+$/,"")),a}function f(a,c,d){var f=b.disableForced4SpacesIndentedSublists?/^ ?\d+\.[ \t]/gm:/^ {0,3}\d+\.[ \t]/gm,g=b.disableForced4SpacesIndentedSublists?/^ ?[*+-][ \t]/gm:/^ {0,3}[*+-][ \t]/gm,h="ul"===c?f:g,i="";return-1!==a.search(h)?function a(b){var j=b.search(h);-1!==j?(i+="\n<"+c+">\n"+e(b.slice(0,j),!!d)+"</"+c+">\n",c="ul"===c?"ol":"ul",h="ul"===c?f:g,a(b.slice(j))):i+="\n<"+c+">\n"+e(b,!!d)+"</"+c+">\n"}(a):i="\n<"+c+">\n"+e(a,!!d)+"</"+c+">\n",i}
+return a=c.converter._dispatch("lists.before",a,b,c),a+="¨0",a=c.gListLevel?a.replace(/^(( {0,3}([*+-]|\d+[.])[ \t]+)[^\r]+?(¨0|\n{2,}(?=\S)(?![ \t]*(?:[*+-]|\d+[.])[ \t]+)))/gm,function(a,b,c){return f(b,c.search(/[*+-]/g)>-1?"ul":"ol",!0)}):a.replace(/(\n\n|^\n?)(( {0,3}([*+-]|\d+[.])[ \t]+)[^\r]+?(¨0|\n{2,}(?=\S)(?![ \t]*(?:[*+-]|\d+[.])[ \t]+)))/gm,function(a,b,c,d){return f(c,d.search(/[*+-]/g)>-1?"ul":"ol",!1)}),a=a.replace(/¨0/,""),a=c.converter._dispatch("lists.after",a,b,c)}),d.subParser("outdent",function(a,b,c){"use strict";return a=c.converter._dispatch("outdent.before",a,b,c),a=a.replace(/^(\t|[ ]{1,4})/gm,"¨0"),a=a.replace(/¨0/g,""),a=c.converter._dispatch("outdent.after",a,b,c)}),d.subParser("paragraphs",function(a,b,c){"use strict";a=c.converter._dispatch("paragraphs.before",a,b,c),a=a.replace(/^\n+/g,""),a=a.replace(/\n+$/g,"");for(var e=a.split(/\n{2,}/g),f=[],g=e.length,h=0;h<g;h++){var i=e[h];i.search(/¨(K|G)(\d+)\1/g)>=0?f.push(i):i.search(/\S/)>=0&&(i=d.subParser("spanGamut")(i,b,c),i=i.replace(/^([ \t]*)/g,"<p>"),i+="</p>",f.push(i))}for(g=f.length,h=0;h<g;h++){for(var j="",k=f[h],l=!1;/¨(K|G)(\d+)\1/.test(k);){var m=RegExp.$1,n=RegExp.$2;j="K"===m?c.gHtmlBlocks[n]:l?d.subParser("encodeCode")(c.ghCodeBlocks[n].text,b,c):c.ghCodeBlocks[n].codeblock,j=j.replace(/\$/g,"$$$$"),k=k.replace(/(\n\n)?¨(K|G)\d+\2(\n\n)?/,j),/^<pre\b[^>]*>\s*<code\b[^>]*>/.test(k)&&(l=!0)}f[h]=k}return a=f.join("\n"),a=a.replace(/^\n+/g,""),a=a.replace(/\n+$/g,""),c.converter._dispatch("paragraphs.after",a,b,c)}),d.subParser("runExtension",function(a,b,c,d){"use strict";if(a.filter)b=a.filter(b,d.converter,c);else if(a.regex){var e=a.regex;e instanceof RegExp||(e=new RegExp(e,"g")),b=b.replace(e,a.replace)}return b}),d.subParser("spanGamut",function(a,b,c){"use strict";return a=c.converter._dispatch("spanGamut.before",a,b,c),a=d.subParser("codeSpans")(a,b,c),a=d.subParser("escapeSpecialCharsWithinTagAttributes")(a,b,c),a=d.subParser("encodeBackslashEscapes")(a,b,c),a=d.subParser("images")(a,b,c),a=d.subParser("anchors")(a,b,c),a=d.subParser("autoLinks")(a,b,c),a=d.subParser("italicsAndBold")(a,b,c),a=d.subParser("strikethrough")(a,b,c),a=d.subParser("simplifiedAutoLinks")(a,b,c),a=d.subParser("hashHTMLSpans")(a,b,c),a=d.subParser("encodeAmpsAndAngles")(a,b,c),a=b.simpleLineBreaks?a.replace(/\n/g,"<br />\n"):a.replace(/  +\n/g,"<br />\n"),a=c.converter._dispatch("spanGamut.after",a,b,c)}),d.subParser("strikethrough",function(a,b,c){"use strict";function e(a){return b.simplifiedAutoLink&&(a=d.subParser("simplifiedAutoLinks")(a,b,c)),"<del>"+a+"</del>"}return b.strikethrough&&(a=c.converter._dispatch("strikethrough.before",a,b,c),a=a.replace(/(?:~){2}([\s\S]+?)(?:~){2}/g,function(a,b){return e(b)}),a=c.converter._dispatch("strikethrough.after",a,b,c)),a}),d.subParser("stripLinkDefinitions",function(a,b,c){"use strict";var e=/^ {0,3}\[(.+)]:[ \t]*\n?[ \t]*<?([^>\s]+)>?(?: =([*\d]+[A-Za-z%]{0,4})x([*\d]+[A-Za-z%]{0,4}))?[ \t]*\n?[ \t]*(?:(\n*)["|'(](.+?)["|')][ \t]*)?(?:\n+|(?=¨0))/gm;return a+="¨0",a=a.replace(e,function(a,e,f,g,h,i,j){return e=e.toLowerCase(),c.gUrls[e]=d.subParser("encodeAmpsAndAngles")(f,b,c),i?i+j:(j&&(c.gTitles[e]=j.replace(/"|'/g,"&quot;")),b.parseImgDimensions&&g&&h&&(c.gDimensions[e]={width:g,height:h}),"")}),a=a.replace(/¨0/,"")}),d.subParser("tables",function(a,b,c){"use strict";function e(a){return/^:[ \t]*--*$/.test(a)?' style="text-align:left;"':/^--*[ \t]*:[ \t]*$/.test(a)?' style="text-align:right;"':/^:[ \t]*--*[ \t]*:$/.test(a)?' style="text-align:center;"':""}function f(a,e){var f="";return a=a.trim(),b.tableHeaderId&&(f=' id="'+a.replace(/ /g,"_").toLowerCase()+'"'),a=d.subParser("spanGamut")(a,b,c),"<th"+f+e+">"+a+"</th>\n"}function g(a,e){return"<td"+e+">"+d.subParser("spanGamut")(a,b,c)+"</td>\n"}function h(a,b){for(var c="<table>\n<thead>\n<tr>\n",d=a.length,e=0;e<d;++e)c+=a[e];for(c+="</tr>\n</thead>\n<tbody>\n",e=0;e<b.length;++e){c+="<tr>\n";for(var f=0;f<d;++f)c+=b[e][f];c+="</tr>\n"}return c+="</tbody>\n</table>\n"}if(!b.tables)return a;var i=/^ {0,3}\|?.+\|.+\n[ \t]{0,3}\|?[ \t]*:?[ \t]*(?:-|=){2,}[ \t]*:?[ \t]*\|[ \t]*:?[ \t]*(?:-|=){2,}[\s\S]+?(?:\n\n|¨0)/gm;return a=c.converter._dispatch("tables.before",a,b,c),a=a.replace(/\\(\|)/g,d.helper.escapeCharactersCallback),a=a.replace(i,function(a){var b,c=a.split("\n");for(b=0;b<c.length;++b)/^ {0,3}\|/.test(c[b])&&(c[b]=c[b].replace(/^ {0,3}\|/,"")),/\|[ \t]*$/.test(c[b])&&(c[b]=c[b].replace(/\|[ \t]*$/,""));var i=c[0].split("|").map(function(a){return a.trim()}),j=c[1].split("|").map(function(a){return a.trim()}),k=[],l=[],m=[],n=[];for(c.shift(),c.shift(),b=0;b<c.length;++b)""!==c[b].trim()&&k.push(c[b].split("|").map(function(a){return a.trim()}));if(i.length<j.length)return a;for(b=0;b<j.length;++b)m.push(e(j[b]));for(b=0;b<i.length;++b)d.helper.isUndefined(m[b])&&(m[b]=""),l.push(f(i[b],m[b]));for(b=0;b<k.length;++b){for(var o=[],p=0;p<l.length;++p)d.helper.isUndefined(k[b][p]),o.push(g(k[b][p],m[p]));n.push(o)}return h(l,n)}),a=c.converter._dispatch("tables.after",a,b,c)}),d.subParser("unescapeSpecialChars",function(a,b,c){"use strict";return a=c.converter._dispatch("unescapeSpecialChars.before",a,b,c),a=a.replace(/¨E(\d+)E/g,function(a,b){var c=parseInt(b);return String.fromCharCode(c)}),a=c.converter._dispatch("unescapeSpecialChars.after",a,b,c)});var r=this;"undefined"!=typeof module&&module.exports?module.exports=d:"function"==typeof define&&define.amd?define(function(){"use strict";return d}):r.showdown=d}).call(this);
+//# sourceMappingURL=showdown.min.js.map

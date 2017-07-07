@@ -2,15 +2,12 @@
     'use strict';
 
     Typer.presets.textbox = {
-        inline: true,
-        defaultOptions: false,
-        disallowedElement: '*',
         accept: 'text',
         overrides: {
-            getValue: function () {
+            getValue: function (preset) {
                 return this.extractText();
             },
-            setValue: function (value) {
+            setValue: function (preset, value) {
                 if (value !== this.getValue()) {
                     this.invoke(function (tx) {
                         tx.selection.select(this.element, 'contents');
@@ -21,9 +18,9 @@
             hasContent: function () {
                 return !!this.getValue();
             },
-            validate: function () {
+            validate: function (preset) {
                 var value = this.getValue();
-                if (this.presetOptions.required && !value) {
+                if (preset.options.required && !value) {
                     return false;
                 }
                 return true;

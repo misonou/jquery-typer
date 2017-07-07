@@ -78,10 +78,12 @@
             typer: typer,
             widget: widget || null,
             theme: options.theme,
-            controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'toolbar:widget' : 'toolbar',
+            defaultNS: 'typer',
+            controls: type === 'contextmenu' ? 'contextmenu' : widget ? 'widget' : 'toolbar',
             options: options,
-            controlExecuted: function (ui, self, control) {
-                if (/button|dropdown/.test(control.type)) {
+            showButtonLabel: type === 'contextmenu',
+            controlExecuted: function (ui, control) {
+                if (control.is('button dropdown')) {
                     ui.typer.getSelection().focus();
                 }
             }
@@ -111,7 +113,7 @@
             $(typer.element).bind('contextmenu', function (e) {
                 e.preventDefault();
                 toolbar.update();
-                toolbar.trigger(toolbar, 'show', {
+                toolbar.show({
                     x: e.clientX,
                     y: e.clientY
                 });
@@ -137,14 +139,7 @@
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
-            e.widget.widgetbars = {};
-        },
-        widgetInit: function (e) {
-            if (Typer.ui.controls['widget:' + e.targetWidget.id]) {
-                if (!e.widget.widgetbars[e.targetWidget.id]) {
-                    e.widget.widgetbars[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
-                }
-            }
+            e.widget.widgets = {};
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
@@ -153,9 +148,14 @@
             hideToolbar(e.widget.toolbar);
         },
         widgetFocusin: function (e) {
-            if (e.widget.widgetbars[e.targetWidget.id]) {
-                e.widget.widgetbars[e.targetWidget.id].widget = e.targetWidget;
-                showToolbar(e.widget.widgetbars[e.targetWidget.id]);
+            if (!e.widget.widgets[e.targetWidget.id]) {
+                if (Typer.ui.controls['typer:widget:' + e.targetWidget.id]) {
+                    e.widget.widgets[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
+                }
+            }
+            if (e.widget.widgets[e.targetWidget.id]) {
+                e.widget.widgets[e.targetWidget.id].widget = e.targetWidget;
+                showToolbar(e.widget.widgets[e.targetWidget.id]);
             }
         },
         widgetFocusout: function (e) {
@@ -183,25 +183,27 @@
      * Built-in Controls
      * ********************************/
 
-    $.extend(Typer.ui.controls, {
-        'contextmenu': Typer.ui.group('contextmenu:*'),
-        'contextmenu:history': Typer.ui.group('history:*'),
-        'contextmenu:selection': Typer.ui.group('selection:*'),
-        'contextmenu:clipboard': Typer.ui.group('clipboard:*'),
-        'toolbar': Typer.ui.group('toolbar:insert toolbar:* -toolbar:widget'),
+    Typer.ui.addControls('typer', {
+        'contextmenu': Typer.ui.group('history selection clipboard *'),
+        'contextmenu:history': Typer.ui.group('typer:history:*'),
+        'contextmenu:selection': Typer.ui.group('typer:selection:*'),
+        'contextmenu:clipboard': Typer.ui.group('typer:clipboard:*'),
+        'toolbar': Typer.ui.group(),
         'toolbar:insert': Typer.ui.callout({
-            controls: 'insert:*',
+            before: '*',
+            controls: 'typer:insert:*',
             enabled: function (toolbar) {
                 return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
             }
         }),
-        'toolbar:widget': Typer.ui.group('', {
+        'widget': Typer.ui.group({
             requireWidget: true,
             controls: function (toolbar, self) {
-                return toolbar.widget && ('widget:' + toolbar.widget.id);
+                return toolbar.widget.id + ' delete';
             }
         }),
         'history:undo': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlZ',
             execute: function (toolbar) {
                 toolbar.typer.undo();
@@ -211,6 +213,7 @@
             }
         }),
         'history:redo': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlShiftZ',
             execute: function (toolbar) {
                 toolbar.typer.redo();
@@ -220,12 +223,14 @@
             }
         }),
         'widget:delete': Typer.ui.button({
+            after: '*',
             requireWidget: true,
             execute: function (toolbar) {
                 toolbar.widget.remove();
             }
         }),
         'selection:selectAll': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlA',
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
@@ -234,6 +239,7 @@
             }
         }),
         'selection:selectParagraph': Typer.ui.button({
+            before: '*',
             hiddenWhenDisabled: true,
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
@@ -245,6 +251,7 @@
             }
         }),
         'clipboard:cut': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlX',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
@@ -252,6 +259,7 @@
             }
         }),
         'clipboard:copy': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlC',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
@@ -259,18 +267,19 @@
             }
         }),
         'clipboard:paste': Typer.ui.button({
+            before: '*',
             shortcut: 'ctrlV',
             execute: function (toolbar) {
                 toolbar.typer.getSelection().focus();
                 document.execCommand('paste');
                 detectClipboardInaccessible(function () {
-                   toolbar.alert('clipboard:inaccessible');
+                    Typer.ui.alert('typer:clipboard:inaccessible');
                 });
             }
         })
     });
 
-    Typer.ui.addLabels('en', {
+    Typer.ui.addLabels('en', 'typer', {
         'toolbar:insert': 'Insert widget',
         'history:undo': 'Undo',
         'history:redo': 'Redo',
@@ -283,7 +292,7 @@
         'widget:delete': 'Delete'
     });
 
-    Typer.ui.addIcons('material', {
+    Typer.ui.addIcons('material', 'typer', {
         'toolbar:insert': '\ue1bd',      // widgets
         'history:undo': '\ue166',        // undo
         'history:redo': '\ue15a',        // redo
@@ -294,4 +303,4 @@
         'widget:delete': '\ue872'        // delete
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));

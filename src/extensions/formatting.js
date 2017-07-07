@@ -26,6 +26,14 @@
     var reFormat = /^([a-z\d]*)(?:\.(.+))?/i;
     var reCompatFormat = /^(p|h[1-6])(?:\.(.+))?$/i;
 
+    function outermost(elements) {
+        return elements.filter(function (v) {
+            return !elements.some(function (w) {
+                return $.contains(w, v);
+            });
+        });
+    }
+
     function getTextAlign(element) {
         var textAlign = $(element).css('text-align');
         var direction = $(element).css('direction');
@@ -50,7 +58,7 @@
             if (property === 'textAlign') {
                 my = getTextAlign(v);
             } else if (property === 'inlineClass') {
-                my = $(v).filter('span').attr('class') || '';
+                my = $(v).attr('class') || '';
             } else {
                 my = $(v).css(property);
             }
@@ -122,7 +130,7 @@
     }
 
     function indentCommand(tx, elements) {
-        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        elements = elements || outermost(tx.selection.getParagraphElements());
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0] || $(v).prev('ul,ol')[0] || $('<ul>').insertBefore(v)[0];
             var newList = list;
@@ -141,7 +149,7 @@
     }
 
     function outdentCommand(tx, elements) {
-        elements = elements || Typer.outermost(tx.selection.getParagraphElements());
+        elements = elements || outermost(tx.selection.getParagraphElements());
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0];
             var parentList = $(list).parent('li')[0];
@@ -171,10 +179,9 @@
     Typer.widgets.inlineStyle = {
         inline: true,
         beforeStateChange: function (e) {
-            var selection = e.typer.getSelection();
-            var elements = selection.getSelectedElements();
+            var elements = e.typer.getSelection().getSelectedElements();
             $.extend(e.widget, {
-                bold: /bold|700/.test(computePropertyValue(elements, 'fontWeight')),
+                bold: Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
                 italic: computePropertyValue(elements, 'fontStyle') === 'italic',
                 underline: computePropertyValue(elements, 'textDecoration') === 'underline',
                 strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
@@ -191,14 +198,30 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var paragraphs = tx.selection.getParagraphElements();
-                $(tx.selection.getSelectedTextNodes()).wrap(createElementWithClassName('span', className));
-                $('span:has(span)', paragraphs).each(function (i, v) {
+                var isCaret = tx.selection.isCaret;
+                var span = createElementWithClassName('span', className);
+                if (tx.selection.isCaret) {
+                    tx.insertHtml(span);
+                    span.appendChild(Typer.createTextNode());
+                } else {
+                    $(tx.selection.getSelectedTextNodes()).wrap(span);
+                }
+                var $elm = $(tx.selection.getSelectedElements());
+                $elm.filter('span:has(span)').each(function (i, v) {
                     $(v).contents().unwrap().filter(function (i, v) {
                         return v.nodeType === 3;
                     }).wrap(createElementWithClassName('span', v.className));
                 });
-                $('span[class=""]', paragraphs).contents().unwrap();
+                $elm.filter('span[class=""],span:not([class])').contents().unwrap();
+                $elm.filter('span+span').each(function (i, v) {
+                    if (Typer.is(v.previousSibling, 'span.' + v.className)) {
+                        $(v).contents().appendTo(v.previousSibling);
+                        $(v).remove();
+                    }
+                });
+                if (isCaret) {
+                    tx.selection.select(span, -0);
+                }
                 tx.trackChange(tx.selection.focusNode.element);
             }
         }
@@ -240,7 +263,7 @@
                         if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
-                            v.className = m[2];
+                            v.className = m[2] || '';
                             tx.trackChange(v);
                         }
                     });
@@ -308,8 +331,8 @@
         return !!(inline ? (selection.startNode.nodeType & (Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH | Typer.NODE_INLINE)) : selection.getParagraphElements()[0]);
     }
 
-    var simpleCommandButton = Typer.ui.button.extend(function (command, widget) {
-        this._super({
+    function simpleCommandButton(command, widget) {
+        return Typer.ui.button({
             requireWidget: widget,
             requireCommand: command,
             execute: command,
@@ -320,10 +343,11 @@
                 return isEnabled(toolbar, widget === 'inlineStyle');
             }
         });
-    });
-    var orderedListButton = Typer.ui.button.extend(function (type, annotation) {
-        this._super({
-            name: 'formatting:orderedList:' + type,
+    }
+
+    function orderedListButton(type, annotation) {
+        return Typer.ui.button({
+            name: 'formatting:listtype:' + LIST_STYLE_TYPE[type],
             annotation: annotation,
             requireWidgetEnabled: 'list',
             value: type,
@@ -334,13 +358,17 @@
                 return self.widget && $(self.widget.element).attr('type') === type;
             }
         });
+    }
+
+    Typer.ui.addControls('typer:toolbar', {
+        formatting: Typer.ui.group('* -inlineStyleOptions -inlineStyleClear', {
+            requireTyper: true,
+            defaultNS: 'typer:formatting'
+        })
     });
 
-    $.extend(Typer.ui.controls, {
-        'toolbar:formatting': Typer.ui.group('formatting:*', {
-            requireTyper: true
-        }),
-        'formatting:paragraph': Typer.ui.dropdown({
+    Typer.ui.addControls('typer:formatting', {
+        paragraph: Typer.ui.dropdown({
             requireWidget: 'formatting',
             requireCommand: 'formatting',
             hiddenWhenDisabled: true,
@@ -353,8 +381,7 @@
                         enabled: function (toolbar, self) {
                             var selection = toolbar.typer.getSelection();
                             var curElm = (selection.startNode === selection.endNode ? selection.startNode : selection.focusNode).element;
-                            var myElm = (reFormat.exec(self.value) || [])[1];
-                            return !myElm || compatibleFormatting(curElm.tagName, myElm);
+                            return !reFormat.test(self.value) || compatibleFormatting(curElm.tagName, RegExp.$1);
                         }
                     });
                 });
@@ -367,7 +394,7 @@
                                 return false;
                             }
                         }
-                        self.label = 'formatting:name:' + (reFormat.exec(self.widget.formatting) || [])[1];
+                        self.label = 'typer:formatting:tagname:' + (reFormat.exec(self.widget.formatting) || [])[1];
                         self.value = self.widget.formatting;
                         return true;
                     }
@@ -388,10 +415,21 @@
                 self.value = self.widget.formatting;
             }
         }),
-        'formatting:inlineStyle': Typer.ui.dropdown({
+        inlineStyle: Typer.ui.dropdown({
             requireWidget: 'inlineStyle',
             requireCommand: 'applyClass',
             hiddenWhenDisabled: true,
+            defaultNS: 'typer:formatting',
+            controls: 'inlineStyleOptions inlineStyleClear',
+            execute: 'applyClass',
+            enabled: function (toolbar) {
+                return isEnabled(toolbar, true);
+            },
+            stateChange: function (toolbar, self) {
+                self.value = self.widget.inlineClass;
+            }
+        }),
+        inlineStyleOptions: Typer.ui.group({
             controls: function (toolbar) {
                 return $.map(Object.keys(toolbar.options.inlineClass || {}), function (v) {
                     return Typer.ui.button({
@@ -399,17 +437,18 @@
                         label: toolbar.options.inlineClass[v]
                     });
                 });
-            },
-            execute: 'applyClass',
-            enabled: function (toolbar) {
-                return isEnabled(toolbar, true);
             }
         }),
-        'formatting:bold': simpleCommandButton('bold', 'inlineStyle'),
-        'formatting:italic': simpleCommandButton('italic', 'inlineStyle'),
-        'formatting:underline': simpleCommandButton('underline', 'inlineStyle'),
-        'formatting:strikeThrough': simpleCommandButton('strikeThrough', 'inlineStyle'),
-        'formatting:unorderedList': Typer.ui.button({
+        inlineStyleClear: Typer.ui.button({
+            dropdownOption: 'exclude',
+            requireWidget: 'inlineStyle',
+            execute: 'applyClass'
+        }),
+        bold: simpleCommandButton('bold', 'inlineStyle'),
+        italic: simpleCommandButton('italic', 'inlineStyle'),
+        underline: simpleCommandButton('underline', 'inlineStyle'),
+        strikeThrough: simpleCommandButton('strikeThrough', 'inlineStyle'),
+        unorderedList: Typer.ui.button({
             requireWidgetEnabled: 'list',
             execute: function (toolbar, self, tx) {
                 tx.insertWidget('list', '');
@@ -421,7 +460,7 @@
                 return isEnabled(toolbar, false);
             }
         }),
-        'formatting:orderedList': Typer.ui.callout({
+        orderedList: Typer.ui.callout({
             requireWidgetEnabled: 'list',
             controls: [
                 orderedListButton('1', '1, 2, 3, 4'),
@@ -437,66 +476,70 @@
                 return isEnabled(toolbar, false);
             }
         }),
-        'formatting:indent': simpleCommandButton('indent', 'list'),
-        'formatting:outdent': simpleCommandButton('outdent', 'list'),
-        'formatting:justifyLeft': simpleCommandButton('justifyLeft', 'formatting'),
-        'formatting:justifyCenter': simpleCommandButton('justifyCenter', 'formatting'),
-        'formatting:justifyRight': simpleCommandButton('justifyRight', 'formatting'),
-        'formatting:justifyFull': simpleCommandButton('justifyFull', 'formatting')
+        indent: simpleCommandButton('indent', 'list'),
+        outdent: simpleCommandButton('outdent', 'list'),
+        justifyLeft: simpleCommandButton('justifyLeft', 'formatting'),
+        justifyCenter: simpleCommandButton('justifyCenter', 'formatting'),
+        justifyRight: simpleCommandButton('justifyRight', 'formatting'),
+        justifyFull: simpleCommandButton('justifyFull', 'formatting')
     });
 
-    /* ********************************
-     * Resources
-     * ********************************/
-
-    Typer.ui.addLabels('en', {
-        'formatting:bold': 'Bold',
-        'formatting:italic': 'Italic',
-        'formatting:underline': 'Underlined',
-        'formatting:strikeThrough': 'Strikethrough',
-        'formatting:unorderedList': 'Bullet list',
-        'formatting:orderedList': 'Numbered list',
-        'formatting:indent': 'Indent',
-        'formatting:outdent': 'Outdent',
-        'formatting:justifyLeft': 'Align left',
-        'formatting:justifyCenter': 'Align center',
-        'formatting:justifyRight': 'Align right',
-        'formatting:justifyFull': 'Align justified',
-        'formatting:paragraph': 'Formatting',
-        'formatting:inlineStyle': 'Text style',
-        'formatting:orderedList:1': 'Decimal numbers',
-        'formatting:orderedList:a': 'Alphabetically ordered list, lowercase',
-        'formatting:orderedList:A': 'Alphabetically ordered list, uppercase',
-        'formatting:orderedList:i': 'Roman numbers, lowercase',
-        'formatting:orderedList:I': 'Roman numbers, uppercase',
-        'formatting:name:p': 'Paragraph',
-        'formatting:name:h1': 'Header 1',
-        'formatting:name:h2': 'Header 2',
-        'formatting:name:h3': 'Header 3',
-        'formatting:name:h4': 'Header 4',
-        'formatting:name:h5': 'Header 5',
-        'formatting:name:h6': 'Header 6',
-        'formatting:name:td': 'Table cell',
-        'formatting:name:th': 'Table header',
-        'formatting:name:ul': 'Unordered list',
-        'formatting:name:ol': 'Ordered list',
-        'formatting:name:li': 'List item',
-        'formatting:name:blockquote': 'Blockquote'
+    Typer.ui.addLabels('en', 'typer:formatting', {
+        bold: 'Bold',
+        italic: 'Italic',
+        underline: 'Underlined',
+        strikeThrough: 'Strikethrough',
+        unorderedList: 'Bullet list',
+        orderedList: 'Numbered list',
+        indent: 'Indent',
+        outdent: 'Outdent',
+        justifyLeft: 'Align left',
+        justifyCenter: 'Align center',
+        justifyRight: 'Align right',
+        justifyFull: 'Align justified',
+        paragraph: 'Formatting',
+        inlineStyle: 'Text style',
+        inlineStyleClear: 'Clear style'
     });
 
-    Typer.ui.addIcons('material', {
-        'formatting:bold': '\ue238',          // format_bold
-        'formatting:italic': '\ue23f',        // format_italic
-        'formatting:underline': '\ue249',     // format_underlined
-        'formatting:strikeThrough': '\ue257', // strikethrough_s
-        'formatting:unorderedList': '\ue241', // format_list_bulleted
-        'formatting:orderedList': '\ue242',   // format_list_numbered
-        'formatting:indent': '\ue23e',        // format_indent_increase
-        'formatting:outdent': '\ue23d',       // format_indent_decrease
-        'formatting:justifyLeft': '\ue236',   // format_align_left
-        'formatting:justifyCenter': '\ue234', // format_align_center
-        'formatting:justifyRight': '\ue237',  // format_align_right
-        'formatting:justifyFull': '\ue235'    // format_align_justify
+    Typer.ui.addLabels('en', 'typer:formatting:listtype', {
+        'decimal': 'Decimal numbers',
+        'lower-alpha': 'Alphabetically ordered list, lowercase',
+        'upper-alpha': 'Alphabetically ordered list, uppercase',
+        'lower-roman': 'Roman numbers, lowercase',
+        'upper-roman': 'Roman numbers, uppercase'
+    });
+
+    Typer.ui.addLabels('en', 'typer:formatting:tagname', {
+        p: 'Paragraph',
+        h1: 'Header 1',
+        h2: 'Header 2',
+        h3: 'Header 3',
+        h4: 'Header 4',
+        h5: 'Header 5',
+        h6: 'Header 6',
+        table: 'Table',
+        td: 'Table cell',
+        th: 'Table header',
+        ul: 'Unordered list',
+        ol: 'Ordered list',
+        li: 'List item',
+        blockquote: 'Blockquote'
+    });
+
+    Typer.ui.addIcons('material', 'typer:formatting', {
+        bold: '\ue238', // format_bold
+        italic: '\ue23f', // format_italic
+        underline: '\ue249', // format_underlined
+        strikeThrough: '\ue257', // strikethrough_s
+        unorderedList: '\ue241', // format_list_bulleted
+        orderedList: '\ue242', // format_list_numbered
+        indent: '\ue23e', // format_indent_increase
+        outdent: '\ue23d', // format_indent_decrease
+        justifyLeft: '\ue236', // format_align_left
+        justifyCenter: '\ue234', // format_align_center
+        justifyRight: '\ue237', // format_align_right
+        justifyFull: '\ue235' // format_align_justify
     });
 
     Typer.ui.setShortcut({
@@ -515,4 +558,4 @@
         }
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));

@@ -6,6 +6,7 @@
     "multistr": true,
     "globals": {
         "setImmediate": true,
-        "clearImmediate": true
+        "clearImmediate": true,
+        "showdown": true
     }
 }
