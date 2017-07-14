@@ -1,4 +1,4 @@
-(function ($, Typer, Object, window, document) {
+(function ($, Typer, Object, RegExp, window, document) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
@@ -6,6 +6,7 @@
     var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
 
     var isFunction = $.isFunction;
+    var isPlainObject = $.isPlainObject;
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var defineProperty = Object.defineProperty;
 
@@ -35,7 +36,7 @@
     var MAC_CTRLKEY = {
         ctrl: '\u2318',
         alt: '\u2325',
-        shift: '\u8679'
+        shift: '\u21e7'
     };
 
     var definedControls = {};
@@ -64,6 +65,11 @@
         return v.charAt(0).toUpperCase() + v.slice(1);
     }
 
+    function lowfirst(v) {
+        v = String(v || '');
+        return v.charAt(0).toLowerCase() + v.slice(1);
+    }
+
     function exclude(haystack, needle) {
         if (!needle || !needle.length) {
             return haystack.slice(0);
@@ -90,7 +96,7 @@
     function getPropertyDescriptor(obj, prop) {
         if (prop in obj) {
             for (var cur = obj; cur; cur = Object.getPrototypeOf(cur)) {
-                if (obj.hasOwnProperty(prop)) {
+                if (cur.hasOwnProperty(prop)) {
                     return getOwnPropertyDescriptor(cur, prop);
                 }
             }
@@ -133,12 +139,12 @@
             enumerable: desc.enumerable,
             configurable: false,
             get: function () {
-                return desc.get ? desc.get.apply(obj) : desc.value;
+                return desc.get ? desc.get.call(obj) : desc.value;
             },
             set: function (value) {
                 if (value !== this[prop]) {
                     if (desc.set) {
-                        desc.set.apply(obj, value);
+                        desc.set.call(obj, value);
                     } else {
                         desc.value = value;
                     }
@@ -324,6 +330,7 @@
         }
         defaultNS = defaultNS || control.defaultNS;
         exclusions = exclusions || [];
+        exclusions[exclusions.length] = control.name;
 
         var cacheKey = defaultNS + '/' + needle;
         if (haystack === definedControls) {
@@ -398,6 +405,7 @@
         }
         if (isString(control.controls)) {
             control.controls = findControls(control, control.controls, null, definedControls, exclusions);
+            exclusions.push.apply(exclusions, control.controls);
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);
@@ -650,7 +658,7 @@
 
     var typerUI = Typer.ui = define('TyperUI', {
         language: 'en'
-    }, function (options) {
+    }, function (options, values) {
         if (isString(options)) {
             options = {
                 controls: options
@@ -677,6 +685,11 @@
         }
         foreachControl(self, triggerEvent, 'init');
         triggerEvent(self, 'init');
+        if (isPlainObject(values)) {
+            $.each(values, function (i, v) {
+                self.setValue(i, 'value', v);
+            });
+        }
     });
 
     $.extend(typerUI.prototype, {
@@ -837,7 +850,7 @@
         controlExtensions: controlExtensions,
         matchWSDelim: matchWSDelim,
         define: function (name, base, ctor) {
-            if (typeof name === 'object') {
+            if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
                 return;
             }
@@ -877,7 +890,7 @@
             });
         },
         addHook: function (keystroke, hook) {
-            if (typeof keystroke === 'object') {
+            if (isPlainObject(keystroke)) {
                 $.each(keystroke, typerUI.addHook);
                 return;
             }
@@ -889,7 +902,7 @@
             });
         },
         setShortcut: function (command, keystroke) {
-            if (typeof command === 'object') {
+            if (isPlainObject(command)) {
                 $.each(command, typerUI.setShortcut);
                 return;
             }
@@ -955,20 +968,20 @@
             return ui.execute();
         },
         alert: function (message, pin) {
-            var ui = typerUI('dialog:alert');
-            ui.setValue('message', message);
-            return ui.execute();
+            return typerUI('dialog:alert', {
+                message: message
+            }).execute();
         },
         confirm: function (message, pin) {
-            var ui = typerUI('dialog:confirm');
-            ui.setValue('message', message);
-            return ui.execute();
+            return typerUI('dialog:confirm', {
+                message: message
+            }).execute();
         },
         prompt: function (message, value, pin) {
-            var ui = typerUI('dialog:prompt');
-            ui.setValue('message', message);
-            ui.setValue('prompt', value);
-            return ui.execute();
+            return typerUI('dialog:prompt', {
+                message: message,
+                input: value
+            }).execute();
         },
         getWheelDelta: function (e) {
             e = e.originalEvent || e;
@@ -1026,9 +1039,11 @@
             return ui.getIcon(value);
         },
         bindShortcut: function (ui, control, value) {
-            return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
-                return IS_MAC ? MAC_CTRLKEY[v.toLowerCase()] : capfirst(v) + '+';
+            var flag = {};
+            var str = (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+                return IS_MAC ? ((flag[v.toLowerCase()] = MAC_CTRLKEY[v.toLowerCase()]), '') : capfirst(v) + '+';
             });
+            return IS_MAC ? (flag.alt || '') + (flag.shift || '') + (flag.ctrl || '') + (MAC_CTRLKEY[lowfirst(str)] || str) : str;
         }
     });
 
@@ -1249,4 +1264,4 @@
         });
     });
 
-}(jQuery, window.Typer, Object, window, document));
+}(jQuery, window.Typer, Object, RegExp, window, document));
