@@ -247,7 +247,11 @@
             });
         },
         enter: function (e) {
-            e.typer.invoke('insertLine');
+            if (e.typer.widgetEnabled('lineBreak') && Typer.is(e.typer.getSelection().startNode, Typer.NODE_EDITABLE_PARAGRAPH)) {
+                e.typer.invoke('insertLineBreak');
+            } else {
+                e.typer.invoke('insertLine');
+            }
         },
         commands: {
             justifyCenter: justifyCommand,
@@ -277,6 +281,9 @@
 
     Typer.widgets.lineBreak = {
         inline: true,
+        enter: function (e) {
+            e.typer.invoke('insertLineBreak');
+        },
         shiftEnter: function (e) {
             e.typer.invoke('insertLineBreak');
         },

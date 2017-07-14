@@ -203,7 +203,7 @@
         if (selector.toFixed) {
             return (element.nodeType & selector) && element;
         }
-        return (selector === '*' || $(element).is(selector)) && element;
+        return (selector === '*' || tagName(element) === selector || $(element).is(selector)) && element;
     }
 
     function attrs(element) {
@@ -925,6 +925,7 @@
             extractContents(range, 'paste', function (state, startPoint, endPoint) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
+                var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
@@ -1014,7 +1015,7 @@
                                 caretPoint = createRange(lastNode, -0);
                             }
                         }
-                        paragraphAsInline = false;
+                        paragraphAsInline = forcedInline;
                     } else {
                         var caretNode = typerDocument.getEditableNode(caretPoint.startContainer);
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
@@ -1022,9 +1023,9 @@
                         } else {
                             createRange(caretNode.element, true).insertNode(nodeToInsert);
                         }
-                        insertAsInline = is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
+                        insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
                         caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
-                        paragraphAsInline = !insertAsInline;
+                        paragraphAsInline = forcedInline || !insertAsInline;
                         hasInsertedBlock = true;
                     }
                     tracker.track(caretPoint.startContainer);
