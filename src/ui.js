@@ -83,12 +83,13 @@
     }
 
     function exclude(haystack, needle) {
-        if (!needle || !needle.length) {
-            return haystack.slice(0);
+        var result = {};
+        for (var i in haystack) {
+            if (!(i in needle)) {
+                result[i] = haystack[i];
+            }
         }
-        return haystack.filter(function (v) {
-            return needle.indexOf(v) < 0;
-        });
+        return result;
     }
 
     function matchWSDelim(haystack, needle) {
@@ -341,49 +342,57 @@
             defineHiddenProperty(haystack, '_cache', {});
         }
         defaultNS = defaultNS || control.defaultNS;
-        exclusions = exclusions || [];
-        exclusions[exclusions.length] = control.name;
-
-        var cacheKey = defaultNS + '/' + needle;
-        if (haystack === definedControls) {
-            cacheKey = [control.ui.type, control.type, cacheKey].join('/');
-        }
-        if (haystack._cache[cacheKey]) {
-            return exclude(haystack._cache[cacheKey], exclusions);
+        exclusions = exclusions || {};
+        if (control.name) {
+            exclusions[control.name] = true;
         }
 
-        var result = [];
+        var cacheKey = (defaultNS || '*') + '/' + needle;
+        if (control !== control.ui && haystack === definedControls) {
+            cacheKey = [control.ui.type || '*', control.type, cacheKey].join('/');
+        }
+        var cachedResult = haystack._cache[cacheKey];
+        if (cachedResult) {
+            return Object.keys(exclude(cachedResult.include, $.extend(exclusions, cachedResult.exclude)));
+        }
+
+        var resultExclude = {};
+        var resultInclude = {};
         String(needle || '').replace(/(?:^|\s)(-?)((?:([\w-:]+|\*):)?(?:[\w-]+|\*|(?=\()))(\([^)]+\))?(?=$|\s)/g, function (v, minus, name, ns, params) {
-            var arr = [];
+            var arr = {};
             var startWith = (ns || defaultNS || '').replace(/.$/, '$&:');
             if (!name || name.slice(-1) === '*') {
                 $.each(haystack, function (i) {
                     if (ns === '*' || (i.substr(0, startWith.length) === startWith && i.indexOf(':', startWith.length) < 0)) {
-                        arr[arr.length] = i;
+                        arr[i] = true;
                     }
                 });
             } else {
                 name = name.indexOf(':') < 0 ? startWith + name : name;
                 if (haystack[name]) {
-                    arr[arr.length] = name;
+                    arr[name] = true;
                 }
             }
             if (params) {
                 params = parseCompactSyntax(params).params;
-                arr = arr.filter(function (v) {
-                    return matchParams(params, haystack[v]);
+                $.each(arr, function (i) {
+                    if (!matchParams(params, haystack[i])) {
+                        delete arr[i];
+                    }
                 });
             }
             if (minus) {
-                exclusions.push.apply(exclusions, arr);
-                result = exclude(result, arr);
+                $.extend(resultExclude, arr);
+                resultInclude = exclude(resultInclude, arr);
             } else {
-                arr = exclude(arr, exclusions);
-                result.push.apply(result, exclude(arr, result));
+                $.extend(resultInclude, arr);
             }
         });
-        haystack._cache[cacheKey] = result.slice(0);
-        return result;
+        haystack._cache[cacheKey] = {
+            include: resultInclude,
+            exclude: resultExclude
+        };
+        return Object.keys(exclude(resultInclude, $.extend(exclusions, resultExclude)));
     }
 
     function sortControls(controls) {
@@ -410,14 +419,16 @@
         var ui = control.ui;
         contextualParent = control instanceof typerUI.group ? contextualParent || ui : control;
         contextualParent.all = contextualParent.all || {};
-        exclusions = exclusions || [];
+        exclusions = exclusions || {};
 
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
         if (isString(control.controls)) {
             control.controls = findControls(control, control.controls, null, definedControls, exclusions);
-            exclusions.push.apply(exclusions, control.controls);
+            $.each(control.controls, function (i, v) {
+                exclusions[v] = true;
+            });
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);
@@ -435,7 +446,7 @@
                 inst.shortcut = typerUI.getShortcut(inst.execute);
             }
             contextualParent.all[name] = inst;
-            createControls(inst, contextualParent, contextualParent === control && exclusions.slice(0));
+            createControls(inst, contextualParent, (control === ui || control === contextualParent) && $.extend({}, exclusions));
             return inst;
         });
         sortControls(control.controls);
@@ -973,31 +984,28 @@
                 $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
         },
-        openDialog: function (control, value, pin) {
-            var ui = typerUI(control);
-            ui.setValue(control, value);
-            return ui.execute();
-        },
-        alert: function (message, pin) {
-            return typerUI('dialog:alert', {
+        alert: function (message) {
+            return typerUI('dialog:prompt -dialog:input -dialog:buttonCancel', {
                 message: message
             }).execute();
         },
-        confirm: function (message, pin) {
-            return typerUI('dialog:confirm', {
-                message: message
+        confirm: function (message, buttonOK) {
+            return typerUI('dialog:prompt -dialog:input', {
+                message: message,
+                buttonOK: buttonOK
             }).execute();
         },
-        prompt: function (message, value, pin) {
+        prompt: function (message, value, buttonOK) {
             return typerUI('dialog:prompt', {
                 message: message,
-                input: value
+                input: value,
+                buttonOK: buttonOK
             }).execute();
         },
         getWheelDelta: function (e) {
             e = e.originalEvent || e;
             var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
-            return dir / Math.abs(dir);
+            return dir / Math.abs(dir) * (IS_MAC ? -1 : 1);
         },
         parseOrigin: function (value) {
             if (/(left|center|right)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?(?:\s+(top|center|bottom)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?)?/g.test(value)) {
@@ -1198,31 +1206,17 @@
         message: typerUI.label({
             markdown: true
         }),
-        input: typerUI.textbox({
-            label: '',
-        }),
+        input: typerUI.textbox(),
         prompt: typerUI.dialog({
             pinnable: true,
             defaultNS: 'dialog',
             controls: 'message input buttonset',
-            resolveWith: 'input',
-            setup: function (ui, self) {
-                ui.setValue('input', self.value);
-            }
-        }),
-        confirm: typerUI.dialog({
-            pinnable: true,
-            defaultNS: 'dialog',
-            controls: 'message buttonset'
-        }),
-        alert: typerUI.dialog({
-            pinnable: true,
-            defaultNS: 'dialog',
-            controls: 'message buttonset -buttonCancel'
+            resolveWith: 'input'
         })
     });
 
     typerUI.addLabels('en', 'dialog', {
+        input: '',
         buttonOK: 'OK',
         buttonCancel: 'Cancel'
     });

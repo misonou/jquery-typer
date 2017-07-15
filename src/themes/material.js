@@ -46,7 +46,7 @@
             if (control.is('textbox')) {
                 return '';
             }
-            if ((control.contextualParent || ui).type !== 'callout' && ui.getIcon(control)) {
+            if (!(control.contextualParent || ui).is('callout') && ui.getIcon(control)) {
                 if (!control.showButtonLabel || !control.contextualParent.showButtonLabel || !ui.showButtonLabel) {
                     return '';
                 }

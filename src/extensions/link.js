@@ -58,7 +58,9 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return Typer.ui.openDialog('typer:link:selectLink', currentValue);
+                return Typer.ui('typer:link:selectLink', {
+                    'typer:link:selectLink': currentValue
+                }).execute();
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
@@ -151,4 +153,4 @@
         }
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));

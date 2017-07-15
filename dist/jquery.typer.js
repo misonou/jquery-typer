@@ -229,7 +229,7 @@
         if (selector.toFixed) {
             return (element.nodeType & selector) && element;
         }
-        return (selector === '*' || $(element).is(selector)) && element;
+        return (selector === '*' || tagName(element) === selector || $(element).is(selector)) && element;
     }
 
     function attrs(element) {
@@ -951,6 +951,7 @@
             extractContents(range, 'paste', function (state, startPoint, endPoint) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = startPoint.cloneRange();
+                var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
@@ -1040,7 +1041,7 @@
                                 caretPoint = createRange(lastNode, -0);
                             }
                         }
-                        paragraphAsInline = false;
+                        paragraphAsInline = forcedInline;
                     } else {
                         var caretNode = typerDocument.getEditableNode(caretPoint.startContainer);
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
@@ -1048,9 +1049,9 @@
                         } else {
                             createRange(caretNode.element, true).insertNode(nodeToInsert);
                         }
-                        insertAsInline = is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
+                        insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET);
                         caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
-                        paragraphAsInline = !insertAsInline;
+                        paragraphAsInline = forcedInline || !insertAsInline;
                         hasInsertedBlock = true;
                     }
                     tracker.track(caretPoint.startContainer);
@@ -2638,7 +2639,7 @@
 
 } (jQuery, window.Typer));
 
-(function ($, Typer, Object, window, document) {
+(function ($, Typer, Object, RegExp, window, document) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
@@ -2646,6 +2647,7 @@
     var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
 
     var isFunction = $.isFunction;
+    var isPlainObject = $.isPlainObject;
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var defineProperty = Object.defineProperty;
 
@@ -2675,7 +2677,19 @@
     var MAC_CTRLKEY = {
         ctrl: '\u2318',
         alt: '\u2325',
-        shift: '\u8679'
+        shift: '\u21e7',
+        enter: '\u21a9',
+        tab: '\u2135',
+        pageUp: '\u21de',
+        pageDown: '\u21df',
+        backspace: '\u232b',
+        escape: '\u238b',
+        leftArrow: '\u2b60',
+        upArrow: '\u2b61',
+        rightArrow: '\u2b62',
+        downArrow: '\u2b63',
+        home: '\u2b66',
+        end: '\u2b68'
     };
 
     var definedControls = {};
@@ -2696,7 +2710,7 @@
     }
 
     function isString(v) {
-        return typeof v === 'string';
+        return typeof v === 'string' && v;
     }
 
     function capfirst(v) {
@@ -2704,13 +2718,19 @@
         return v.charAt(0).toUpperCase() + v.slice(1);
     }
 
+    function lowfirst(v) {
+        v = String(v || '');
+        return v.charAt(0).toLowerCase() + v.slice(1);
+    }
+
     function exclude(haystack, needle) {
-        if (!needle || !needle.length) {
-            return haystack.slice(0);
+        var result = {};
+        for (var i in haystack) {
+            if (!(i in needle)) {
+                result[i] = haystack[i];
+            }
         }
-        return haystack.filter(function (v) {
-            return needle.indexOf(v) < 0;
-        });
+        return result;
     }
 
     function matchWSDelim(haystack, needle) {
@@ -2730,7 +2750,7 @@
     function getPropertyDescriptor(obj, prop) {
         if (prop in obj) {
             for (var cur = obj; cur; cur = Object.getPrototypeOf(cur)) {
-                if (obj.hasOwnProperty(prop)) {
+                if (cur.hasOwnProperty(prop)) {
                     return getOwnPropertyDescriptor(cur, prop);
                 }
             }
@@ -2773,12 +2793,12 @@
             enumerable: desc.enumerable,
             configurable: false,
             get: function () {
-                return desc.get ? desc.get.apply(obj) : desc.value;
+                return desc.get ? desc.get.call(obj) : desc.value;
             },
             set: function (value) {
                 if (value !== this[prop]) {
                     if (desc.set) {
-                        desc.set.apply(obj, value);
+                        desc.set.call(obj, value);
                     } else {
                         desc.value = value;
                     }
@@ -2963,48 +2983,57 @@
             defineHiddenProperty(haystack, '_cache', {});
         }
         defaultNS = defaultNS || control.defaultNS;
-        exclusions = exclusions || [];
-
-        var cacheKey = defaultNS + '/' + needle;
-        if (haystack === definedControls) {
-            cacheKey = [control.ui.type, control.type, cacheKey].join('/');
-        }
-        if (haystack._cache[cacheKey]) {
-            return exclude(haystack._cache[cacheKey], exclusions);
+        exclusions = exclusions || {};
+        if (control.name) {
+            exclusions[control.name] = true;
         }
 
-        var result = [];
+        var cacheKey = (defaultNS || '*') + '/' + needle;
+        if (control !== control.ui && haystack === definedControls) {
+            cacheKey = [control.ui.type || '*', control.type, cacheKey].join('/');
+        }
+        var cachedResult = haystack._cache[cacheKey];
+        if (cachedResult) {
+            return Object.keys(exclude(cachedResult.include, $.extend(exclusions, cachedResult.exclude)));
+        }
+
+        var resultExclude = {};
+        var resultInclude = {};
         String(needle || '').replace(/(?:^|\s)(-?)((?:([\w-:]+|\*):)?(?:[\w-]+|\*|(?=\()))(\([^)]+\))?(?=$|\s)/g, function (v, minus, name, ns, params) {
-            var arr = [];
+            var arr = {};
             var startWith = (ns || defaultNS || '').replace(/.$/, '$&:');
             if (!name || name.slice(-1) === '*') {
                 $.each(haystack, function (i) {
                     if (ns === '*' || (i.substr(0, startWith.length) === startWith && i.indexOf(':', startWith.length) < 0)) {
-                        arr[arr.length] = i;
+                        arr[i] = true;
                     }
                 });
             } else {
                 name = name.indexOf(':') < 0 ? startWith + name : name;
                 if (haystack[name]) {
-                    arr[arr.length] = name;
+                    arr[name] = true;
                 }
             }
             if (params) {
                 params = parseCompactSyntax(params).params;
-                arr = arr.filter(function (v) {
-                    return matchParams(params, haystack[v]);
+                $.each(arr, function (i) {
+                    if (!matchParams(params, haystack[i])) {
+                        delete arr[i];
+                    }
                 });
             }
             if (minus) {
-                exclusions.push.apply(exclusions, arr);
-                result = exclude(result, arr);
+                $.extend(resultExclude, arr);
+                resultInclude = exclude(resultInclude, arr);
             } else {
-                arr = exclude(arr, exclusions);
-                result.push.apply(result, exclude(arr, result));
+                $.extend(resultInclude, arr);
             }
         });
-        haystack._cache[cacheKey] = result.slice(0);
-        return result;
+        haystack._cache[cacheKey] = {
+            include: resultInclude,
+            exclude: resultExclude
+        };
+        return Object.keys(exclude(resultInclude, $.extend(exclusions, resultExclude)));
     }
 
     function sortControls(controls) {
@@ -3031,35 +3060,37 @@
         var ui = control.ui;
         contextualParent = control instanceof typerUI.group ? contextualParent || ui : control;
         contextualParent.all = contextualParent.all || {};
-        exclusions = exclusions || [];
+        exclusions = exclusions || {};
 
         if (isFunction(control.controls)) {
             control.controls = control.controls(ui, control);
         }
         if (isString(control.controls)) {
             control.controls = findControls(control, control.controls, null, definedControls, exclusions);
+            $.each(control.controls, function (i, v) {
+                exclusions[v] = true;
+            });
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);
-            inst.ui = ui;
-            inst.parent = control;
-            inst.contextualParent = contextualParent;
-            inst.name = inst.name || (isString(v) ? v : control.defaultNS + ':' + randomId());
-            if (!isString(inst.defaultNS)) {
-                inst.defaultNS = inst.name;
+            var name = inst.name || isString(v) || control.defaultNS + ':' + randomId();
+            $.extend(inst, {
+                ui: ui,
+                name: name,
+                parent: control,
+                contextualParent: contextualParent,
+                defaultNS: isString(inst.defaultNS) || name,
+                icon: isString(inst.icon) || name,
+                label: isString(inst.label) || name
+            });
+            if (!isString(inst.shortcut) && isString(inst.execute)) {
+                inst.shortcut = typerUI.getShortcut(inst.execute);
             }
-            if (!isString(inst.icon)) {
-                inst.icon = inst.name;
-            }
-            if (!isString(inst.label)) {
-                inst.label = inst.name;
-            }
-            contextualParent.all[inst.name] = inst;
-            createControls(inst, contextualParent, contextualParent === control && exclusions.slice(0));
+            contextualParent.all[name] = inst;
+            createControls(inst, contextualParent, (control === ui || control === contextualParent) && $.extend({}, exclusions));
             return inst;
         });
         sortControls(control.controls);
-        return control.controls;
     }
 
     function renderControls(control, params) {
@@ -3290,7 +3321,7 @@
 
     var typerUI = Typer.ui = define('TyperUI', {
         language: 'en'
-    }, function (options) {
+    }, function (options, values) {
         if (isString(options)) {
             options = {
                 controls: options
@@ -3309,14 +3340,19 @@
         var self = $.extend(this, options);
         self.ui = self;
         self.theme = self.theme || Object.keys(definedThemes)[0];
-        self.controls = createControls(self);
-        self.element = renderControls(self);
+        createControls(self);
+        renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
         foreachControl(self, triggerEvent, 'init');
         triggerEvent(self, 'init');
+        if (isPlainObject(values)) {
+            $.each(values, function (i, v) {
+                self.setValue(i, 'value', v);
+            });
+        }
     });
 
     $.extend(typerUI.prototype, {
@@ -3477,7 +3513,7 @@
         controlExtensions: controlExtensions,
         matchWSDelim: matchWSDelim,
         define: function (name, base, ctor) {
-            if (typeof name === 'object') {
+            if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
                 return;
             }
@@ -3517,7 +3553,7 @@
             });
         },
         addHook: function (keystroke, hook) {
-            if (typeof keystroke === 'object') {
+            if (isPlainObject(keystroke)) {
                 $.each(keystroke, typerUI.addHook);
                 return;
             }
@@ -3529,7 +3565,7 @@
             });
         },
         setShortcut: function (command, keystroke) {
-            if (typeof command === 'object') {
+            if (isPlainObject(command)) {
                 $.each(command, typerUI.setShortcut);
                 return;
             }
@@ -3589,31 +3625,28 @@
                 $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf().eq(0).focus();
             }
         },
-        openDialog: function (control, value, pin) {
-            var ui = typerUI(control);
-            ui.setValue(control, value);
-            return ui.execute();
+        alert: function (message) {
+            return typerUI('dialog:prompt -dialog:input -dialog:buttonCancel', {
+                message: message
+            }).execute();
         },
-        alert: function (message, pin) {
-            var ui = typerUI('dialog:alert');
-            ui.setValue('message', message);
-            return ui.execute();
+        confirm: function (message, buttonOK) {
+            return typerUI('dialog:prompt -dialog:input', {
+                message: message,
+                buttonOK: buttonOK
+            }).execute();
         },
-        confirm: function (message, pin) {
-            var ui = typerUI('dialog:confirm');
-            ui.setValue('message', message);
-            return ui.execute();
-        },
-        prompt: function (message, value, pin) {
-            var ui = typerUI('dialog:prompt');
-            ui.setValue('message', message);
-            ui.setValue('prompt', value);
-            return ui.execute();
+        prompt: function (message, value, buttonOK) {
+            return typerUI('dialog:prompt', {
+                message: message,
+                input: value,
+                buttonOK: buttonOK
+            }).execute();
         },
         getWheelDelta: function (e) {
             e = e.originalEvent || e;
             var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
-            return dir / Math.abs(dir);
+            return dir / Math.abs(dir) * (IS_MAC ? -1 : 1);
         },
         parseOrigin: function (value) {
             if (/(left|center|right)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?(?:\s+(top|center|bottom)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?)?/g.test(value)) {
@@ -3666,9 +3699,11 @@
             return ui.getIcon(value);
         },
         bindShortcut: function (ui, control, value) {
-            return (value || '').replace(/ctrl|alt|shift/gi, function (v) {
-                return IS_MAC ? MAC_CTRLKEY[v.toLowerCase()] : capfirst(v) + '+';
+            var flag = {};
+            var str = (value || '').replace(/ctrl|alt|shift/gi, function (v) {
+                return IS_MAC ? ((flag[v.toLowerCase()] = MAC_CTRLKEY[v.toLowerCase()]), '') : capfirst(v) + '+';
             });
+            return IS_MAC ? (flag.alt || '') + (flag.shift || '') + (flag.ctrl || '') + (MAC_CTRLKEY[lowfirst(str)] || str) : str;
         }
     });
 
@@ -3812,31 +3847,17 @@
         message: typerUI.label({
             markdown: true
         }),
-        input: typerUI.textbox({
-            label: '',
-        }),
+        input: typerUI.textbox(),
         prompt: typerUI.dialog({
             pinnable: true,
             defaultNS: 'dialog',
             controls: 'message input buttonset',
-            resolveWith: 'input',
-            setup: function (ui, self) {
-                ui.setValue('input', self.value);
-            }
-        }),
-        confirm: typerUI.dialog({
-            pinnable: true,
-            defaultNS: 'dialog',
-            controls: 'message buttonset'
-        }),
-        alert: typerUI.dialog({
-            pinnable: true,
-            defaultNS: 'dialog',
-            controls: 'message buttonset -buttonCancel'
+            resolveWith: 'input'
         })
     });
 
     typerUI.addLabels('en', 'dialog', {
+        input: '',
         buttonOK: 'OK',
         buttonCancel: 'Cancel'
     });
@@ -3889,7 +3910,7 @@
         });
     });
 
-}(jQuery, window.Typer, Object, window, document));
+}(jQuery, window.Typer, Object, RegExp, window, document));
 
 (function ($, Typer) {
     'use strict';
@@ -4003,7 +4024,7 @@
         var tagName = tx.commandName === 'insertOrderedList' || type ? 'ol' : 'ul';
         var html = '<' + tagName + (type || '').replace(/^.+/, ' type="$&"') + '>';
         var filter = function (i, v) {
-            return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
+            return Typer.is(v, tagName) && ($(v).attr('type') || '') === (type || '');
         };
         var lists = [];
         $.each(tx.selection.getParagraphElements(), function (i, v) {
@@ -4140,7 +4161,11 @@
             });
         },
         enter: function (e) {
-            e.typer.invoke('insertLine');
+            if (e.typer.widgetEnabled('lineBreak') && Typer.is(e.typer.getSelection().startNode, Typer.NODE_EDITABLE_PARAGRAPH)) {
+                e.typer.invoke('insertLineBreak');
+            } else {
+                e.typer.invoke('insertLine');
+            }
         },
         commands: {
             justifyCenter: justifyCommand,
@@ -4153,7 +4178,7 @@
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
                     $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
-                        if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
+                        if (m[1] && !Typer.is(v, m[1]) && compatibleFormatting(m[1], v.tagName)) {
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2] || '';
@@ -4170,6 +4195,9 @@
 
     Typer.widgets.lineBreak = {
         inline: true,
+        enter: function (e) {
+            e.typer.invoke('insertLineBreak');
+        },
         shiftEnter: function (e) {
             e.typer.invoke('insertLineBreak');
         },
@@ -4347,7 +4375,7 @@
                 tx.insertWidget('list', '');
             },
             active: function (toolbar, self) {
-                return self.widget && self.widget.element.tagName.toLowerCase() === 'ul';
+                return self.widget && Typer.is(self.widget.element, 'ul');
             },
             enabled: function (toolbar) {
                 return isEnabled(toolbar, false);
@@ -4363,7 +4391,7 @@
                 orderedListButton('I', 'I, II, III, IV')
             ],
             active: function (toolbar, self) {
-                return self.widget && self.widget.element.tagName.toLowerCase() === 'ol';
+                return self.widget && Typer.is(self.widget.element, 'ol');
             },
             enabled: function (toolbar) {
                 return isEnabled(toolbar, false);
@@ -4513,7 +4541,9 @@
                 if (typeof toolbar.options.selectLink === 'function') {
                     return toolbar.options.selectLink(currentValue);
                 }
-                return Typer.ui.openDialog('typer:link:selectLink', currentValue);
+                return Typer.ui('typer:link:selectLink', {
+                    'typer:link:selectLink': currentValue
+                }).execute();
             },
             execute: function (toolbar, self, tx, value) {
                 if (!value) {
@@ -4606,7 +4636,7 @@
         }
     });
 
-} (jQuery, window.Typer));
+}(jQuery, window.Typer));
 
 (function ($, Typer) {
     'use strict';
@@ -4621,7 +4651,7 @@
         insert: function (tx, options) {
             var element = Typer.createElement(reMediaType.test(options.src || options) ? (RegExp.$2 ? 'video' : RegExp.$3 ? 'audio' : 'img') : 'img');
             element.src = options.src || options;
-            if (element.tagName.toLowerCase() === 'video') {
+            if (Typer.is(element, 'video')) {
                 $(element).attr('controls', '');
             }
             tx.insertHtml(element);
@@ -5195,7 +5225,7 @@
             shortcut: 'ctrlA',
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
-                selection.select(toolbar.typer.element, 'contents');
+                selection.selectAll();
                 selection.focus();
             }
         }),
@@ -6279,7 +6309,7 @@
             if (control.is('textbox')) {
                 return '';
             }
-            if ((control.contextualParent || ui).type !== 'callout' && ui.getIcon(control)) {
+            if (!(control.contextualParent || ui).is('callout') && ui.getIcon(control)) {
                 if (!control.showButtonLabel || !control.contextualParent.showButtonLabel || !ui.showButtonLabel) {
                     return '';
                 }
