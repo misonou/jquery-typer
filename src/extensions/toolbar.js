@@ -234,7 +234,7 @@
             shortcut: 'ctrlA',
             execute: function (toolbar) {
                 var selection = toolbar.typer.getSelection();
-                selection.select(toolbar.typer.element, 'contents');
+                selection.selectAll();
                 selection.focus();
             }
         }),

@@ -36,7 +36,19 @@
     var MAC_CTRLKEY = {
         ctrl: '\u2318',
         alt: '\u2325',
-        shift: '\u21e7'
+        shift: '\u21e7',
+        enter: '\u21a9',
+        tab: '\u2135',
+        pageUp: '\u21de',
+        pageDown: '\u21df',
+        backspace: '\u232b',
+        escape: '\u238b',
+        leftArrow: '\u2b60',
+        upArrow: '\u2b61',
+        rightArrow: '\u2b62',
+        downArrow: '\u2b63',
+        home: '\u2b66',
+        end: '\u2b68'
     };
 
     var definedControls = {};
@@ -57,7 +69,7 @@
     }
 
     function isString(v) {
-        return typeof v === 'string';
+        return typeof v === 'string' && v;
     }
 
     function capfirst(v) {
@@ -409,25 +421,24 @@
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);
-            inst.ui = ui;
-            inst.parent = control;
-            inst.contextualParent = contextualParent;
-            inst.name = inst.name || (isString(v) ? v : control.defaultNS + ':' + randomId());
-            if (!isString(inst.defaultNS)) {
-                inst.defaultNS = inst.name;
+            var name = inst.name || isString(v) || control.defaultNS + ':' + randomId();
+            $.extend(inst, {
+                ui: ui,
+                name: name,
+                parent: control,
+                contextualParent: contextualParent,
+                defaultNS: isString(inst.defaultNS) || name,
+                icon: isString(inst.icon) || name,
+                label: isString(inst.label) || name
+            });
+            if (!isString(inst.shortcut) && isString(inst.execute)) {
+                inst.shortcut = typerUI.getShortcut(inst.execute);
             }
-            if (!isString(inst.icon)) {
-                inst.icon = inst.name;
-            }
-            if (!isString(inst.label)) {
-                inst.label = inst.name;
-            }
-            contextualParent.all[inst.name] = inst;
+            contextualParent.all[name] = inst;
             createControls(inst, contextualParent, contextualParent === control && exclusions.slice(0));
             return inst;
         });
         sortControls(control.controls);
-        return control.controls;
     }
 
     function renderControls(control, params) {
@@ -677,8 +688,8 @@
         var self = $.extend(this, options);
         self.ui = self;
         self.theme = self.theme || Object.keys(definedThemes)[0];
-        self.controls = createControls(self);
-        self.element = renderControls(self);
+        createControls(self);
+        renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
         if (self.typer) {
             self.typer.retainFocus(self.element);

@@ -11,7 +11,7 @@
         insert: function (tx, options) {
             var element = Typer.createElement(reMediaType.test(options.src || options) ? (RegExp.$2 ? 'video' : RegExp.$3 ? 'audio' : 'img') : 'img');
             element.src = options.src || options;
-            if (element.tagName.toLowerCase() === 'video') {
+            if (Typer.is(element, 'video')) {
                 $(element).attr('controls', '');
             }
             tx.insertHtml(element);

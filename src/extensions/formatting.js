@@ -110,7 +110,7 @@
         var tagName = tx.commandName === 'insertOrderedList' || type ? 'ol' : 'ul';
         var html = '<' + tagName + (type || '').replace(/^.+/, ' type="$&"') + '>';
         var filter = function (i, v) {
-            return v.tagName.toLowerCase() === tagName && ($(v).attr('type') || '') === (type || '');
+            return Typer.is(v, tagName) && ($(v).attr('type') || '') === (type || '');
         };
         var lists = [];
         $.each(tx.selection.getParagraphElements(), function (i, v) {
@@ -264,7 +264,7 @@
                     tx.insertWidget('list', m[1] === 'ol' && '1');
                 } else {
                     $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
-                        if (m[1] && m[1] !== v.tagName.toLowerCase() && compatibleFormatting(m[1], v.tagName)) {
+                        if (m[1] && !Typer.is(v, m[1]) && compatibleFormatting(m[1], v.tagName)) {
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2] || '';
@@ -461,7 +461,7 @@
                 tx.insertWidget('list', '');
             },
             active: function (toolbar, self) {
-                return self.widget && self.widget.element.tagName.toLowerCase() === 'ul';
+                return self.widget && Typer.is(self.widget.element, 'ul');
             },
             enabled: function (toolbar) {
                 return isEnabled(toolbar, false);
@@ -477,7 +477,7 @@
                 orderedListButton('I', 'I, II, III, IV')
             ],
             active: function (toolbar, self) {
-                return self.widget && self.widget.element.tagName.toLowerCase() === 'ol';
+                return self.widget && Typer.is(self.widget.element, 'ol');
             },
             enabled: function (toolbar) {
                 return isEnabled(toolbar, false);
