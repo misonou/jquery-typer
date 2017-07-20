@@ -163,7 +163,7 @@
             }
             setImmediate(function () {
                 $(control.element).addClass('open');
-                if (ui.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
+                if (control.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
                     $wrapper.addClass('pinned pinned-' + ui.parentControl.pinDirection);
                     $(ui.parentControl.element).addClass('pin-active');
                     Typer.ui.pin(control, $wrapper[0], ui.parentControl.element, ui.parentControl.pinDirection);
@@ -179,7 +179,7 @@
         dialogClose: function (ui, control) {
             $(control.element).addClass('closing').one(TRANSITION_END, function () {
                 $(ui.element).remove();
-                if (ui.pinnable && ui.parentControl) {
+                if (control.pinnable && ui.parentControl) {
                     $(ui.parentControl.element).removeClass('pin-active');
                     Typer.ui.unpin(control);
                 }

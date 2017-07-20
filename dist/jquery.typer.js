@@ -2886,7 +2886,7 @@
             $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
                 dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
             });
-            callThemeFunction(v.dialog, 'positionUpdate', {
+            callThemeFunction(v.control, 'positionUpdate', {
                 element: v.element,
                 position: rect,
                 stick: stick
@@ -3130,7 +3130,7 @@
         }
 
         function replacePlaceholder(name) {
-            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>').attr('role', control.name)[0];
+            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>')[0];
             bindPlaceholder(element);
             $('[x\\:t]', element).each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:t'));
@@ -3167,6 +3167,7 @@
         }
 
         control.element = replacePlaceholder(control.type);
+        $(control.element).attr('role', control.name);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
         });
@@ -3209,11 +3210,11 @@
         if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
             return false;
         }
-        return callFunction(control, 'enabled') !== false;
+        return control.enabled !== false && callFunction(control, 'enabled') !== false;
     }
 
     function isActive(control) {
-        return !!callFunction(control, 'active');
+        return control.active === true || !!callFunction(control, 'active');
     }
 
     function updateControl(control) {
@@ -3228,7 +3229,7 @@
         }
 
         var disabled = !isEnabled(control);
-        var visible = !control.hiddenWhenDisabled || !disabled;
+        var visible = (!control.hiddenWhenDisabled || !disabled) && control.visible !== false && callFunction(control, 'visible') !== false;
 
         var $elm = $(control.element);
         var theme = definedThemes[ui.theme];
@@ -3473,7 +3474,11 @@
                     this.isFailed = alwaysTrue;
                 }
             };
-            foreachControl(this, triggerEvent, 'validate', optArg);
+            foreachControl(this, function (control) {
+                if (isEnabled(control)) {
+                    triggerEvent(control, 'validate', optArg);
+                }
+            });
             return !optArg.isFailed();
         },
         execute: function (control) {
@@ -3630,17 +3635,15 @@
                 message: message
             }).execute();
         },
-        confirm: function (message, buttonOK) {
+        confirm: function (message) {
             return typerUI('dialog:prompt -dialog:input', {
-                message: message,
-                buttonOK: buttonOK
+                message: message
             }).execute();
         },
-        prompt: function (message, value, buttonOK) {
+        prompt: function (message, value) {
             return typerUI('dialog:prompt', {
                 message: message,
-                input: value,
-                buttonOK: buttonOK
+                input: value
             }).execute();
         },
         getWheelDelta: function (e) {
@@ -3838,10 +3841,12 @@
             type: 'buttonset',
             defaultNS: 'dialog'
         }),
-        buttonOK: typerUI.button({
+        buttonOK: typerUI.label({
+            type: 'button',
             buttonsetGroup: 'right'
         }),
-        buttonCancel: typerUI.button({
+        buttonCancel: typerUI.label({
+            type: 'button',
             buttonsetGroup: 'right'
         }),
         message: typerUI.label({
@@ -5878,16 +5883,16 @@
         },
         overrides: {
             getValue: function (preset) {
-                return normalizeDate(preset.options.mode, preset.selectedDate || new Date());
+                return preset.selectedDate ? normalizeDate(preset.options.mode, preset.selectedDate) : null;
             },
             setValue: function (preset, date) {
-                preset.selectedDate = normalizeDate(preset.options.mode, date);
+                preset.selectedDate = date && normalizeDate(preset.options.mode, date);
                 this.selectAll();
                 this.invoke(function (tx) {
-                    tx.insertText(formatDate(preset.options.mode, preset.selectedDate));
+                    tx.insertText(date ? formatDate(preset.options.mode, preset.selectedDate) : '');
                 });
                 if (this === activeTyper) {
-                    datepickerMenuUI.setValue('calendar', preset.selectedDate);
+                    datepickerMenuUI.setValue('calendar', preset.selectedDate || new Date());
                 }
             },
             hasContent: function (preset) {
@@ -5924,7 +5929,7 @@
             e.typer.retainFocus(datepickerMenuUI.element);
             activeTyper = e.typer;
             datepickerMenuUI.setValue('calendar', 'mode', e.widget.options.mode);
-            datepickerMenuUI.setValue('calendar', e.typer.getValue());
+            datepickerMenuUI.setValue('calendar', e.typer.getValue() || new Date());
             datepickerMenuUI.show(e.typer.element);
         },
         focusout: function (e) {
@@ -5989,6 +5994,7 @@
 
     Typer.presets.keyword = {
         options: {
+            required: false,
             allowFreeInput: true,
             suggestionCount: 5,
             suggestions: false,
@@ -6231,6 +6237,9 @@
 
     Typer.presets.textbox = {
         accept: 'text',
+        options: {
+            required: false
+        },
         overrides: {
             getValue: function (preset) {
                 return this.extractText();
@@ -6426,7 +6435,7 @@
             }
             setImmediate(function () {
                 $(control.element).addClass('open');
-                if (ui.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
+                if (control.pinnable && ui.parentControl && Typer.ui.matchWSDelim(ui.parentControl.pinDirection, 'left right top bottom')) {
                     $wrapper.addClass('pinned pinned-' + ui.parentControl.pinDirection);
                     $(ui.parentControl.element).addClass('pin-active');
                     Typer.ui.pin(control, $wrapper[0], ui.parentControl.element, ui.parentControl.pinDirection);
@@ -6442,7 +6451,7 @@
         dialogClose: function (ui, control) {
             $(control.element).addClass('closing').one(TRANSITION_END, function () {
                 $(ui.element).remove();
-                if (ui.pinnable && ui.parentControl) {
+                if (control.pinnable && ui.parentControl) {
                     $(ui.parentControl.element).removeClass('pin-active');
                     Typer.ui.unpin(control);
                 }

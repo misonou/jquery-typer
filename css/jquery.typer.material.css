@@ -704,7 +704,6 @@ label.typer-ui-callout {
     height: 1.2em;
     font-size: 10px;
     overflow: hidden;
-    z-index: 1;
 }
 
 .pinned .typer-ui-dialog-pin {

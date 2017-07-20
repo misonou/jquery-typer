@@ -50,6 +50,7 @@
 
     Typer.presets.keyword = {
         options: {
+            required: false,
             allowFreeInput: true,
             suggestionCount: 5,
             suggestions: false,

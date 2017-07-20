@@ -245,7 +245,7 @@
             $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
                 dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
             });
-            callThemeFunction(v.dialog, 'positionUpdate', {
+            callThemeFunction(v.control, 'positionUpdate', {
                 element: v.element,
                 position: rect,
                 stick: stick
@@ -489,7 +489,7 @@
         }
 
         function replacePlaceholder(name) {
-            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>').attr('role', control.name)[0];
+            var element = $(definedThemes[ui.theme][name] || '<div><br x:t="children"></div>')[0];
             bindPlaceholder(element);
             $('[x\\:t]', element).each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:t'));
@@ -526,6 +526,7 @@
         }
 
         control.element = replacePlaceholder(control.type);
+        $(control.element).attr('role', control.name);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
         });
@@ -568,11 +569,11 @@
         if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
             return false;
         }
-        return callFunction(control, 'enabled') !== false;
+        return control.enabled !== false && callFunction(control, 'enabled') !== false;
     }
 
     function isActive(control) {
-        return !!callFunction(control, 'active');
+        return control.active === true || !!callFunction(control, 'active');
     }
 
     function updateControl(control) {
@@ -587,7 +588,7 @@
         }
 
         var disabled = !isEnabled(control);
-        var visible = !control.hiddenWhenDisabled || !disabled;
+        var visible = (!control.hiddenWhenDisabled || !disabled) && control.visible !== false && callFunction(control, 'visible') !== false;
 
         var $elm = $(control.element);
         var theme = definedThemes[ui.theme];
@@ -832,7 +833,11 @@
                     this.isFailed = alwaysTrue;
                 }
             };
-            foreachControl(this, triggerEvent, 'validate', optArg);
+            foreachControl(this, function (control) {
+                if (isEnabled(control)) {
+                    triggerEvent(control, 'validate', optArg);
+                }
+            });
             return !optArg.isFailed();
         },
         execute: function (control) {
@@ -989,17 +994,15 @@
                 message: message
             }).execute();
         },
-        confirm: function (message, buttonOK) {
+        confirm: function (message) {
             return typerUI('dialog:prompt -dialog:input', {
-                message: message,
-                buttonOK: buttonOK
+                message: message
             }).execute();
         },
-        prompt: function (message, value, buttonOK) {
+        prompt: function (message, value) {
             return typerUI('dialog:prompt', {
                 message: message,
-                input: value,
-                buttonOK: buttonOK
+                input: value
             }).execute();
         },
         getWheelDelta: function (e) {
@@ -1197,10 +1200,12 @@
             type: 'buttonset',
             defaultNS: 'dialog'
         }),
-        buttonOK: typerUI.button({
+        buttonOK: typerUI.label({
+            type: 'button',
             buttonsetGroup: 'right'
         }),
-        buttonCancel: typerUI.button({
+        buttonCancel: typerUI.label({
+            type: 'button',
             buttonsetGroup: 'right'
         }),
         message: typerUI.label({

@@ -3,6 +3,9 @@
 
     Typer.presets.textbox = {
         accept: 'text',
+        options: {
+            required: false
+        },
         overrides: {
             getValue: function (preset) {
                 return this.extractText();

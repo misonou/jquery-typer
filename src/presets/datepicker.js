@@ -224,16 +224,16 @@
         },
         overrides: {
             getValue: function (preset) {
-                return normalizeDate(preset.options.mode, preset.selectedDate || new Date());
+                return preset.selectedDate ? normalizeDate(preset.options.mode, preset.selectedDate) : null;
             },
             setValue: function (preset, date) {
-                preset.selectedDate = normalizeDate(preset.options.mode, date);
+                preset.selectedDate = date && normalizeDate(preset.options.mode, date);
                 this.selectAll();
                 this.invoke(function (tx) {
-                    tx.insertText(formatDate(preset.options.mode, preset.selectedDate));
+                    tx.insertText(date ? formatDate(preset.options.mode, preset.selectedDate) : '');
                 });
                 if (this === activeTyper) {
-                    datepickerMenuUI.setValue('calendar', preset.selectedDate);
+                    datepickerMenuUI.setValue('calendar', preset.selectedDate || new Date());
                 }
             },
             hasContent: function (preset) {
@@ -270,7 +270,7 @@
             e.typer.retainFocus(datepickerMenuUI.element);
             activeTyper = e.typer;
             datepickerMenuUI.setValue('calendar', 'mode', e.widget.options.mode);
-            datepickerMenuUI.setValue('calendar', e.typer.getValue());
+            datepickerMenuUI.setValue('calendar', e.typer.getValue() || new Date());
             datepickerMenuUI.show(e.typer.element);
         },
         focusout: function (e) {
