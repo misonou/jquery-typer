@@ -253,6 +253,24 @@
         });
     }
 
+    function getFullClientRect(element) {
+        var rect = getBoundingClientRect(element);
+        if (rect.width && rect.height) {
+            return rect;
+        }
+        rect = $.extend({}, rect);
+        $(element).children().each(function (i, v) {
+            var r = getBoundingClientRect(v);
+            rect.top = Math.min(rect.top, r.top);
+            rect.left = Math.min(rect.left, r.left);
+            rect.right = Math.max(rect.right, r.right);
+            rect.bottom = Math.max(rect.bottom, r.bottom);
+        });
+        rect.width = rect.right - rect.left;
+        rect.height = rect.bottom - rect.top;
+        return rect;
+    }
+
     function showCallout(control, element, ref, pos) {
         for (var i = 0; i < currentCallouts.length; i++) {
             if (currentCallouts[i].control !== control && !currentCallouts[i].control.parentOf(control)) {
@@ -282,7 +300,7 @@
             rect.top = rect.bottom = ref.y;
         }
         var winRect = getBoundingClientRect();
-        var elmRect = getBoundingClientRect(element);
+        var elmRect = getFullClientRect(element);
         $(element).css({
             left: (rect.left + elmRect.width > winRect.width ? rect.right - elmRect.width : rect.left) + 'px',
             top: (rect.top + elmRect.height > winRect.height ? rect.bottom - elmRect.height : rect.top) + 'px'
@@ -418,7 +436,6 @@
     function createControls(control, contextualParent, exclusions) {
         var ui = control.ui;
         contextualParent = control instanceof typerUI.group ? contextualParent || ui : control;
-        contextualParent.all = contextualParent.all || {};
         exclusions = exclusions || {};
 
         if (isFunction(control.controls)) {
@@ -429,6 +446,9 @@
             $.each(control.controls, function (i, v) {
                 exclusions[v] = true;
             });
+        }
+        if (control.controls !== undefined) {
+            contextualParent.all = contextualParent.all || {};
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);

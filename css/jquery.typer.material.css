@@ -390,6 +390,10 @@ label.typer-ui-callout {
     flex-grow: 1;
 }
 
+.typer-ui-buttonset-pad:last-child {
+    display: none;
+}
+
 .typer-ui-buttonset > *,
 .typer-ui-buttonset .typer-ui-group > *,
 .typer-ui-buttonset > label,
@@ -409,6 +413,9 @@ label.typer-ui-callout {
 
 .typer-ui-textbox .typer-ui-label {
     display: none;
+    -webkit-flex-grow: 0;
+    -ms-flex-positive: 0;
+    flex-grow: 0;
 }
 
 .typer-ui-buttonlist .typer-ui-textbox .typer-ui-label,
@@ -420,7 +427,7 @@ label.typer-ui-callout {
     display: block;
     position: relative;
     margin: 0 -0.25em 0.42em;
-    padding: 0.75em 0.25em 0.17em;
+    padding: 0.67em 0.25em 0.25em;
     width: 100%;
     border-bottom: 1px solid #aeb8c2;
     vertical-align: top;
