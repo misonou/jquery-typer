@@ -16,7 +16,7 @@
             __preset__: $.extend({}, options)
         };
         $.each(preset, function (i, v) {
-            (typeof v === 'function' || i === 'options' ? presetDefinition : options)[i] = v;
+            (typeof v === 'function' || i === 'options' || i === 'commands' ? presetDefinition : options)[i] = v;
         });
         $.each(options.__preset__, function (i, v) {
             if (typeof v === 'function' || !presetDefinition.options || !(i in presetDefinition.options)) {

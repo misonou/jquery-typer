@@ -720,6 +720,7 @@
         var self = $.extend(this, options);
         self.ui = self;
         self.theme = self.theme || Object.keys(definedThemes)[0];
+        self.all = {};
         createControls(self);
         renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
@@ -896,6 +897,8 @@
         themeExtensions: {},
         controlExtensions: controlExtensions,
         matchWSDelim: matchWSDelim,
+        getZIndex: getZIndex,
+        getZIndexOver: getZIndexOver,
         define: function (name, base, ctor) {
             if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
