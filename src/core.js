@@ -845,7 +845,7 @@
             var state = new TyperSelection(typer, range);
             var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
 
-            codeUpdate(mode, function () {
+            codeUpdate(null, function () {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
                     iterate(state.createTreeWalker(-1, function (node) {
