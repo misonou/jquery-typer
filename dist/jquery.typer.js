@@ -6123,7 +6123,7 @@
             e.typer.getSelection().moveToText(e.typer.element, -0);
             e.widget.allowedValues = [];
             e.widget.suggestions = [];
-            e.widget.callout = Typer.ui({ 
+            e.widget.callout = Typer.ui({
                 type: 'contextmenu',
                 typer: e.typer
             });
