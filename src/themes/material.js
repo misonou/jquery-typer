@@ -40,6 +40,7 @@
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
         controlPinActiveClass: 'pin-active',
+        controlErrorClass: 'error',
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
@@ -122,6 +123,19 @@
                 focusout: function (e) {
                     $(control.element).closest('.typer-ui-textbox').removeClass('focused');
                 },
+                stateChange: function (e) {
+                    var topElement = e.typer.element;
+                    var style = window.getComputedStyle(topElement);
+                    if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
+                        var rect = topElement.getBoundingClientRect();
+                        var pos = e.typer.getSelection().extendCaret.getRange().getBoundingClientRect();
+                        if (pos.left > rect.right) {
+                            topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
+                        } else if (pos.left < rect.left) {
+                            topElement.style.textIndent = Math.min(0, parseInt(style.textIndent) + (rect.left - pos.left + 5)) + 'px';
+                        }
+                    }
+                },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();
                     $(control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
@@ -134,9 +148,7 @@
             $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
-            var valid = control.preset.validate() !== false;
-            $(control.element).toggleClass('error', !valid);
-            if (!valid) {
+            if (!control.preset.validate()) {
                 opt.fail();
             }
         },
