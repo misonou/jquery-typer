@@ -37,6 +37,9 @@
             },
             hasContent: function () {
                 return !!this.extractText();
+            },
+            validate: function (preset) {
+                return true;
             }
         },
         focusout: function (e) {

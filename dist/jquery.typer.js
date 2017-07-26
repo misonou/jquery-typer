@@ -2778,9 +2778,13 @@
             }
             ctor.apply(this, arguments);
         });
-        fn.prototype = base || {};
-        defineHiddenProperty(base, 'constructor', fn);
-        Object.setPrototypeOf(fn.prototype, controlExtensions);
+        var baseFn = function () {};
+        baseFn.prototype = controlExtensions;
+        fn.prototype = new baseFn();
+        Object.getOwnPropertyNames(base || {}).forEach(function (v) {
+            defineProperty(fn.prototype, v, getOwnPropertyDescriptor(base, v));
+        });
+        defineHiddenProperty(fn.prototype, 'constructor', fn);
         return fn;
     }
 
@@ -3489,18 +3493,23 @@
             }
         },
         validate: function () {
-            var optArg = {
-                isFailed: alwaysFalse,
-                fail: function () {
-                    this.isFailed = alwaysTrue;
-                }
-            };
+            var failed;
+            var errorClass = definedThemes[this.theme].controlErrorClass;
             foreachControl(this, function (control) {
                 if (isEnabled(control)) {
+                    var optArg = {
+                        isFailed: alwaysFalse,
+                        fail: function () {
+                            this.isFailed = alwaysTrue;
+                            failed = true;
+                            $(control.element).addClass(errorClass);
+                        }
+                    };
                     triggerEvent(control, 'validate', optArg);
+                    failed |= optArg.isFailed();
                 }
             });
-            return !optArg.isFailed();
+            return !failed;
         },
         execute: function (control) {
             var self = this;
@@ -3535,7 +3544,6 @@
     $.extend(typerUI, {
         controls: definedControls,
         themes: definedThemes,
-        themeExtensions: {},
         controlExtensions: controlExtensions,
         matchWSDelim: matchWSDelim,
         getZIndex: getZIndex,
@@ -3707,6 +3715,9 @@
         }
     });
 
+    typerUI.theme = define('TyperUITheme');
+    typerUI.themeExtensions = typerUI.theme.prototype;
+
     $.extend(typerUI.themeExtensions, {
         bind: function (ui, control, value) {
             value = ui.getLabel(value) || '';
@@ -3738,7 +3749,6 @@
      * ********************************/
 
     typerUI.define({
-        theme: typerUI.themeExtensions,
         group: {
             hiddenWhenDisabled: true,
             requireChildControls: true,
@@ -3757,6 +3767,10 @@
             }
         },
         dropdown: {
+            optionFilter: '(type:button) -(dropdownOption:exclude)',
+            defaultEmpty: false,
+            allowEmpty: false,
+            selectedIndex: -1,
             requireChildControls: true,
             controls: '*',
             get value() {
@@ -3765,7 +3779,7 @@
             set value(value) {
                 var self = this;
                 self.selectedIndex = -1;
-                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
+                $.each(self.resolve(self.optionFilter), function (i, v) {
                     if (v.value === value) {
                         self.selectedIndex = i;
                         self.selectedText = v.label || v.name;
@@ -3780,7 +3794,8 @@
                 foreachControl(self, updateControl);
             },
             init: function (ui, self) {
-                $.each(self.resolve('(type:button) -(dropdownOption:exclude)'), function (i, v) {
+                self.selectedText = self.label || self.name;
+                $.each(self.resolve(self.optionFilter), function (i, v) {
                     v.active = function () {
                         return self.selectedIndex === i;
                     };
@@ -3789,6 +3804,21 @@
                         ui.execute(self);
                     };
                 });
+            },
+            stateChange: function (ui, self) {
+                var children = self.resolve(self.optionFilter);
+                if (self.selectedIndex < 0 || !isEnabled(children[self.selectedIndex])) {
+                    if (!self.defaultEmpty) {
+                        self.value = (children.filter(isEnabled)[0] || '').value;
+                    } else if (self.selectedIndex >= 0) {
+                        self.value = '';
+                    }
+                }
+            },
+            validate: function (ui, self, opt) {
+                if (!self.allowEmpty && self.selectedIndex < 0) {
+                    opt.fail();
+                }
             }
         },
         callout: {
@@ -5695,6 +5725,7 @@
 
     function normalizeDate(mode, date) {
         date = new Date(+date);
+        date.setHours(0, 0, 0, 0);
         switch (mode) {
             case 'week':
                 date.setDate(date.getDate() - date.getDay());
@@ -5902,7 +5933,8 @@
 
     Typer.presets.datepicker = {
         options: {
-            mode: 'day'
+            mode: 'day',
+            required: false
         },
         overrides: {
             getValue: function (preset) {
@@ -5920,6 +5952,9 @@
             },
             hasContent: function (preset) {
                 return !!preset.selectedDate;
+            },
+            validate: function (preset) {
+                return !preset.options.required || !!preset.selectedDate;
             }
         },
         contentChange: function (e) {
@@ -6269,6 +6304,9 @@
             },
             hasContent: function () {
                 return !!this.extractText();
+            },
+            validate: function (preset) {
+                return true;
             }
         },
         focusout: function (e) {
@@ -6377,6 +6415,7 @@
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
         controlPinActiveClass: 'pin-active',
+        controlErrorClass: 'error',
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
@@ -6458,6 +6497,19 @@
                 },
                 focusout: function (e) {
                     $(control.element).closest('.typer-ui-textbox').removeClass('focused');
+                },
+                stateChange: function (e) {
+                    var topElement = e.typer.element;
+                    var style = window.getComputedStyle(topElement);
+                    if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
+                        var rect = topElement.getBoundingClientRect();
+                        var pos = e.typer.getSelection().extendCaret.getRange().getBoundingClientRect();
+                        if (pos.left > rect.right) {
+                            topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
+                        } else if (pos.left < rect.left) {
+                            topElement.style.textIndent = Math.min(0, parseInt(style.textIndent) + (rect.left - pos.left + 5)) + 'px';
+                        }
+                    }
                 },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();

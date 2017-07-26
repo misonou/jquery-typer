@@ -13,6 +13,7 @@
 
     function normalizeDate(mode, date) {
         date = new Date(+date);
+        date.setHours(0, 0, 0, 0);
         switch (mode) {
             case 'week':
                 date.setDate(date.getDate() - date.getDay());
@@ -220,7 +221,8 @@
 
     Typer.presets.datepicker = {
         options: {
-            mode: 'day'
+            mode: 'day',
+            required: false
         },
         overrides: {
             getValue: function (preset) {
@@ -238,6 +240,9 @@
             },
             hasContent: function (preset) {
                 return !!preset.selectedDate;
+            },
+            validate: function (preset) {
+                return !preset.options.required || !!preset.selectedDate;
             }
         },
         contentChange: function (e) {
