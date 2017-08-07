@@ -1273,9 +1273,7 @@
                 };
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                    if (!typerFocused) {
-                        currentSelection.focus();
-                    }
+                    currentSelection.focus();
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
