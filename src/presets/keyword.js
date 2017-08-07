@@ -9,6 +9,7 @@
     }
 
     function fuzzyMatch(haystack, needle) {
+        haystack = String(haystack || '');
         var vector = [];
         var str = haystack.toLowerCase();
         var j = 0;
@@ -183,7 +184,7 @@
             }
         },
         downArrow: function (e) {
-            if (e.widget.selectedIndex < $('button', e.widget.callout).length - 1) {
+            if (e.widget.selectedIndex < $('button', e.widget.callout.element).length - 1) {
                 $('button', e.widget.callout.element).removeClass('active').eq(++e.widget.selectedIndex).addClass('active');
             }
         },
