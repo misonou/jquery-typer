@@ -1,3 +1,21 @@
+## 0.10.1 / 2017-08-07
+
+- Add control options: `visible`
+- Add validation on dropdown, datepicker and number control
+- Allow boolean values in flag options (`enabled`, `active` and `visible`)
+- Allow empty value for datepicker control
+- Mimic native single-line input behavior when text overflow
+- Fix: inverted direction of mousewheel event in Mac
+- Fix: mouse click does not move caret to clicked position
+- Fix: pressing `enter` breaking editable paragraph (insert `<br>` instead)
+- Fix: incorrect source in `contentChange` event after inserting content
+- Fix: `TyperSelection.getEditableRanges` returns overlapped ranges
+- Fix: IE10 does not have `Object.setPrototypeOf`
+- Fix: inifite recursion and duplicated control when resolving child controls
+- Fix: callout placed partially outside visible area
+- Fix: incorrect widget supplied for preset commands
+- Fix: prevent validation on disabled controls
+
 ## 0.10.0 / 2017-07-14
 
 - New methods: `setValue`, `hasContent`, `releaseFocus`, `selectAll`

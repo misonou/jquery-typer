@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.10.0
+ * jQuery Typer Plugin v0.10.1
  *
  * The MIT License (MIT)
  *
@@ -526,7 +526,7 @@
                     return callback.apply(null, args);
                 });
             };
-        } ());
+        }());
 
         function TyperTransaction() { }
 
@@ -1299,9 +1299,7 @@
                 };
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                    if (!typerFocused) {
-                        currentSelection.focus();
-                    }
+                    currentSelection.focus();
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
@@ -2042,8 +2040,13 @@
             if (this.isCaret || is(this.focusNode, NODE_ANY_INLINE)) {
                 return [range];
             }
-            return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
+            var ranges = $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
                 return createRange(range, createRange(v.element));
+            });
+            return $.grep(ranges, function (v, i) {
+                return !i || !any(ranges.slice(0, i), function (w) {
+                    return rangeCovers(w, v);
+                });
             });
         },
         getWidgets: function () {
@@ -2545,7 +2548,7 @@
                 }
                 return createRange(element, -0);
             };
-        } ();
+        }();
     }
 
     // detect support for textInput event
@@ -2585,7 +2588,7 @@
         document.addEventListener('textinput', dispatchInputEvent, true);
     }
 
-} (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
+}(jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
 
 (function ($, Typer) {
     'use strict';
@@ -6011,6 +6014,7 @@
     }
 
     function fuzzyMatch(haystack, needle) {
+        haystack = String(haystack || '');
         var vector = [];
         var str = haystack.toLowerCase();
         var j = 0;
@@ -6185,7 +6189,7 @@
             }
         },
         downArrow: function (e) {
-            if (e.widget.selectedIndex < $('button', e.widget.callout).length - 1) {
+            if (e.widget.selectedIndex < $('button', e.widget.callout.element).length - 1) {
                 $('button', e.widget.callout.element).removeClass('active').eq(++e.widget.selectedIndex).addClass('active');
             }
         },
@@ -6523,9 +6527,7 @@
             $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
-            var valid = control.preset.validate() !== false;
-            $(control.element).toggleClass('error', !valid);
-            if (!valid) {
+            if (!control.preset.validate()) {
                 opt.fail();
             }
         },
