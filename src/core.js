@@ -500,7 +500,7 @@
                     return callback.apply(null, args);
                 });
             };
-        } ());
+        }());
 
         function TyperTransaction() { }
 
@@ -2014,8 +2014,13 @@
             if (this.isCaret || is(this.focusNode, NODE_ANY_INLINE)) {
                 return [range];
             }
-            return $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
+            var ranges = $.map(iterateToArray(typerSelectionDeepIterator(this, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)), function (v) {
                 return createRange(range, createRange(v.element));
+            });
+            return $.grep(ranges, function (v, i) {
+                return !i || !any(ranges.slice(0, i), function (w) {
+                    return rangeCovers(w, v);
+                });
             });
         },
         getWidgets: function () {
@@ -2517,7 +2522,7 @@
                 }
                 return createRange(element, -0);
             };
-        } ();
+        }();
     }
 
     // detect support for textInput event
@@ -2557,4 +2562,4 @@
         document.addEventListener('textinput', dispatchInputEvent, true);
     }
 
-} (jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
+}(jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
