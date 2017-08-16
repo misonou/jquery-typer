@@ -185,16 +185,18 @@
                         requireWidget: 'table',
                         value: v,
                         label: toolbar.options.tableStyles[v],
-                        execute: function (toolbar, self) {
+                        execute: function (toolbar, self, tx) {
                             self.widget.element.className = v;
+                            tx.trackChange(self.widget.element);
                         }
                     });
                 });
                 var fallbackOption = Typer.ui.button({
                     requireWidget: 'table',
                     label: 'typer:table:styleDefault',
-                    execute: function (toolbar, self) {
+                    execute: function (toolbar, self, tx) {
                         self.widget.element.className = '';
+                        tx.trackChange(self.widget.element);
                     }
                 });
                 return definedOptions.concat(fallbackOption);
@@ -203,14 +205,16 @@
         'table:tableWidth': Typer.ui.callout(),
         'table:tableWidth:fitContent': Typer.ui.button({
             requireWidget: 'table',
-            execute: function (toolbar, self) {
+            execute: function (toolbar, self, tx) {
                 $(self.widget.element).removeAttr('width');
+                tx.trackChange(self.widget.element);
             }
         }),
         'table:tableWidth:fullWidth': Typer.ui.button({
             requireWidget: 'table',
-            execute: function (toolbar, self) {
+            execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('width', '100%');
+                tx.trackChange(self.widget.element);
             }
         }),
         'table:addRemoveCell': Typer.ui.group(),
