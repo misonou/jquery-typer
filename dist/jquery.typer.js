@@ -495,7 +495,7 @@
             var currentSource = 'script';
             var run = transaction(function () {
                 var source = currentSource;
-                if (codeUpdate.needSnapshot) {
+                if (codeUpdate.needSnapshot || tracker.changes[0]) {
                     undoable.snapshot();
                 }
                 currentSource = 'script';
@@ -3326,7 +3326,8 @@
             }
         };
         var defaultResolve = function () {
-            execute(ui.getValue(control.resolveWith || control), this);
+            var resolveWith = control.resolve(control.resolveWith)[0] || control;
+            execute(ui.getValue(resolveWith), this);
         };
         var defaultReject = function () {
             deferred.reject();
@@ -3551,6 +3552,7 @@
         matchWSDelim: matchWSDelim,
         getZIndex: getZIndex,
         getZIndexOver: getZIndexOver,
+        listen: listen,
         define: function (name, base, ctor) {
             if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
@@ -4974,16 +4976,18 @@
                         requireWidget: 'table',
                         value: v,
                         label: toolbar.options.tableStyles[v],
-                        execute: function (toolbar, self) {
+                        execute: function (toolbar, self, tx) {
                             self.widget.element.className = v;
+                            tx.trackChange(self.widget.element);
                         }
                     });
                 });
                 var fallbackOption = Typer.ui.button({
                     requireWidget: 'table',
                     label: 'typer:table:styleDefault',
-                    execute: function (toolbar, self) {
+                    execute: function (toolbar, self, tx) {
                         self.widget.element.className = '';
+                        tx.trackChange(self.widget.element);
                     }
                 });
                 return definedOptions.concat(fallbackOption);
@@ -4992,14 +4996,16 @@
         'table:tableWidth': Typer.ui.callout(),
         'table:tableWidth:fitContent': Typer.ui.button({
             requireWidget: 'table',
-            execute: function (toolbar, self) {
+            execute: function (toolbar, self, tx) {
                 $(self.widget.element).removeAttr('width');
+                tx.trackChange(self.widget.element);
             }
         }),
         'table:tableWidth:fullWidth': Typer.ui.button({
             requireWidget: 'table',
-            execute: function (toolbar, self) {
+            execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('width', '100%');
+                tx.trackChange(self.widget.element);
             }
         }),
         'table:addRemoveCell': Typer.ui.group(),
@@ -5773,6 +5779,7 @@
             controlExecuted: function (ui, control) {
                 if (control.is('calendar')) {
                     activeTyper.setValue(ui.getValue(control));
+                    ui.hide();
                 }
             }
         });
