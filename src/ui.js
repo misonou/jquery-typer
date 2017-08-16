@@ -682,7 +682,8 @@
             }
         };
         var defaultResolve = function () {
-            execute(ui.getValue(control.resolveWith || control), this);
+            var resolveWith = control.resolve(control.resolveWith)[0] || control;
+            execute(ui.getValue(resolveWith), this);
         };
         var defaultReject = function () {
             deferred.reject();
@@ -907,6 +908,7 @@
         matchWSDelim: matchWSDelim,
         getZIndex: getZIndex,
         getZIndexOver: getZIndexOver,
+        listen: listen,
         define: function (name, base, ctor) {
             if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
