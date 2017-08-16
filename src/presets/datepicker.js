@@ -58,6 +58,7 @@
             controlExecuted: function (ui, control) {
                 if (control.is('calendar')) {
                     activeTyper.setValue(ui.getValue(control));
+                    ui.hide();
                 }
             }
         });
