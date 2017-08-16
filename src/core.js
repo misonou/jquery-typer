@@ -469,7 +469,7 @@
             var currentSource = 'script';
             var run = transaction(function () {
                 var source = currentSource;
-                if (codeUpdate.needSnapshot) {
+                if (codeUpdate.needSnapshot || tracker.changes[0]) {
                     undoable.snapshot();
                 }
                 currentSource = 'script';
