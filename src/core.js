@@ -443,7 +443,11 @@
             r.select();
             selection.removeAllRanges();
         }
-        selection.addRange(range);
+        try {
+            // IE may throws unspecified error
+            // even though the selection is successfully moved to the given range
+            selection.addRange(range);
+        } catch (e) { }
     }
 
     function Typer(topElement, options) {
