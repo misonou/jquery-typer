@@ -730,6 +730,9 @@
         createControls(self);
         renderControls(self);
         $(self.element).addClass('typer-ui typer-ui-' + self.theme);
+        $(self.element).mousedown(function () {
+            typerUI.focus(self.element);
+        });
         if (self.typer) {
             self.typer.retainFocus(self.element);
         }
@@ -845,6 +848,13 @@
                 control[prop] = value;
                 updateControl(control);
             }
+        },
+        setValueAndExecute: function (control, value) {
+            if (isString(control)) {
+                control = this.resolve(control)[0];
+            }
+            this.setValue(control, value);
+            this.execute(control);
         },
         getExecutingControl: function () {
             for (var i = 0, length = executionContext.length; i < length; i++) {
