@@ -289,7 +289,8 @@
 
         var rect = {
             control: control,
-            element: element
+            element: element,
+            focusedElement: Typer.is(document.activeElement, SELECTOR_FOCUSABLE)
         };
         if (ref.getBoundingClientRect) {
             var xrel = matchWSDelim(pos, 'left right') || 'left';
@@ -365,7 +366,7 @@
         }
         defaultNS = defaultNS || control.defaultNS;
         exclusions = exclusions || {};
-        if (control.name) {
+        if (control.name && haystack !== control.contextualParent.all) {
             exclusions[control.name] = true;
         }
 
@@ -884,10 +885,14 @@
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
-                        self.setValue(control, value);
-                        executeControl(control);
+                        try {
+                            self.setValue(control, value);
+                            executeControl(control);
+                        } finally {
+                            executionContext.shift(control);
+                        }
                     });
-                    promise.always(function () {
+                    promise.fail(function () {
                         executionContext.shift(control);
                     });
                     return promise;
@@ -1320,9 +1325,13 @@
         $(window).bind('resize scroll orientationchange', function (e) {
             updatePinnedPositions();
         });
+        $(document.body).on('click', 'label', function (e) {
+            // IE does not focus on focusable element when clicking containing LABEL element
+            $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
+        });
         $(document.body).mousedown(function (e) {
             $.each(currentCallouts.slice(0), function (i, v) {
-                if (!Typer.containsOrEquals(v.element, e.target)) {
+                if (!Typer.containsOrEquals(v.element, e.target) && (!v.focusedElement || !Typer.containsOrEquals(v.focusedElement, e.target))) {
                     hideCallout(v.control);
                 }
             });
