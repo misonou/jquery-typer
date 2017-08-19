@@ -2,7 +2,6 @@
     'use strict';
 
     Typer.presets.textbox = {
-        accept: 'text',
         options: {
             required: false
         },
