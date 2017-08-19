@@ -9,7 +9,8 @@
             max: null,
             min: null,
             digits: 'auto',
-            step: 1
+            step: 1,
+            loop: false
         },
         overrides: {
             getValue: function (preset) {
@@ -17,11 +18,13 @@
             },
             setValue: function (preset, value) {
                 value = +value || 0;
-                if (preset.options.max !== null && value > preset.options.max) {
-                    value = preset.options.max;
-                }
-                if (preset.options.min !== null && value < preset.options.min) {
-                    value = preset.options.min;
+                var min = preset.options.min;
+                var max = preset.options.max;
+                var loop = preset.options.loop && min !== null && max !== null;
+                if ((loop && value < min) || (!loop && max !== null && value > max)) {
+                    value = max;
+                } else if ((loop && value > max) || (!loop &&  min !== null && value < min)) {
+                    value = min;
                 }
                 value = String(+value || 0);
                 if (preset.options.digits === 'fixed') {
