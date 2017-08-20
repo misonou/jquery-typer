@@ -21,13 +21,10 @@
     }
 
     function detachCallout(control) {
-        var callout = $('<div class="typer-ui typer-ui-material">').append($(control.element).children('.typer-ui-float').addClass('is-' + control.type))[0];
+        control.callout = $('<div class="typer-ui typer-ui-material">').append($(control.element).children('.typer-ui-float').addClass('is-' + control.type))[0];
         if (control.ui.typer) {
-            control.ui.typer.retainFocus(callout);
+            control.ui.typer.retainFocus(control.callout);
         }
-        $(control.element).click(function (e) {
-            control.ui.show(control, callout, control.element, 'left bottom');
-        });
     }
 
     Typer.ui.themes.material = Typer.ui.theme({
@@ -145,6 +142,7 @@
                 }
             }));
             control.preset.parentControl = control;
+            control.presetOptions = control.preset.getStaticWidget('__preset__').options;
             $(control.element).toggleClass('empty', !control.preset.hasContent());
         },
         textboxValidate: function (ui, control, opt) {
@@ -196,6 +194,11 @@
                     Typer.ui.unpin(control);
                 }
             });
+        },
+        showCallout: function (ui, control) {
+            if (control.callout) {
+                ui.show(control, control.callout, control.element, 'left bottom');
+            }
         },
         afterShow: function (ui, control, data) {
             if (control.is('dialog contextmenu')) {
