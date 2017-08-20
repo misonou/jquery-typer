@@ -10,12 +10,6 @@
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var defineProperty = Object.defineProperty;
 
-    var alwaysTrue = function () {
-        return true;
-    };
-    var alwaysFalse = function () {
-        return false;
-    };
     var FLIP_POS = {
         left: 'right',
         right: 'left',
@@ -457,7 +451,10 @@
         }
         control.controls = $.map(control.controls || [], function (v, i) {
             var inst = Object.create(isString(v) ? definedControls[v] : v);
-            var name = inst.name || isString(v) || control.defaultNS + ':' + randomId();
+            var name = inst.name || isString(v) || randomId();
+            if (name.indexOf(':') < 0 && control.defaultNS) {
+                name = control.defaultNS + ':' + name;
+            }
             $.extend(inst, {
                 ui: ui,
                 name: name,
@@ -542,15 +539,14 @@
         function executeFromEvent(e) {
             if ($(e.target).is(':checkbox')) {
                 setImmediate(function () {
-                    ui.setValue(control, !!e.target.checked);
-                    ui.execute(control);
+                    ui.execute(control, !!e.target.checked);
                 });
             } else {
                 ui.execute(control);
             }
         }
 
-        control.element = replacePlaceholder(control.type);
+        control.element = replacePlaceholder(control.renderAs || control.type);
         $(control.element).attr('role', control.name);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
@@ -609,6 +605,9 @@
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange) {
+            if (control.validateOnChange) {
+                validateControl(control);
+            }
             triggerEvent(control, 'stateChange');
         }
 
@@ -647,6 +646,23 @@
             control.execute(ui, control, null, control.value);
         }
         triggerEvent(control, 'controlExecuted');
+    }
+
+    function validateControl(control) {
+        var valid = true;
+        if (isEnabled(control)) {
+            triggerEvent(control, 'validate', {
+                get isFailed() {
+                    return valid;
+                },
+                fail: function () {
+                    valid = false;
+                }
+            });
+            control.validateOnChange = !valid;
+            $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, valid);
+        }
+        return valid;
     }
 
     function foreachControl(control, fn, optArg, fnArg) {
@@ -740,7 +756,7 @@
         triggerEvent(self, 'init');
         if (isPlainObject(values)) {
             $.each(values, function (i, v) {
-                self.setValue(i, 'value', v);
+                self.setValue(i, v);
             });
         }
     });
@@ -788,15 +804,15 @@
         },
         enabled: function (control) {
             if (isString(control)) {
-                control = this.getControl(control) || {};
+                control = this.getControl(control);
             }
-            return isEnabled(control);
+            return control && isEnabled(control);
         },
         active: function (control) {
             if (isString(control)) {
-                control = this.getControl(control) || {};
+                control = this.getControl(control);
             }
-            return isActive(control);
+            return control && isActive(control);
         },
         getIcon: function (control) {
             return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[this.iconset || definedThemes[this.theme].iconset] || '';
@@ -813,49 +829,6 @@
             }
             return control;
         },
-        getValue: function (control, prop) {
-            var self = this;
-            prop = prop || 'value';
-            if (isString(control)) {
-                control = self.getControl(control);
-            }
-            if (control) {
-                if (!control.valueMap) {
-                    return control[prop];
-                }
-                var value = {};
-                $.each(control.valueMap, function (i, v) {
-                    value[i] = self.getValue(resolveControls(control, v)[0], prop);
-                });
-                return value;
-            }
-        },
-        setValue: function (control, prop, value) {
-            var self = this;
-            if (arguments.length < 3) {
-                return self.setValue(control, 'value', prop);
-            }
-            if (isString(control)) {
-                control = self.getControl(control);
-            }
-            if (control) {
-                if (control.valueMap) {
-                    $.each(value, function (i, v) {
-                        self.setValue(resolveControls(control, control.valueMap[i])[0], prop, v);
-                    });
-                    return;
-                }
-                control[prop] = value;
-                updateControl(control);
-            }
-        },
-        setValueAndExecute: function (control, value) {
-            if (isString(control)) {
-                control = this.getControl(control);
-            }
-            this.setValue(control, value);
-            this.execute(control);
-        },
         getExecutingControl: function () {
             for (var i = 0, length = executionContext.length; i < length; i++) {
                 if (executionContext[i].ui === this) {
@@ -865,24 +838,16 @@
         },
         validate: function () {
             var failed;
-            var errorClass = definedThemes[this.theme].controlErrorClass;
             foreachControl(this, function (control) {
-                if (isEnabled(control)) {
-                    var optArg = {
-                        isFailed: alwaysFalse,
-                        fail: function () {
-                            this.isFailed = alwaysTrue;
-                            failed = true;
-                            $(control.element).addClass(errorClass);
-                        }
-                    };
-                    triggerEvent(control, 'validate', optArg);
-                    failed |= optArg.isFailed();
-                }
+                failed |= !validateControl(control);
             });
             return !failed;
         },
-        execute: function (control) {
+        reset: function () {
+            foreachControl(this, triggerEvent, 'reset');
+            this.update();
+        },
+        execute: function (control, value) {
             var self = this;
             if (isString(control)) {
                 control = self.getControl(control);
@@ -890,13 +855,16 @@
                 control = self.controls[0];
             }
             if (control && executionContext.indexOf(control) < 0 && isEnabled(control)) {
+                if (value !== undefined) {
+                    self.setValue(control, value);
+                }
                 executionContext.unshift(control);
                 triggerEvent(control, 'controlExecuting');
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         try {
-                            self.setValue(control, value);
+                            self.setValue(control, 'value', value);
                             executeControl(control);
                         } finally {
                             executionContext.shift(control);
@@ -1078,12 +1046,6 @@
         is: function (type) {
             return matchWSDelim(this.type, type);
         },
-        resolve: function (control) {
-            return resolveControls(this, control);
-        },
-        getControl: function (control) {
-            return this.resolve(control)[0];
-        },
         parentOf: function (control) {
             for (; control; control = control.parent) {
                 if (this === control) {
@@ -1091,6 +1053,55 @@
                 }
             }
             return false;
+        },
+        resolve: function (control) {
+            return resolveControls(this, control);
+        },
+        getControl: function (control) {
+            return this.resolve(control)[0];
+        },
+        getValue: function (control, prop) {
+            var self = this;
+            prop = prop || 'value';
+            if (isString(control)) {
+                control = self.getControl(control);
+            } else if (!control || !Typer.is(control.ui, typerUI)) {
+                control = self === self.ui ? self.controls[0] : self;
+            }
+            if (control) {
+                if (!control.valueMap) {
+                    return control[prop];
+                }
+                var value = {};
+                $.each(control.valueMap, function (i, v) {
+                    value[i] = control.getValue(v, prop);
+                });
+                return value;
+            }
+        },
+        setValue: function (control, prop, value) {
+            var self = this;
+            if (isString(control)) {
+                control = self.getControl(control);
+            } else if (control === undefined || control === null || !Typer.is(control.ui, typerUI)) {
+                self.setValue.apply(self, [self === self.ui ? self.controls[0] : self, control, prop].slice(0, arguments.length + 1));
+                return;
+            }
+            if (control) {
+                if (control.valueMap) {
+                    var attr = isString(prop) || 'value';
+                    $.each(value || prop || {}, function (i, v) {
+                        control.setValue(control.valueMap[i], attr, v);
+                    });
+                } else if (arguments.length === 3) {
+                    control[prop] = value;
+                } else if ($.isPlainObject(prop)) {
+                    $.extend(control, prop);
+                } else {
+                    control.value = prop;
+                }
+                updateControl(control);
+            }
         }
     });
 
@@ -1183,6 +1194,11 @@
                         ui.execute(self);
                     };
                 });
+                $(self.element).click(function () {
+                    if (isEnabled(self)) {
+                        callThemeFunction(self, 'showCallout');
+                    }
+                });
             },
             stateChange: function (ui, self) {
                 var children = self.resolve(self.optionFilter);
@@ -1198,6 +1214,9 @@
                 if (!self.allowEmpty && self.selectedIndex < 0) {
                     opt.fail();
                 }
+            },
+            reset: function (ui, self) {
+                self.value = self.defaultEmpty ? '' : (self.resolve(self.optionFilter).filter(isEnabled)[0] || '').value;
             }
         },
         callout: {
@@ -1214,7 +1233,10 @@
         button: {},
         file: {},
         textbox: {
-            preset: 'textbox'
+            preset: 'textbox',
+            reset: function (ui, self) {
+                self.value = '';
+            }
         },
         textboxCombo: {
             controls: function (ui, self) {
@@ -1231,7 +1253,11 @@
                 return controls;
             }
         },
-        checkbox: {},
+        checkbox: {
+            reset: function (ui, self) {
+                self.value = false;
+            }
+        },
         dialog: {
             pinnable: false,
             keyboardResolve: true,
