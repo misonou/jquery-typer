@@ -555,7 +555,7 @@
                 });
             }
             if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
-                setTimeout(function () {
+                setImmediate(function () {
                     triggerEvent(eventSource, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
                     });
@@ -928,7 +928,7 @@
 
         function insertContents(range, content) {
             if (!is(content, Node)) {
-                content = String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>');
+                content = $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>'));
             }
             content = slice(createDocumentFragment(content).childNodes);
 
@@ -1061,12 +1061,9 @@
         }
 
         function extractText(content) {
-            if (containsOrEquals(topElement, content)) {
-                content = extractContents(content, 'copy');
-            }
+            var range = createRange(content || topElement);
             var text = '';
-            var rootNode = createTyperDocument(content).getNode(content);
-            iterate(new TyperTreeWalker(rootNode, -1, function (v) {
+            iterate(new TyperSelection(typer, range).createTreeWalker(-1, function (v) {
                 if (is(v, NODE_WIDGET | NODE_INLINE_WIDGET) && isFunction(widgetOptions[v.widget.id].text)) {
                     text += (text && '\n\n') + widgetOptions[v.widget.id].text(v.widget);
                     return 2;
@@ -1081,7 +1078,18 @@
                     });
                     text += text && '\n\n';
                     iterate(new TyperDOMNodeIterator(it, 5), function (v) {
-                        text += v.nodeType === 3 ? v.nodeValue : tagName(v) === 'br' ? '\n' : '';
+                        if (v.nodeType === 3) {
+                            var value = v.nodeValue;
+                            if (v === range.endContainer) {
+                                value = value.slice(0, range.endOffset);
+                            }
+                            if (v === range.startContainer) {
+                                value = value.slice(range.startOffset);
+                            }
+                            text += value;
+                        } else if (tagName(v) === 'br') {
+                            text += '\n';
+                        }
                     });
                     return 2;
                 }
@@ -1097,7 +1105,7 @@
             var snapshotTimeout;
 
             function triggerStateChange() {
-                setTimeout(function () {
+                setImmediate(function () {
                     triggerEvent(null, EVENT_ALL, 'beforeStateChange');
                     triggerEvent(null, EVENT_ALL, 'stateChange');
                 });
@@ -1178,9 +1186,9 @@
                     }
                 },
                 snapshot: function (delay) {
-                    clearTimeout(snapshotTimeout);
+                    clearImmediate(snapshotTimeout);
                     if (+delay === delay || !currentSelection) {
-                        snapshotTimeout = setTimeout(takeSnapshot, delay);
+                        snapshotTimeout = setImmediate(takeSnapshot, delay);
                     } else if (delay === true || !codeUpdate.executing) {
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
@@ -1222,7 +1230,7 @@
                         triggerWidgetFocusout();
                     }
                     var timeStamp = +new Date();
-                    setTimeout(function () {
+                    setImmediate(function () {
                         undoable.snapshot(timeStamp - lastInputTime < 200 ? 200 : 0);
                         lastInputTime = timeStamp;
                     });
@@ -1624,8 +1632,7 @@
                 return currentSelection;
             },
             extractText: function (selection) {
-                var content = extractContents(selection || topElement, 'copy');
-                return extractText(content);
+                return extractText(selection);
             },
             nodeFromPoint: function (x, y) {
                 var range = caretRangeFromPoint(x, y, topElement);
@@ -2057,7 +2064,7 @@
             return iterateToArray(typerSelectionDeepIterator(this, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET), mapFn('element'));
         },
         getSelectedText: function () {
-            return this.typer.extractText(this);
+            return this.typer.extractText(this.getRange());
         },
         getSelectedTextNodes: function () {
             if (this.isCaret) {
