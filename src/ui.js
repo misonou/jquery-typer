@@ -864,7 +864,7 @@
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         try {
-                            self.setValue(control, 'value', value);
+                            self.setValue(control, value);
                             executeControl(control);
                         } finally {
                             executionContext.shift(control);
@@ -1054,15 +1054,22 @@
             }
             return false;
         },
+        set: function (prop, value) {
+            if (isString(prop)) {
+                this[prop] = value;
+            } else {
+                $.extend(this, prop);
+            }
+            updateControl(this);
+        },
         resolve: function (control) {
             return resolveControls(this, control);
         },
         getControl: function (control) {
             return this.resolve(control)[0];
         },
-        getValue: function (control, prop) {
+        getValue: function (control) {
             var self = this;
-            prop = prop || 'value';
             if (isString(control)) {
                 control = self.getControl(control);
             } else if (!control || !Typer.is(control.ui, typerUI)) {
@@ -1070,35 +1077,30 @@
             }
             if (control) {
                 if (!control.valueMap) {
-                    return control[prop];
+                    return control.value;
                 }
                 var value = {};
                 $.each(control.valueMap, function (i, v) {
-                    value[i] = control.getValue(v, prop);
+                    value[i] = control.getValue(v);
                 });
                 return value;
             }
         },
-        setValue: function (control, prop, value) {
+        setValue: function (control, value) {
             var self = this;
             if (isString(control)) {
                 control = self.getControl(control);
             } else if (control === undefined || control === null || !Typer.is(control.ui, typerUI)) {
-                self.setValue.apply(self, [self === self.ui ? self.controls[0] : self, control, prop].slice(0, arguments.length + 1));
+                self.setValue(self === self.ui ? self.controls[0] : self, control);
                 return;
             }
             if (control) {
                 if (control.valueMap) {
-                    var attr = isString(prop) || 'value';
-                    $.each(value || prop || {}, function (i, v) {
-                        control.setValue(control.valueMap[i], attr, v);
+                    $.each(value || {}, function (i, v) {
+                        control.setValue(control.valueMap[i], v);
                     });
-                } else if (arguments.length === 3) {
-                    control[prop] = value;
-                } else if ($.isPlainObject(prop)) {
-                    $.extend(control, prop);
                 } else {
-                    control.value = prop;
+                    control.value = value;
                 }
                 updateControl(control);
             }
