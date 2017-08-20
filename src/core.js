@@ -473,6 +473,7 @@
             var currentSource = 'script';
             var run = transaction(function () {
                 var source = currentSource;
+                codeUpdate.executing = false;
                 if (codeUpdate.needSnapshot || tracker.changes[0]) {
                     undoable.snapshot();
                 }
@@ -496,6 +497,7 @@
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
                 codeUpdate.suppressTextEvent = true;
+                codeUpdate.executing = true;
                 if (source !== currentSource && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource)) {
                     currentSource = source || 'script';
                 }
