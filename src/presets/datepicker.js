@@ -1,26 +1,54 @@
-(function ($, Typer) {
+(function ($, Typer, Date) {
     'use strict';
 
     var MS_PER_DAY = 86400000;
     var monthstr = 'January February March April May June July August September October November December'.split(' ');
     var shortWeekday = 'Su Mo Tu We Th Fr Sa'.split(' ');
     var activeTyper;
-    var datepickerMenuUI;
+    var callout;
+
+    function getFullYear(d) {
+        return d.getFullYear();
+    }
+
+    function getMonth(d) {
+        return d.getMonth();
+    }
+
+    function getDate(d) {
+        return d.getDate();
+    }
+
+    function getHours(d) {
+        return d.getHours();
+    }
+
+    function getMinutes(d) {
+        return d.getMinutes();
+    }
 
     function repeat(str, count) {
         return new Array(count + 1).join(str);
     }
 
+    function makeTime(h, m) {
+        var date = new Date();
+        date.setHours(h, m, 0, 0);
+        return date;
+    }
+
     function normalizeDate(mode, date) {
         date = new Date(+date);
-        date.setHours(0, 0, 0, 0);
         switch (mode) {
             case 'week':
-                date.setDate(date.getDate() - date.getDay());
+                date.setDate(getDate(date) - date.getDay());
                 break;
             case 'month':
                 date.setDate(1);
                 break;
+        }
+        if (mode !== 'datetime') {
+            date.setHours(0, 0, 0, 0);
         }
         return date;
     }
@@ -32,33 +60,34 @@
             case 'week':
                 return new Date(+date + MS_PER_DAY * 7 * dir);
             case 'month':
-                return new Date(date.getFullYear(), date.getMonth() + dir, date.getDate());
+                return new Date(getFullYear(date), getMonth(date) + dir, getDate(date));
             case 'year':
-                return new Date(date.getFullYear() + dir, date.getMonth(), date.getDate());
+                return new Date(getFullYear(date) + dir, getMonth(date), getDate(date));
         }
     }
 
     function formatDate(mode, date) {
         switch (mode) {
             case 'month':
-                return monthstr[date.getMonth()] + ' ' + date.getFullYear();
+                return monthstr[getMonth(date)] + ' ' + getFullYear(date);
             case 'week':
                 var end = stepDate('day', date, 6);
-                return monthstr[date.getMonth()] + ' ' + date.getDate() + ' - ' + (end.getMonth() !== date.getMonth() ? monthstr[end.getMonth()] + ' ' : '') + end.getDate() + ', ' + date.getFullYear();
+                return monthstr[getMonth(date)] + ' ' + getDate(date) + ' - ' + (getMonth(end) !== getMonth(date) ? monthstr[getMonth(end)] + ' ' : '') + getDate(end) + ', ' + getFullYear(date);
         }
-        return monthstr[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+        var monthPart = monthstr[getMonth(date)] + ' ' + getDate(date) + ', ' + getFullYear(date);
+        return mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
     }
 
-    function initDatapicker() {
-        datepickerMenuUI = Typer.ui({
+    function initDatepicker() {
+        callout = Typer.ui({
             type: 'contextmenu',
-            controls: [Typer.ui.calendar({
-                name: 'calendar'
-            })],
+            controls: [Typer.ui.datepicker()],
             controlExecuted: function (ui, control) {
-                if (control.is('calendar')) {
-                    activeTyper.setValue(ui.getValue(control));
-                    ui.hide();
+                if (control.is('calendar clock')) {
+                    activeTyper.setValue(ui.getValue());
+                    if (control.is('calendar')) {
+                        ui.hide();
+                    }
                 }
             }
         });
@@ -87,11 +116,11 @@
             });
             $table.bind('mousewheel', function (e) {
                 ui.trigger(self, 'showMonth', Typer.ui.getWheelDelta(e));
+                e.preventDefault();
             });
             $table.find('td').click(function () {
                 var monthDelta = $(this).hasClass('prev') ? -1 : $(this).hasClass('next') ? 1 : 0;
-                ui.setValue(self, new Date(self.currentMonth.getFullYear(), self.currentMonth.getMonth() + monthDelta, +this.textContent));
-                ui.execute(self);
+                ui.execute(self, new Date(getFullYear(self.currentMonth), getMonth(self.currentMonth) + monthDelta, +this.textContent));
             });
         },
         stateChange: function (ui, self) {
@@ -104,8 +133,8 @@
             if (typeof date === 'number') {
                 date = stepDate('month', self.currentMonth, date);
             }
-            var y = date.getFullYear();
-            var m = date.getMonth();
+            var y = getFullYear(date);
+            var m = getMonth(date);
             var currentMonth = new Date(y, m);
             var firstDay = currentMonth.getDay();
             var $buttons = $('td', self.element).removeClass('selected');
@@ -124,13 +153,13 @@
                     }
                 });
                 var today = new Date();
-                if (today.getFullYear() === y && today.getMonth() === m) {
-                    $buttons.filter('.cur').eq(today.getDate() - 1).addClass('today');
+                if (getFullYear(today) === y && getMonth(today) === m) {
+                    $buttons.filter('.cur').eq(getDate(today) - 1).addClass('today');
                 }
                 $('tr:last', self.element).toggle(firstDay + numDays > 35);
 
-                var cy = self.resolve('year')[0];
-                var cm = self.resolve('month')[0];
+                var cy = self.getControl('year');
+                var cm = self.getControl('month');
                 $.each(cy.controls, function (i, v) {
                     v.label = v.value = y + i - 5;
                 });
@@ -138,13 +167,13 @@
                 cm.value = m;
                 self.currentMonth = currentMonth;
             }
-            if (self.value.getFullYear() === y && self.value.getMonth() === m) {
+            if (getFullYear(self.value) === y && getMonth(self.value) === m) {
                 switch (self.mode) {
                     case 'day':
-                        $buttons.eq(self.value.getDate() + firstDay - 1).addClass('selected');
+                        $buttons.eq(getDate(self.value) + firstDay - 1).addClass('selected');
                         break;
                     case 'week':
-                        $buttons.slice(self.value.getDate() + firstDay - 1, self.value.getDate() + firstDay + 6).addClass('selected');
+                        $buttons.slice(getDate(self.value) + firstDay - 1, getDate(self.value) + firstDay + 6).addClass('selected');
                         break;
                     case 'month':
                         $buttons.filter('td.cur').addClass('selected');
@@ -152,6 +181,120 @@
                 }
             }
             $(self.element).toggleClass('select-range', self.mode !== 'day');
+        }
+    });
+
+    Typer.ui.define('clock', {
+        type: 'clock',
+        defaultNS: 'clock',
+        controls: '*',
+        step: 1,
+        init: function (ui, self) {
+            // only allow minute interval that is a factor of 60
+            // to maintain consistent step over hours
+            if (60 % self.step > 0) {
+                self.step = 1;
+            }
+            var $face = $('.typer-ui-clock-face', self.element);
+            $(repeat('<i></i>', 12)).appendTo($face).each(function (i, v) {
+                $(v).css('transform', 'rotate(' + (i * 30) + 'deg)');
+            });
+            $('s', self.element).mousedown(function (e) {
+                var elm = e.target;
+                var center = elm.parentNode.getBoundingClientRect();
+                center = {
+                    top: (center.top + center.bottom) / 2,
+                    left: (center.left + center.right) / 2
+                };
+                var handlers = {
+                    mousemove: function (e) {
+                        if (e.which !== 1) {
+                            return handlers.mouseup();
+                        }
+                        var rad = Math.atan2(e.clientY - center.top, e.clientX - center.left) / Math.PI;
+                        var curM = getMinutes(self.value);
+                        var curH = getHours(self.value);
+                        if (elm.getAttribute('hand') === 'm') {
+                            var m = (Math.round((rad * 30 + 75) / self.step) * self.step) % 60;
+                            if (m !== curM) {
+                                var deltaH = Math.floor(Math.abs(curM - m) / 30) * (m > curM ? -1 : 1);
+                                self.setValue(makeTime(curH + deltaH, m));
+                            }
+                        } else {
+                            var h = Math.round(rad * 6 + 15) % 12 + (ui.getValue('meridiem') === 'am' ? 0 : 12);
+                            if (h !== curH) {
+                                self.setValue(makeTime(h, curM));
+                            }
+                        }
+                    },
+                    mouseup: function () {
+                        $(document.body).unbind(handlers);
+                        ui.execute(self);
+                    }
+                };
+                if (e.which === 1) {
+                    $(document.body).bind(handlers);
+                }
+            });
+            var mousewheelTimeout;
+            $(self.element).bind('mousewheel', function (e) {
+                var dir = Typer.ui.getWheelDelta(e);
+                var curM = getMinutes(self.value);
+                self.setValue(makeTime(getHours(self.value), curM + (((dir > 0 ? self.step : 0) - (curM % self.step)) || (self.step * dir))));
+                e.preventDefault();
+                clearImmediate(mousewheelTimeout);
+                mousewheelTimeout = setImmediate(function () {
+                    ui.execute(self);
+                });
+            });
+            self.setValue(new Date());
+        },
+        stateChange: function (ui, self) {
+            var date = self.value;
+            self.getControl('minute').presetOptions.step = self.step;
+            self.setValue('hour', getHours(date));
+            self.setValue('minute', getMinutes(date));
+            self.setValue('meridiem', getHours(date) >= 12 ? 'pm' : 'am');
+            $('s[hand="h"]', self.element).css('transform', 'rotate(' + (getHours(date) * 30 + getMinutes(date) * 0.5 - 90) + 'deg)');
+            $('s[hand="m"]', self.element).css('transform', 'rotate(' + (getMinutes(date) * 6 - 90) + 'deg)');
+        }
+    });
+
+    Typer.ui.define('datepicker', {
+        renderAs: 'buttonset',
+        mode: 'day',
+        minuteStep: 1,
+        controls: [
+            Typer.ui.calendar({
+                name: 'calendar'
+            }),
+            Typer.ui.clock({
+                name: 'clock',
+                hiddenWhenDisabled: true,
+                enabled: function (ui, self) {
+                    return self.contextualParent.mode === 'datetime';
+                }
+            })
+        ],
+        get value() {
+            var date = new Date(+this.getValue('calendar'));
+            if (this.ui.enabled('clock')) {
+                var time = this.getValue('clock');
+                date.setHours(getHours(time), getMinutes(time), 0, 0);
+            }
+            return date;
+        },
+        set value(value) {
+            value = new Date(typeof value === 'string' ? value : +value);
+            if (isNaN(+value)) {
+                value = new Date();
+            }
+            this.setValue('calendar', value);
+            this.setValue('clock', value);
+        },
+        stateChange: function (ui, self) {
+            self.setValue('calendar', 'mode', self.mode === 'datetime' ? 'day' : self.mode);
+            self.setValue('clock', 'step', self.minuteStep);
         }
     });
 
@@ -193,6 +336,44 @@
         })
     });
 
+    Typer.ui.addControls('clock', {
+        hour: Typer.ui.textbox({
+            preset: 'number',
+            presetOptions: {
+                min: 0,
+                max: 23,
+                loop: true
+            },
+            execute: function (ui, self) {
+                ui.execute(self.contextualParent, makeTime(self.value, ui.getValue('clock:minute')));
+            }
+        }),
+        timeSeperator: Typer.ui.label({
+            value: ':'
+        }),
+        minute: Typer.ui.textbox({
+            preset: 'number',
+            presetOptions: {
+                min: 0,
+                max: 59,
+                digits: 'fixed',
+                loop: true
+            },
+            execute: function (ui, self) {
+                ui.execute(self.contextualParent, makeTime(ui.getValue('clock:hour'), self.value));
+            }
+        }),
+        meridiem: Typer.ui.button({
+            execute: function (ui, self) {
+                ui.setValue(self, self.value === 'am' ? 'pm' : 'am');
+                ui.execute(self.contextualParent, makeTime(ui.getValue('clock:hour') % 12 + (self.value === 'am' ? 0 : 12), ui.getValue('clock:minute')));
+            },
+            stateChange: function (ui, self) {
+                self.label = 'clock:meridiem:' + self.value;
+            }
+        })
+    });
+
     Typer.ui.addIcons('material', 'calendar', {
         today: '\ue8df', // today
         prev: '\ue314', // keyboard_arrow_left
@@ -203,6 +384,11 @@
         today: 'Today',
         prev: 'Previous month',
         next: 'Next month'
+    });
+
+    Typer.ui.addLabels('en', 'clock:meridiem', {
+        am: 'AM',
+        pm: 'PM'
     });
 
     var monthLabels = {};
@@ -217,12 +403,14 @@
     Typer.ui.addLabels('en', 'calendar:month', monthLabels);
 
     $.extend(Typer.ui.themeExtensions, {
-        calendar: '<div class="typer-ui-calendar"><div class="typer-ui-calendar-header"><br x:t="buttonset"/></div><div class="typer-ui-calendar-body"><table></table></div></div>'
+        calendar: '<div class="typer-ui-calendar"><div class="typer-ui-calendar-header"><br x:t="buttonset"/></div><div class="typer-ui-calendar-body"><table></table></div></div>',
+        clock: '<div class="typer-ui-clock"><div class="typer-ui-clock-face"><s hand="h"></s><s hand="m"></s></div><br x:t="buttonset"/></div>'
     });
 
     Typer.presets.datepicker = {
         options: {
             mode: 'day',
+            minuteStep: 1,
             required: false
         },
         overrides: {
@@ -231,12 +419,12 @@
             },
             setValue: function (preset, date) {
                 preset.selectedDate = date && normalizeDate(preset.options.mode, date);
-                this.selectAll();
                 this.invoke(function (tx) {
+                    tx.selection.select(this.element, 'contents');
                     tx.insertText(date ? formatDate(preset.options.mode, preset.selectedDate) : '');
                 });
                 if (this === activeTyper) {
-                    datepickerMenuUI.setValue('calendar', preset.selectedDate || new Date());
+                    callout.setValue(preset.selectedDate || new Date());
                 }
             },
             hasContent: function (preset) {
@@ -250,13 +438,8 @@
             if (e.typer === activeTyper && e.data !== 'script') {
                 var date = new Date(e.typer.extractText());
                 if (!isNaN(+date)) {
-                    datepickerMenuUI.setValue('calendar', normalizeDate(e.widget.options.mode, date));
+                    callout.setValue(normalizeDate(e.widget.options.mode, date));
                 }
-            }
-        },
-        click: function (e) {
-            if (e.typer === activeTyper) {
-                datepickerMenuUI.show(e.typer.element);
             }
         },
         mousewheel: function (e) {
@@ -270,21 +453,26 @@
             e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), 1));
         },
         focusin: function (e) {
-            if (!datepickerMenuUI) {
-                initDatapicker();
+            if (!callout) {
+                initDatepicker();
             }
-            e.typer.retainFocus(datepickerMenuUI.element);
+            e.typer.retainFocus(callout.element);
             activeTyper = e.typer;
-            datepickerMenuUI.setValue('calendar', 'mode', e.widget.options.mode);
-            datepickerMenuUI.setValue('calendar', e.typer.getValue() || new Date());
-            datepickerMenuUI.show(e.typer.element);
+
+            var options = e.widget.options;
+            callout.setValue({
+                mode: options.mode,
+                minuteStep: options.minuteStep
+            });
+            callout.setValue(e.typer.getValue() || new Date());
+            callout.show(e.typer.element);
         },
         focusout: function (e) {
             if (e.typer === activeTyper) {
-                e.typer.setValue(datepickerMenuUI.getValue('calendar'));
+                e.typer.setValue(callout.getValue());
             }
-            datepickerMenuUI.hide();
+            callout.hide();
         }
     };
 
-}(jQuery, window.Typer));
+}(jQuery, window.Typer, Date));
