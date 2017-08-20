@@ -293,8 +293,8 @@
             this.setValue('clock', value);
         },
         stateChange: function (ui, self) {
-            self.setValue('calendar', 'mode', self.mode === 'datetime' ? 'day' : self.mode);
-            self.setValue('clock', 'step', self.minuteStep);
+            self.getControl('calendar').set('mode', self.mode === 'datetime' ? 'day' : self.mode);
+            self.getControl('clock').set('step', self.minuteStep);
         }
     });
 
@@ -460,7 +460,7 @@
             activeTyper = e.typer;
 
             var options = e.widget.options;
-            callout.setValue({
+            callout.getControl('(type:datepicker)').set({
                 mode: options.mode,
                 minuteStep: options.minuteStep
             });
