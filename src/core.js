@@ -722,11 +722,15 @@
 
             function getNode(element) {
                 ensureState();
+                if (element.nodeType === 3 || tagName(element) === 'br') {
+                    element = element.parentNode || element;
+                }
                 if (containsOrEquals(rootElement, element)) {
-                    if (element.nodeType === 3 || tagName(element) === 'br') {
-                        element = element.parentNode;
-                    }
                     return nodeMap.get(element) || ensureNode(element);
+                }
+                if (!containsOrEquals(document, element)) {
+                    for (var detachedRoot = element; detachedRoot.parentNode; detachedRoot = detachedRoot.parentNode);
+                    return (nodeMap.get(detachedRoot) || createTyperDocument(detachedRoot)).getNode(element);
                 }
             }
 
