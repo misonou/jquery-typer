@@ -1220,7 +1220,31 @@
             }
         },
         callout: {
-            controls: '*'
+            controls: '*',
+            init: function (ui, self) {
+                $(self.element).click(function () {
+                    if (isEnabled(self) && self.resolve('*:*').filter(isEnabled).length > 1) {
+                        callThemeFunction(self, 'showCallout');
+                    }
+                });
+            },
+            stateChange: function (ui, self) {
+                var enabled = self.resolve('*:*').filter(isEnabled);
+                if (enabled.length === 1) {
+                    self.icon = enabled[0].icon;
+                    self.label = enabled[0].label;
+                } else {
+                    var proto = Object.getPrototypeOf(self);
+                    self.icon = proto.icon || self.name;
+                    self.label = proto.label || self.name;
+                }
+            },
+            execute: function (ui, self) {
+                var enabled = self.resolve('*:*').filter(isEnabled);
+                if (enabled.length === 1) {
+                    ui.execute(enabled[0]);
+                }
+            }
         },
         label: {
             get value() {
