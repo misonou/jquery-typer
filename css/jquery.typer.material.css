@@ -81,6 +81,10 @@
     flex-grow: 1;
 }
 
+.typer-ui-label:empty {
+    display: none !important;
+}
+
 .typer-ui-label .material-icons {
     display: inline-block;
     position: relative;
@@ -421,6 +425,7 @@ label.typer-ui-callout {
 .typer-ui-buttonlist .typer-ui-textbox .typer-ui-label,
 .typer-ui-buttonset .typer-ui-textbox .typer-ui-label {
     display: inline-block;
+    margin-right: 0.25em;
 }
 
 .typer-ui-textbox .typer-ui-textbox-wrapper {
@@ -442,7 +447,6 @@ label.typer-ui-callout {
 .typer-ui-buttonset .typer-ui-textbox .typer-ui-textbox-wrapper,
 .typer-ui-buttonlist .typer-ui-textbox .typer-ui-textbox-wrapper {
     display: inline-block;
-    margin-left: 0.25em;
     border-bottom-style: hidden;
     width: auto;
 }
@@ -1078,4 +1082,106 @@ label.typer-ui-callout {
     min-height: 0;
     line-height: 1.2;
     text-align: right;
+}
+
+.typer-ui-clock {
+    display: -ms-flexbox;
+    display: -webkit-flex;
+    display: flex;
+    -webkit-flex-direction: column;
+    -ms-flex-direction: column;
+    flex-direction: column;
+    -webkit-align-items: center;
+    -ms-flex-align: center;
+    align-items: center;
+    -webkit-align-self: stretch;
+    -ms-flex-item-align: stretch;
+    align-self: stretch;
+}
+
+.typer-ui-calendar + .typer-ui-clock {
+    border-left: 1px solid #d3d3d3;
+}
+
+.typer-ui-clock-face {
+    position: relative;
+    margin: 1em;
+    width: 10em;
+    height: 10em;
+    -webkit-flex-grow: 1;
+    -ms-flex-positive: 1;
+    flex-grow: 1;
+}
+
+.typer-ui-clock-face i,
+.typer-ui-clock-face s {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
+
+.typer-ui-clock-face i {
+    width: 50%;
+    -webkit-transform-origin: left center;
+    -moz-transform-origin: left center;
+    -ms-transform-origin: left center;
+    transform-origin: left center;
+}
+
+.typer-ui-clock-face i:before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-left: 30%;
+    border-top: 1px solid;
+    width: 0.5em;
+}
+
+.typer-ui-clock-face s {
+    margin-left: -2px;
+    -webkit-transform-origin: 2px center;
+    -moz-transform-origin: 2px center;
+    -ms-transform-origin: 2px center;
+    transform-origin: 2px center;
+}
+
+.typer-ui-clock-face s[hand="m"] {
+    color: #a30000;
+    width: 35%;
+}
+
+.typer-ui-clock-face s[hand="h"] {
+    color: green;
+    width: 25%;
+}
+
+.typer-ui-clock-face s:before {
+    content: '';
+    position: absolute;
+    left: 100%;
+    margin-left: -0.5em;
+    margin-top: -0.5em;
+    border: 0.5em solid;
+    border-radius: 1em;
+    opacity: 0.1;
+}
+
+.typer-ui-clock-face:hover s:before {
+    opacity: 1;
+}
+
+.typer-ui-clock-face s:after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin-top: -2px;
+    width: 100%;
+    border-top: 4px solid;
+}
+
+.typer-ui-clock-face s[hand="m"]:after {
+    margin-top: -1px;
+    border-top-width: 2px;
 }
