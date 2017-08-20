@@ -664,7 +664,7 @@
         var deferred = $.Deferred();
         var execute = function (value, submitControl) {
             if (ui.validate()) {
-                submitControl = submitControl || control.resolve(control.resolveBy)[0];
+                submitControl = submitControl || control.getControl(control.resolveBy);
                 var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
                 if (promise.state() === 'pending') {
                     ui.trigger(control, 'waiting', submitControl);
@@ -683,7 +683,7 @@
             }
         };
         var defaultResolve = function () {
-            var resolveWith = control.resolve(control.resolveWith)[0] || control;
+            var resolveWith = control.getControl(control.resolveWith) || control;
             execute(ui.getValue(resolveWith), this);
         };
         var defaultReject = function () {
@@ -766,13 +766,13 @@
         },
         trigger: function (control, event, data) {
             if (isString(control)) {
-                control = this.resolve(control)[0] || {};
+                control = this.getControl(control) || {};
             }
             triggerEvent(control, event, data);
         },
         show: function (control, element, ref, pos) {
             if (isString(control)) {
-                control = this.resolve(control)[0] || {};
+                control = this.getControl(control) || {};
             }
             if (control.ui === this) {
                 showCallout(control, element, ref, pos);
@@ -782,19 +782,19 @@
         },
         hide: function (control) {
             if (isString(control)) {
-                control = this.resolve(control)[0] || {};
+                control = this.getControl(control) || {};
             }
             hideCallout(control || this);
         },
         enabled: function (control) {
             if (isString(control)) {
-                control = this.resolve(control)[0] || {};
+                control = this.getControl(control) || {};
             }
             return isEnabled(control);
         },
         active: function (control) {
             if (isString(control)) {
-                control = this.resolve(control)[0] || {};
+                control = this.getControl(control) || {};
             }
             return isActive(control);
         },
@@ -817,7 +817,7 @@
             var self = this;
             prop = prop || 'value';
             if (isString(control)) {
-                control = self.resolve(control)[0];
+                control = self.getControl(control);
             }
             if (control) {
                 if (!control.valueMap) {
@@ -836,7 +836,7 @@
                 return self.setValue(control, 'value', prop);
             }
             if (isString(control)) {
-                control = self.resolve(control)[0];
+                control = self.getControl(control);
             }
             if (control) {
                 if (control.valueMap) {
@@ -851,7 +851,7 @@
         },
         setValueAndExecute: function (control, value) {
             if (isString(control)) {
-                control = this.resolve(control)[0];
+                control = this.getControl(control);
             }
             this.setValue(control, value);
             this.execute(control);
@@ -885,7 +885,7 @@
         execute: function (control) {
             var self = this;
             if (isString(control)) {
-                control = self.resolve(control)[0];
+                control = self.getControl(control);
             } else if (!control) {
                 control = self.controls[0];
             }
@@ -1080,6 +1080,9 @@
         },
         resolve: function (control) {
             return resolveControls(this, control);
+        },
+        getControl: function (control) {
+            return this.resolve(control)[0];
         },
         parentOf: function (control) {
             for (; control; control = control.parent) {

@@ -157,7 +157,7 @@
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
-            var resolveButton = control.resolve(control.resolveBy)[0];
+            var resolveButton = control.getControl(control.resolveBy);
             var $wrapper = $(ui.element).find('.typer-ui-dialog-wrapper');
             var $content = $(ui.element).find('.typer-ui-dialog-content');
 
