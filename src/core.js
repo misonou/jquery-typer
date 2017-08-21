@@ -1099,7 +1099,7 @@
 
         function initUndoable() {
             var MARKER_ATTR = ['x-typer-end', 'x-typer-start'];
-            var lastValue = topElement.outerHTML;
+            var lastValue = trim(topElement.innerHTML);
             var snapshots = [];
             var currentIndex = 0;
             var snapshotTimeout;
@@ -1167,7 +1167,7 @@
                         codeUpdate.needSnapshot = false;
                         takeSnapshot();
                     }
-                    return lastValue.slice(lastValue.indexOf('>') + 1, lastValue.lastIndexOf('<'));
+                    return lastValue;
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
