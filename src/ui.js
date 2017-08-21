@@ -4,6 +4,7 @@
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
     var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
     var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
+    var ROOT_EVENTS = 'executing executed cancelled';
 
     var isFunction = $.isFunction;
     var isPlainObject = $.isPlainObject;
@@ -321,7 +322,7 @@
     }
 
     function callFunction(control, name, data) {
-        var holder = name.substr(0, 7) === 'control' ? control.ui : control;
+        var holder = matchWSDelim(name, ROOT_EVENTS) ? control.ui : control;
         if (isFunction(holder[name])) {
             try {
                 executionContext.unshift(holder);
@@ -346,7 +347,7 @@
 
     function triggerEvent(control, name, data) {
         callFunction(control, name, data);
-        if (control.ui === control || name.substr(0, 7) === 'control') {
+        if (control.ui === control || matchWSDelim(name, ROOT_EVENTS)) {
             callThemeFunction(control, name, data);
         } else {
             callThemeFunction(control, control.type + capfirst(name), data);
@@ -645,7 +646,7 @@
         } else if (isFunction(control.execute)) {
             control.execute(ui, control, null, control.value);
         }
-        triggerEvent(control, 'controlExecuted');
+        triggerEvent(control, 'executed');
     }
 
     function validateControl(control) {
@@ -859,7 +860,7 @@
                     self.setValue(control, value);
                 }
                 executionContext.unshift(control);
-                triggerEvent(control, 'controlExecuting');
+                triggerEvent(control, 'executing');
                 if (isFunction(control.dialog)) {
                     var promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
@@ -871,6 +872,7 @@
                         }
                     });
                     promise.fail(function () {
+                        triggerEvent(control, 'cancelled');
                         executionContext.shift(control);
                     });
                     return promise;

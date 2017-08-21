@@ -82,7 +82,7 @@
         callout = Typer.ui({
             type: 'contextmenu',
             controls: [Typer.ui.datepicker()],
-            controlExecuted: function (ui, control) {
+            executed: function (ui, control) {
                 if (control.is('calendar clock')) {
                     activeTyper.setValue(ui.getValue());
                     if (control.is('calendar')) {

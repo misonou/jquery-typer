@@ -222,7 +222,7 @@
                 $(data.element).toggleClass('stick-' + v, !!data.stick[v]);
             });
         },
-        controlExecuted: function (ui, control) {
+        executed: function (ui, control) {
             if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu')) {
                 ui.hide(control.contextualParent);
             }
