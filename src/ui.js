@@ -660,7 +660,7 @@
                 }
             });
             control.validateOnChange = !valid;
-            $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, valid);
+            $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, !valid);
         }
         return valid;
     }
@@ -1041,7 +1041,13 @@
 
     $.extend(controlExtensions, {
         buttonsetGroup: 'left',
+        hiddenWhenDisabled: false,
         markdown: false,
+        renderAs: '',
+        requireChildControls: false,
+        requireTyper: false,
+        requireWidget: '',
+        requireWidgetEnabled: '',
         showButtonLabel: true,
         is: function (type) {
             return matchWSDelim(this.type, type);
@@ -1091,8 +1097,8 @@
             if (isString(control)) {
                 control = self.getControl(control);
             } else if (control === undefined || control === null || !Typer.is(control.ui, typerUI)) {
-                self.setValue(self === self.ui ? self.controls[0] : self, control);
-                return;
+                value = control;
+                control = self === self.ui ? self.controls[0] : self;
             }
             if (control) {
                 if (control.valueMap) {
@@ -1222,29 +1228,34 @@
             }
         },
         callout: {
+            allowButtonMode: false,
             controls: '*',
             init: function (ui, self) {
                 $(self.element).click(function () {
-                    if (isEnabled(self) && self.resolve('*:*').filter(isEnabled).length > 1) {
+                    if (isEnabled(self) && (!self.allowButtonMode || self.resolve('*:*').filter(isEnabled).length > 1)) {
                         callThemeFunction(self, 'showCallout');
                     }
                 });
             },
             stateChange: function (ui, self) {
-                var enabled = self.resolve('*:*').filter(isEnabled);
-                if (enabled.length === 1) {
-                    self.icon = enabled[0].icon;
-                    self.label = enabled[0].label;
-                } else {
-                    var proto = Object.getPrototypeOf(self);
-                    self.icon = proto.icon || self.name;
-                    self.label = proto.label || self.name;
+                if (self.allowButtonMode) {
+                    var enabled = self.resolve('*:*').filter(isEnabled);
+                    if (enabled.length === 1) {
+                        self.icon = enabled[0].icon;
+                        self.label = enabled[0].label;
+                    } else {
+                        var proto = Object.getPrototypeOf(self);
+                        self.icon = proto.icon || self.name;
+                        self.label = proto.label || self.name;
+                    }
                 }
             },
             execute: function (ui, self) {
-                var enabled = self.resolve('*:*').filter(isEnabled);
-                if (enabled.length === 1) {
-                    ui.execute(enabled[0]);
+                if (self.allowButtonMode) {
+                    var enabled = self.resolve('*:*').filter(isEnabled);
+                    if (enabled.length === 1) {
+                        ui.execute(enabled[0]);
+                    }
                 }
             }
         },
