@@ -649,9 +649,9 @@
         triggerEvent(control, 'executed');
     }
 
-    function validateControl(control) {
+    function validateControl(control, reset) {
         var valid = true;
-        if (isEnabled(control)) {
+        if (!reset && isEnabled(control)) {
             triggerEvent(control, 'validate', {
                 get isFailed() {
                     return valid;
@@ -660,9 +660,9 @@
                     valid = false;
                 }
             });
-            control.validateOnChange = !valid;
-            $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, !valid);
         }
+        control.validateOnChange = !valid;
+        $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, !valid);
         return valid;
     }
 
@@ -845,8 +845,12 @@
             return !failed;
         },
         reset: function () {
-            foreachControl(this, triggerEvent, 'reset');
-            this.update();
+            var self = this;
+            foreachControl(self, function (control) {
+                triggerEvent(control, 'reset');
+                validateControl(control, true);
+            });
+            self.update();
         },
         execute: function (control, value) {
             var self = this;
