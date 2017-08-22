@@ -27,9 +27,11 @@
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
     var EVENT_CURRENT = 4;
-    var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined;
+    var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined || document.documentElement.style.msUserSelect !== undefined;
 
-    var caretRangeFromPoint_ = document.caretRangeFromPoint;
+    // document.caretRangeFromPoint is still broken even in Edge browser
+    // it does not return correct range for the points x or y larger than window's width or height
+    var caretRangeFromPoint_ = IS_IE ? undefined : document.caretRangeFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
 
@@ -444,10 +446,16 @@
             selection.removeAllRanges();
         }
         try {
-            // IE may throws unspecified error
-            // even though the selection is successfully moved to the given range
             selection.addRange(range);
-        } catch (e) { }
+        } catch (e) {
+            // IE may throws unspecified error even though the selection is successfully moved to the given range
+            // if the range is not successfully selected retry after selecting other range
+            if (!selection.rangeCount) {
+                selection.addRange(createRange(document.body));
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
     }
 
     function Typer(topElement, options) {
@@ -1063,38 +1071,34 @@
         function extractText(content) {
             var range = createRange(content || topElement);
             var text = '';
-            iterate(new TyperSelection(typer, range).createTreeWalker(-1, function (v) {
+            var treeWalker = new TyperSelection(typer, range).createTreeWalker(-1, function (v) {
+                if (is(v, NODE_WIDGET | NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH) && text && text.slice(-2) !== '\n\n') {
+                    text += '\n\n';
+                }
                 if (is(v, NODE_WIDGET | NODE_INLINE_WIDGET) && isFunction(widgetOptions[v.widget.id].text)) {
-                    text += (text && '\n\n') + widgetOptions[v.widget.id].text(v.widget);
+                    text += widgetOptions[v.widget.id].text(v.widget);
                     return 2;
                 }
-                if (is(v, NODE_ANY_ALLOWTEXT)) {
-                    var it = new TyperTreeWalker(v, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET | NODE_SHOW_EDITABLE, function (v) {
-                        if (is(v, NODE_WIDGET | NODE_INLINE_WIDGET) && isFunction(widgetOptions[v.widget.id].text)) {
-                            text += widgetOptions[v.widget.id].text(v.widget);
-                            return 2;
-                        }
-                        return is(v, NODE_ANY_ALLOWTEXT) ? 1 : 3;
-                    });
-                    text += text && '\n\n';
-                    iterate(new TyperDOMNodeIterator(it, 5), function (v) {
-                        if (v.nodeType === 3) {
-                            var value = v.nodeValue;
-                            if (v === range.endContainer) {
-                                value = value.slice(0, range.endOffset);
-                            }
-                            if (v === range.startContainer) {
-                                value = value.slice(range.startOffset);
-                            }
-                            text += value;
-                        } else if (tagName(v) === 'br') {
-                            text += '\n';
-                        }
-                    });
-                    return 2;
+                return 1;
+            });
+            var iterator = new TyperDOMNodeIterator(treeWalker, 5, function (v) {
+                return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
+            });
+            iterate(iterator, function (v) {
+                if (v.nodeType === 3) {
+                    var value = v.nodeValue;
+                    if (v === range.endContainer) {
+                        value = value.slice(0, range.endOffset);
+                    }
+                    if (v === range.startContainer) {
+                        value = value.slice(range.startOffset);
+                    }
+                    text += value;
+                } else if (tagName(v) === 'br') {
+                    text += '\n';
                 }
-            }));
-            return text.replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
+            });
+            return trim(text).replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
         }
 
         function initUndoable() {
@@ -2563,7 +2567,7 @@
     // also IE use all lowercase letter in the event name
     function dispatchInputEvent(e) {
         for (var target = e.target; target; target = target.parentNode) {
-            if (target.contentEditable === 'true') {
+            if (target.contentEditable === 'true' && (target !== e.target || e.type === 'textinput')) {
                 var event = document.createEvent('Event');
                 event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
                 event.data = e.data;
