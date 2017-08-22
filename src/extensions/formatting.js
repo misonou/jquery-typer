@@ -354,7 +354,7 @@
 
     function orderedListButton(type, annotation) {
         return Typer.ui.button({
-            name: 'formatting:listtype:' + LIST_STYLE_TYPE[type],
+            name: LIST_STYLE_TYPE[type],
             annotation: annotation,
             requireWidgetEnabled: 'list',
             value: type,
@@ -509,7 +509,7 @@
         inlineStyleClear: 'Clear style'
     });
 
-    Typer.ui.addLabels('en', 'typer:formatting:listtype', {
+    Typer.ui.addLabels('en', 'typer:formatting:orderedList', {
         'decimal': 'Decimal numbers',
         'lower-alpha': 'Alphabetically ordered list, lowercase',
         'upper-alpha': 'Alphabetically ordered list, uppercase',
