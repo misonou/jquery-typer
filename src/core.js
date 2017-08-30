@@ -261,7 +261,7 @@
     }
 
     function getWholeTextOffset(node, textNode) {
-        var iterator = new TyperDOMNodeIterator(node, 5);
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 5);
         for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length || 0);
         return offset;
     }
@@ -666,6 +666,19 @@
                 });
             }
 
+            function fixIE(element) {
+                // IE fires input and text-input event on the innermost element where the caret positions at
+                // the event does not bubble up so need to trigger manually on the top element
+                // also IE use all lowercase letter in the event name
+                $(element).bind('input textinput', function (e) {
+                    var event = document.createEvent('Event');
+                    event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
+                    event.data = e.data;
+                    e.stopPropagation();
+                    topElement.dispatchEvent(event);
+                });
+            }
+
             function visitElement(element, childOnly) {
                 var stack = [nodeMap.get(element)];
                 updateNodeFromElement(stack[0]);
@@ -692,6 +705,7 @@
                     nodeMap.set(v, node);
                     if (childOnly && unvisited) {
                         visitElement(v);
+                        fixIE(v);
                     }
                     stack.unshift(node);
                 });
@@ -1340,6 +1354,9 @@
                         }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
+                    if (!keyDefaultPrevented) {
+                        codeUpdate.suppressTextEvent = false;
+                    }
                     setImmediate(function () {
                         if (!composition && !keyDefaultPrevented) {
                             updateFromNativeInput();
@@ -2561,26 +2578,5 @@
     var keypressed;
     document.addEventListener('keypress', detectTextInputEvent, true);
     document.addEventListener('textInput', detectTextInputEvent, true);
-
-    // IE fires input and text-input event on the innermost element where the caret positions at
-    // the event does not bubble up so need to trigger manually on the top element
-    // also IE use all lowercase letter in the event name
-    function dispatchInputEvent(e) {
-        for (var target = e.target; target; target = target.parentNode) {
-            if (target.contentEditable === 'true' && (target !== e.target || e.type === 'textinput')) {
-                var event = document.createEvent('Event');
-                event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
-                event.data = e.data;
-                e.stopPropagation();
-                target.dispatchEvent(event);
-                return;
-            }
-        }
-    }
-
-    if (IS_IE) {
-        document.addEventListener('input', dispatchInputEvent, true);
-        document.addEventListener('textinput', dispatchInputEvent, true);
-    }
 
 }(jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype));
