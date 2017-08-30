@@ -1,3 +1,22 @@
+## 0.10.2 / 2017-08-30
+
+- Improved text extraction
+- New methods for controls: `control.getControl`, `control.set`, `callout.allowButtonMode`
+- New method for UI: `ui.reset`
+- New UI events `executing`, `executed`, `cancelled` replacing `controlExecuting` and `controlExecuted`
+- Number control now supports loop mode
+- Datepicker control now supports time component
+- Fix: detection for Edge browser
+- Fix: snapshot not created after changes
+- Fix: first tag is trimmed by `Typer.getValue`
+- Fix: IE bug in `selection.addRange`
+- Fix: IE not focusing containing focusable element when clicking `<label>`
+- Fix: callout not showing up in focus event by mouse click
+- Fix: presets should accept text only by default
+- Fix: datepicker now hides calendar after selecting date
+- Fix: table style and width change does not cause `contentChange`
+- Fix: resolving correct controls specified by `dialog.resolveWith`
+
 ## 0.10.1 / 2017-08-07
 
 - Add control options: `visible`
