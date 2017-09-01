@@ -1084,32 +1084,37 @@
 
         function extractText(content) {
             var range = createRange(content || topElement);
+            var lastNode, lastWidget;
             var text = '';
-            var treeWalker = new TyperSelection(typer, range).createTreeWalker(-1, function (v) {
-                if (is(v, NODE_WIDGET | NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH) && text && text.slice(-2) !== '\n\n') {
-                    text += '\n\n';
-                }
-                if (is(v, NODE_WIDGET | NODE_INLINE_WIDGET) && isFunction(widgetOptions[v.widget.id].text)) {
-                    text += widgetOptions[v.widget.id].text(v.widget);
-                    return 2;
-                }
-                return 1;
-            });
-            var iterator = new TyperDOMNodeIterator(treeWalker, 5, function (v) {
+            var iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(-1), 5, function (v) {
                 return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
             });
             iterate(iterator, function (v) {
-                if (v.nodeType === 3) {
-                    var value = v.nodeValue;
-                    if (v === range.endContainer) {
-                        value = value.slice(0, range.endOffset);
+                var node = typerDocument.getNode(v);
+                var widgetOption = widgetOptions[node.widget.id];
+                if (node !== lastNode) {
+                    if (is(node, NODE_WIDGET | NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH) && text.slice(-2) !== '\n\n') {
+                        text += '\n\n';
                     }
-                    if (v === range.startContainer) {
-                        value = value.slice(range.startOffset);
+                    if (node.widget !== lastWidget && isFunction(widgetOption.text)) {
+                        text += widgetOption.text(node.widget);
                     }
-                    text += value;
-                } else if (tagName(v) === 'br') {
-                    text += '\n';
+                    lastNode = node;
+                    lastWidget = node.widget;
+                }
+                if (!isFunction(widgetOption.text)) {
+                    if (v.nodeType === 3) {
+                        var value = v.nodeValue;
+                        if (v === range.endContainer) {
+                            value = value.slice(0, range.endOffset);
+                        }
+                        if (v === range.startContainer) {
+                            value = value.slice(range.startOffset);
+                        }
+                        text += value;
+                    } else if (tagName(v) === 'br') {
+                        text += '\n';
+                    }
                 }
             });
             return trim(text).replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
