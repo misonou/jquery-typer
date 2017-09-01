@@ -2799,7 +2799,7 @@
             }
             ctor.apply(this, arguments);
         });
-        var baseFn = function () {};
+        var baseFn = function () { };
         baseFn.prototype = controlExtensions;
         fn.prototype = new baseFn();
         Object.getOwnPropertyNames(base || {}).forEach(function (v) {
@@ -3533,25 +3533,35 @@
                 executionContext.unshift(control);
                 triggerEvent(control, 'executing');
                 if (isFunction(control.dialog)) {
-                    var promise = $.when(control.dialog(self, control));
+                    var promise = control.promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
                         try {
                             self.setValue(control, value);
                             executeControl(control);
                         } finally {
-                            executionContext.shift(control);
+                            delete control.promise;
+                            executionContext.shift();
                         }
                     });
                     promise.fail(function () {
-                        triggerEvent(control, 'cancelled');
-                        executionContext.shift(control);
+                        try {
+                            triggerEvent(control, 'cancelled');
+                        } finally {
+                            delete control.promise;
+                            executionContext.shift();
+                        }
                     });
                     return promise;
                 }
                 try {
                     executeControl(control);
+                    if (executionContext[0] !== control) {
+                        return executionContext[0].promise;
+                    }
                 } finally {
-                    executionContext.shift(control);
+                    if (executionContext[0] === control) {
+                        executionContext.shift();
+                    }
                 }
             }
         }
