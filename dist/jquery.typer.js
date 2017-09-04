@@ -2799,7 +2799,7 @@
             }
             ctor.apply(this, arguments);
         });
-        var baseFn = function () { };
+        var baseFn = function () {};
         baseFn.prototype = controlExtensions;
         fn.prototype = new baseFn();
         Object.getOwnPropertyNames(base || {}).forEach(function (v) {
@@ -2838,7 +2838,7 @@
         var params = null;
         try {
             params = m[2] && JSON.parse(('{' + m[2] + '}').replace(/([{:,])\s*([^\s:,}]+)/g, '$1"$2"'));
-        } catch (e) { }
+        } catch (e) {}
         return {
             name: m[1],
             params: params || {}
@@ -3300,6 +3300,19 @@
         }
     }
 
+    function executeControlWithFinal(control, callback, optArg) {
+        try {
+            callback(control, optArg);
+            if (executionContext[0] !== control) {
+                return executionContext[0].promise;
+            }
+        } finally {
+            if (executionContext[0] === control) {
+                while ($.when(executionContext[0].promise).state() !== 'pending' && executionContext.shift() && executionContext[0]);
+            }
+        }
+    }
+
     function executeControl(control) {
         var ui = control.ui;
         if (ui.typer) {
@@ -3535,34 +3548,17 @@
                 if (isFunction(control.dialog)) {
                     var promise = control.promise = $.when(control.dialog(self, control));
                     promise.done(function (value) {
-                        try {
+                        executeControlWithFinal(control, function () {
                             self.setValue(control, value);
                             executeControl(control);
-                        } finally {
-                            delete control.promise;
-                            executionContext.shift();
-                        }
+                        });
                     });
                     promise.fail(function () {
-                        try {
-                            triggerEvent(control, 'cancelled');
-                        } finally {
-                            delete control.promise;
-                            executionContext.shift();
-                        }
+                        executeControlWithFinal(control, triggerEvent, 'cancelled');
                     });
                     return promise;
                 }
-                try {
-                    executeControl(control);
-                    if (executionContext[0] !== control) {
-                        return executionContext[0].promise;
-                    }
-                } finally {
-                    if (executionContext[0] === control) {
-                        executionContext.shift();
-                    }
-                }
+                return executeControlWithFinal(control, executeControl);
             }
         }
     });
