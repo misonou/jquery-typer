@@ -54,6 +54,7 @@
     var controlExtensions = {};
     var wsDelimCache = {};
     var executionContext = [];
+    var callstack = [];
     var currentPinnedElements = [];
     var currentCallouts = [];
     var currentDialog;
@@ -325,10 +326,10 @@
         var holder = matchWSDelim(name, ROOT_EVENTS) ? control.ui : control;
         if (isFunction(holder[name])) {
             try {
-                executionContext.unshift(holder);
+                callstack.unshift(holder);
                 return holder[name](control.ui, control, data);
             } finally {
-                executionContext.shift();
+                callstack.shift();
             }
         }
     }
@@ -337,10 +338,10 @@
         var theme = definedThemes[control.ui.theme];
         if (isFunction(theme[name])) {
             try {
-                executionContext.unshift(control);
+                callstack.unshift(control);
                 return theme[name](control.ui, control, data);
             } finally {
-                executionContext.shift();
+                callstack.shift();
             }
         }
     }
@@ -743,14 +744,14 @@
                 controls: options
             };
         }
-        if (executionContext[0]) {
-            var parentUI = executionContext[0].ui;
+        var parentControl = callstack[0] || executionContext[0];
+        if (parentControl) {
             $.extend(options, {
-                theme: parentUI.theme,
-                typer: parentUI.typer,
-                widget: parentUI.widget,
-                parent: parentUI,
-                parentControl: parentUI.getExecutingControl()
+                theme: parentControl.ui.theme,
+                typer: parentControl.ui.typer,
+                widget: parentControl.ui.widget,
+                parent: parentControl.ui,
+                parentControl: parentControl
             });
         }
         var self = $.extend(this, options);
@@ -844,9 +845,9 @@
             return control;
         },
         getExecutingControl: function () {
-            for (var i = 0, length = executionContext.length; i < length; i++) {
-                if (executionContext[i].ui === this) {
-                    return executionContext[i];
+            for (var i = 0, length = callstack.length; i < length; i++) {
+                if (callstack[i].ui === this) {
+                    return callstack[i];
                 }
             }
         },
@@ -860,8 +861,8 @@
         reset: function () {
             var self = this;
             foreachControl(self, function (control) {
-                triggerEvent(control, 'reset');
                 validateControl(control, true);
+                triggerEvent(control, 'reset');
             });
             self.update();
         },
@@ -1407,7 +1408,7 @@
         });
         $(window).focusin(function (e) {
             if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
-                typerUI.focus(currentDialog.element);
+                setImmediate(typerUI.focus, currentDialog.element);
             }
         });
         $(window).bind('resize scroll orientationchange', function (e) {
