@@ -469,7 +469,7 @@
         },
         focusout: function (e) {
             if (e.typer === activeTyper) {
-                e.typer.setValue(callout.getValue());
+                activeTyper = null;
             }
             callout.hide();
         }

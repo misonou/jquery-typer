@@ -135,7 +135,7 @@
                 },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();
-                    $(control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
+                    $(control.element).toggleClass('empty', !control.preset.hasContent());
                     if (e.typer.focused()) {
                         ui.execute(control);
                     }
