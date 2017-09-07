@@ -255,6 +255,20 @@ button.typer-ui-dropdown.disabled:after {
     border-top-color: #999;
 }
 
+button.typer-ui-dropdown.error {
+    color: #a00009;
+}
+
+button.typer-ui-dropdown.error .typer-ui-label:after {
+    content: '\00e001';
+    display: inline-block;
+    margin-left: 0.25em;
+    font-family: 'Material Icons';
+    font-weight: normal;
+    text-transform: none;
+    vertical-align: top;
+}
+
 .is-dropdown button.active:before {
     position: absolute;
     content: '\00e876';

@@ -115,10 +115,10 @@
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
                 focusin: function (e) {
-                    $(control.element).closest('.typer-ui-textbox').addClass('focused');
+                    $(control.element).addClass('focused');
                 },
                 focusout: function (e) {
-                    $(control.element).closest('.typer-ui-textbox').removeClass('focused');
+                    $(control.element).removeClass('focused');
                 },
                 stateChange: function (e) {
                     var topElement = e.typer.element;
@@ -223,7 +223,7 @@
             });
         },
         executed: function (ui, control) {
-            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu')) {
+            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu') && control.contextualParent.hideCalloutOnExecute !== false) {
                 ui.hide(control.contextualParent);
             }
         }

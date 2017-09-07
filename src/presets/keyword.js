@@ -67,6 +67,63 @@
         return suggestions.slice(0, count);
     }
 
+    function showSuggestions(preset) {
+        var value = preset.typer.extractText();
+        var suggestions = preset.options.suggestions || preset.options.allowedValues || [];
+        if ($.isFunction(suggestions)) {
+            suggestions = suggestions(value);
+        }
+        $.when(suggestions).done(function (suggestions) {
+            suggestions = suggestions.map(function (v) {
+                if (typeof v === 'string') {
+                    return {
+                        value: v,
+                        displayText: v
+                    };
+                }
+                return v;
+            });
+            suggestions.forEach(function (v) {
+                if (preset.allowedValues.indexOf(v.value) < 0) {
+                    preset.allowedValues.push(v.value);
+                }
+            });
+
+            var currentValues = preset.typer.getValue();
+            suggestions = suggestions.filter(function (v) {
+                return currentValues.indexOf(v.value) < 0;
+            });
+            suggestions = processSuggestions(suggestions, value, preset.options.suggestionCount);
+            if (value && preset.options.allowFreeInput) {
+                suggestions.push({
+                    value: value,
+                    displayText: value,
+                    formattedText: '<i>' + encode(value) + '</i>'
+                });
+            }
+            preset.suggestions = suggestions;
+
+            var html;
+            if (suggestions.length) {
+                html = '<button>' + suggestions.map(function (v) {
+                    return v.formattedText;
+                }).join('</button><button>') + '</button>';
+            } else {
+                html = '<button class="disabled">No suggestions</button>';
+            }
+            $('.typer-ui-buttonlist', preset.callout.element).html(html);
+        });
+        setTimeout(function () {
+            if (preset.typer.focused()) {
+                preset.callout.show(preset.typer.element);
+            }
+        });
+    }
+
+    function validate(preset, value) {
+        return (preset.options.allowFreeInput || preset.allowedValues.indexOf(value) >= 0) && preset.options.validate(value);
+    }
+
     Typer.presets.keyword = {
         options: {
             required: false,
@@ -146,9 +203,7 @@
                 lastSpan = $('span:last', tx.typer.element)[0];
                 tx.selection.select(Typer.createRange(lastSpan, false), Typer.createRange(tx.typer.element, -0));
                 tx.insertText('');
-
-                var preset = tx.typer.getStaticWidget('__preset__');
-                if ((!preset.options.allowFreeInput && preset.allowedValues.indexOf(value.value) < 0) || !preset.options.validate(value.value)) {
+                if (!validate(tx.widget, value.value)) {
                     $(lastSpan).addClass('invalid');
                 }
             }
@@ -164,19 +219,19 @@
             $(e.widget.callout.element).on('click', 'button', function (e2) {
                 e.typer.invoke('add', e.widget.suggestions[$(this).index()]);
                 e.typer.getSelection().focus();
-                e.widget.callout.hide();
+                showSuggestions(e.widget);
             });
         },
         click: function (e) {
             e.widget.selectedIndex = -1;
         },
+        focusin: function (e) {
+            showSuggestions(e.widget);
+        },
         focusout: function (e) {
             e.widget.selectedIndex = -1;
             e.widget.callout.hide();
-            var value = Typer.trim(e.typer.extractText());
-            if (value && e.widget.options.validate(value)) {
-                e.typer.invoke('add', value);
-            }
+            e.typer.invoke('add', e.typer.extractText());
         },
         upArrow: function (e) {
             if (e.widget.selectedIndex >= 0) {
@@ -193,10 +248,7 @@
                 e.typer.invoke('add', e.widget.suggestions[e.widget.selectedIndex]);
                 e.widget.selectedIndex = -1;
             } else {
-                var value = Typer.trim(e.typer.extractText());
-                if (value && e.widget.options.validate(value)) {
-                    e.typer.invoke('add', value);
-                }
+                e.typer.invoke('add', e.typer.extractText());
             }
         },
         keystroke: function (e) {
@@ -208,56 +260,7 @@
         },
         contentChange: function (e) {
             if (e.data === 'textInput' || e.data === 'keystroke') {
-                var value = Typer.trim(e.typer.extractText());
-                var suggestions = e.widget.options.suggestions || e.widget.options.allowedValues || [];
-                if ($.isFunction(suggestions)) {
-                    suggestions = suggestions(value);
-                }
-                $.when(suggestions).done(function (suggestions) {
-                    suggestions = suggestions.map(function (v) {
-                        if (typeof v === 'string') {
-                            return {
-                                value: v,
-                                displayText: v
-                            };
-                        }
-                        return v;
-                    });
-                    suggestions.forEach(function (v) {
-                        if (e.widget.allowedValues.indexOf(v.value) <= 0) {
-                            e.widget.allowedValues.push(v.value);
-                        }
-                    });
-
-                    var currentValues = e.typer.getValue();
-                    suggestions = suggestions.filter(function (v) {
-                        return currentValues.indexOf(v.value) < 0;
-                    });
-                    suggestions = processSuggestions(suggestions, value, e.widget.options.suggestionCount);
-                    if (value && e.widget.options.allowFreeInput) {
-                        suggestions.push({
-                            value: value,
-                            displayText: value,
-                            formattedText: '<i>' + encode(value) + '</i>'
-                        });
-                    }
-                    e.widget.suggestions = suggestions;
-
-                    var html;
-                    if (suggestions.length) {
-                        html = '<button>' + suggestions.map(function (v) {
-                            return v.formattedText;
-                        }).join('</button><button>') + '</button>';
-                    } else {
-                        html = '<button class="disabled">No suggestions</button>';
-                    }
-                    $('.typer-ui-buttonlist', e.widget.callout.element).html(html);
-                });
-                setTimeout(function () {
-                    if (e.typer.focused()) {
-                        e.widget.callout.show(e.typer.element);
-                    }
-                });
+                showSuggestions(e.widget);
             }
         }
     };

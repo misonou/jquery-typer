@@ -470,8 +470,8 @@
         focusout: function (e) {
             if (e.typer === activeTyper) {
                 activeTyper = null;
+                callout.hide();
             }
-            callout.hide();
         }
     };
 
