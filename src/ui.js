@@ -1081,7 +1081,9 @@
             if (isString(prop)) {
                 this[prop] = value;
             } else {
-                $.extend(this, prop);
+                for (var i in prop) {
+                    this[i] = prop[i];
+                }
             }
             updateControl(this, true);
         },
