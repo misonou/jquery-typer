@@ -133,7 +133,7 @@
             }
             ctor.apply(this, arguments);
         });
-        var baseFn = function () {};
+        var baseFn = function () { };
         baseFn.prototype = controlExtensions;
         fn.prototype = new baseFn();
         Object.getOwnPropertyNames(base || {}).forEach(function (v) {
@@ -172,7 +172,7 @@
         var params = null;
         try {
             params = m[2] && JSON.parse(('{' + m[2] + '}').replace(/([{:,])\s*([^\s:,}]+)/g, '$1"$2"'));
-        } catch (e) {}
+        } catch (e) { }
         return {
             name: m[1],
             params: params || {}
@@ -599,7 +599,7 @@
         return control.active === true || !!callFunction(control, 'active');
     }
 
-    function updateControl(control) {
+    function updateControl(control, updateParent) {
         var ui = control.ui;
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
@@ -632,12 +632,15 @@
         } else {
             toggleDisplay($elm, visible);
         }
+        if (updateParent && control.parent !== control.ui && callstack.indexOf(control.parent) < 0) {
+            updateControl(control.parent);
+        }
     }
 
     function executeControlWithFinal(control, callback, optArg) {
         try {
             callback(control, optArg);
-            if (executionContext[0] !== control) {
+            if (executionContext.indexOf(control) > 0) {
                 return executionContext[0].promise;
             }
         } finally {
@@ -1062,6 +1065,7 @@
         requireWidget: '',
         requireWidgetEnabled: '',
         showButtonLabel: true,
+        hideCalloutOnExecute: true,
         is: function (type) {
             return matchWSDelim(this.type, type);
         },
@@ -1079,7 +1083,7 @@
             } else {
                 $.extend(this, prop);
             }
-            updateControl(this);
+            updateControl(this, true);
         },
         resolve: function (control) {
             return resolveControls(this, control);
@@ -1121,7 +1125,7 @@
                 } else {
                     control.value = value;
                 }
-                updateControl(control);
+                updateControl(control, true);
             }
         }
     });
