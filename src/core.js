@@ -817,10 +817,23 @@
                     if (checkEditable(node)) {
                         return;
                     }
-                    if (is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_ANY_ALLOWTEXT)) {
-                        $(node.element).wrap('<p>');
+                    if (is(node, NODE_EDITABLE)) {
+                        $(node.element).contents().each(function (i, v) {
+                            if (v.parentNode === node.element) {
+                                var contents = [];
+                                for (; v && (v.nodeType === 3 || tagName(v) === 'br' || is(typerDocument.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                    if (contents.length || v.nodeType === 1 || trim(v.data)) {
+                                        contents.push(v);
+                                    }
+                                }
+                                if (contents.length) {
+                                    $(contents).wrap('<p>');
+                                }
+                            }
+                        });
+                        return;
                     }
-                    if (is(node, NODE_ANY_ALLOWTEXT)) {
+                    if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
                         var lastBr = $('>br:last-child', node.element)[0];
@@ -832,6 +845,8 @@
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
+                    }
+                    if (is(node, NODE_ANY_ALLOWTEXT)) {
                         $('>br', node.element).each(function (i, v) {
                             if (!v.nextSibling || v.nextSibling.nodeType === 1) {
                                 $(createTextNode()).insertAfter(v);
@@ -1102,7 +1117,7 @@
                     lastNode = node;
                     lastWidget = node.widget;
                 }
-                if (!isFunction(widgetOption.text)) {
+                if (is(node, NODE_ANY_ALLOWTEXT) && !isFunction(widgetOption.text)) {
                     if (v.nodeType === 3) {
                         var value = v.nodeValue;
                         if (v === range.endContainer) {
@@ -2273,6 +2288,10 @@
                 } else {
                     this.textNode.nodeValue += ZWSP;
                 }
+            }
+            if (!this.textNode && this.element === this.typer.element) {
+                // avoid creating range that is outside the content editable area
+                return createRange(this.element, this.offset ? 0 : -0);
             }
             return createRange(this.textNode || this.element, this.offset);
         },
