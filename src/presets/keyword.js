@@ -8,6 +8,19 @@
         return b.innerHTML;
     }
 
+    function valueChanged(x, y) {
+        var hash = {};
+        x.forEach(function (v) {
+            hash[v] = true;
+        });
+        y.forEach(function (v) {
+            delete hash[v];
+        });
+        for (var i in hash) {
+            return true;
+        }
+    }
+
     function fuzzyMatch(haystack, needle) {
         haystack = String(haystack || '');
         var vector = [];
@@ -84,9 +97,7 @@
                 return v;
             });
             suggestions.forEach(function (v) {
-                if (preset.allowedValues.indexOf(v.value) < 0) {
-                    preset.allowedValues.push(v.value);
-                }
+                preset.knownValues[v.value] = v.displayText;
             });
 
             var currentValues = preset.typer.getValue();
@@ -121,7 +132,7 @@
     }
 
     function validate(preset, value) {
-        return (preset.options.allowFreeInput || preset.allowedValues.indexOf(value) >= 0) && preset.options.validate(value);
+        return (preset.options.allowFreeInput || preset.knownValues[value]) && preset.options.validate(value);
     }
 
     Typer.presets.keyword = {
@@ -142,16 +153,18 @@
                 }).get();
             },
             setValue: function (preset, values) {
-                this.invoke(function (tx) {
-                    var add = tx.typer.invoke.bind(tx.typer, 'add');
-                    tx.selection.select(tx.typer.element, 'contents');
-                    tx.insertText('');
-                    if ($.isArray(values)) {
-                        $.map(values, add);
-                    } else {
-                        String(values).replace(/\S+/g, add);
-                    }
+                values = ($.isArray(values) ? values : String(values).split(/\s+/)).filter(function (v) {
+                    return v;
                 });
+                if (valueChanged(values, this.getValue())) {
+                    this.invoke(function (tx) {
+                        tx.selection.select(tx.typer.element, 'contents');
+                        tx.insertText('');
+                        values.forEach(function (v) {
+                            tx.typer.invoke('add', v);
+                        });
+                    });
+                }
             },
             hasContent: function () {
                 return !!($('span', this.element)[0] || this.extractText());
@@ -187,12 +200,9 @@
                 if (typeof value === 'string') {
                     value = {
                         value: value,
-                        displayText: value
+                        displayText: tx.widget.knownValues[value] || value
                     };
                 }
-                // TODO: map display text from previous suggestions
-                // and validate from suggestions
-
                 var lastSpan = $('span:last', tx.typer.element)[0];
                 if (lastSpan) {
                     tx.selection.select(lastSpan, false);
@@ -210,7 +220,7 @@
         },
         init: function (e) {
             e.typer.getSelection().moveToText(e.typer.element, -0);
-            e.widget.allowedValues = [];
+            e.widget.knownValues = {};
             e.widget.suggestions = [];
             e.widget.callout = Typer.ui({
                 type: 'contextmenu',

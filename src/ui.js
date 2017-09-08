@@ -1289,10 +1289,7 @@
         button: {},
         file: {},
         textbox: {
-            preset: 'textbox',
-            reset: function (ui, self) {
-                self.value = '';
-            }
+            preset: 'textbox'
         },
         textboxCombo: {
             controls: function (ui, self) {

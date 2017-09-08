@@ -153,6 +153,10 @@
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
         },
+        textboxReset: function (ui, control) {
+            control.preset.setValue('');
+            control.value = control.preset.getValue();
+        },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
             var resolveButton = control.getControl(control.resolveBy);
