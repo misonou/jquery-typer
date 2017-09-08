@@ -31,15 +31,29 @@
         return new Array(count + 1).join(str);
     }
 
+    function sameMonth(x, y) {
+        return getFullYear(x) === getFullYear(y) && getMonth(x) === getMonth(y);
+    }
+
+    function parseMaxima(d) {
+        if (typeof d === 'string' && /^today|([+-]\d+)(day|week|month|year)?$/g.test(d)) {
+            return RegExp.$1 ? stepDate(RegExp.$2 || 'day', new Date(), +RegExp.$1) : new Date();
+        }
+        d = d === null ? undefined : d instanceof Date ? d : new Date(d);
+        return isNaN(d) ? undefined : d;
+    }
+
     function makeTime(h, m) {
         var date = new Date();
         date.setHours(h, m, 0, 0);
         return date;
     }
 
-    function normalizeDate(mode, date) {
-        date = new Date(+date);
-        switch (mode) {
+    function normalizeDate(options, date) {
+        var min = parseMaxima(options.min);
+        var max = parseMaxima(options.max);
+        date = new Date(+(date < min ? min : date > max ? max : date));
+        switch (options.mode || options) {
             case 'week':
                 date.setDate(getDate(date) - date.getDay());
                 break;
@@ -47,14 +61,19 @@
                 date.setDate(1);
                 break;
         }
-        if (mode !== 'datetime') {
+        if ((options.mode || options) !== 'datetime') {
             date.setHours(0, 0, 0, 0);
+        } else {
+            date.setSeconds(0, 0);
         }
         return date;
     }
 
-    function stepDate(mode, date, dir) {
+    function stepDate(mode, date, dir, step) {
         switch (mode) {
+            case 'minute':
+                var d = dir / Math.abs(dir);
+                return new Date(+date + 60000 * ((((d > 0 ? step : 0) - (getMinutes(date) % step)) || (step * d)) + (step * (dir - d))));
             case 'day':
                 return new Date(+date + MS_PER_DAY * dir);
             case 'week':
@@ -66,8 +85,8 @@
         }
     }
 
-    function formatDate(mode, date) {
-        switch (mode) {
+    function formatDate(options, date) {
+        switch (options.mode) {
             case 'month':
                 return monthstr[getMonth(date)] + ' ' + getFullYear(date);
             case 'week':
@@ -75,7 +94,7 @@
                 return monthstr[getMonth(date)] + ' ' + getDate(date) + ' - ' + (getMonth(end) !== getMonth(date) ? monthstr[getMonth(end)] + ' ' : '') + getDate(end) + ', ' + getFullYear(date);
         }
         var monthPart = monthstr[getMonth(date)] + ' ' + getDate(date) + ', ' + getFullYear(date);
-        return mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
+        return options.mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
     }
 
     function initDatepicker() {
@@ -98,11 +117,14 @@
         defaultNS: 'calendar',
         controls: '*',
         showButtonLabel: false,
+        mode: 'day',
+        min: null,
+        max: null,
         get value() {
-            return normalizeDate(this.mode, this.selectedDate);
+            return normalizeDate(this, this.selectedDate);
         },
         set value(value) {
-            this.selectedDate = normalizeDate(this.mode, value);
+            this.selectedDate = normalizeDate(this, value);
             this.ui.trigger(this, 'showMonth', this.selectedDate);
         },
         init: function (ui, self) {
@@ -133,13 +155,19 @@
             if (typeof date === 'number') {
                 date = stepDate('month', self.currentMonth, date);
             }
-            var y = getFullYear(date);
-            var m = getMonth(date);
-            var currentMonth = new Date(y, m);
+            var min = parseMaxima(self.min);
+            var max = parseMaxima(self.max);
+            var currentMonth = normalizeDate({
+                mode: 'month',
+                min: min,
+                max: max
+            }, date);
             var firstDay = currentMonth.getDay();
-            var $buttons = $('td', self.element).removeClass('selected');
+            var $buttons = $('td', self.element).removeClass('selected disabled');
 
-            if (currentMonth !== self.currentMonth) {
+            if (!self.currentMonth || !sameMonth(currentMonth, self.currentMonth)) {
+                var y = getFullYear(currentMonth);
+                var m = getMonth(currentMonth);
                 var numDays = new Date(y, m + 1, 0).getDate();
                 var numDaysLast = new Date(y, m, 0).getDate();
                 $buttons.removeClass('prev cur next today');
@@ -153,8 +181,8 @@
                     }
                 });
                 var today = new Date();
-                if (getFullYear(today) === y && getMonth(today) === m) {
-                    $buttons.filter('.cur').eq(getDate(today) - 1).addClass('today');
+                if (sameMonth(currentMonth, today)) {
+                    $buttons.eq(getDate(today) + firstDay - 1).addClass('today');
                 }
                 $('tr:last', self.element).toggle(firstDay + numDays > 35);
 
@@ -167,13 +195,20 @@
                 cm.value = m;
                 self.currentMonth = currentMonth;
             }
-            if (getFullYear(self.value) === y && getMonth(self.value) === m) {
+            if (min && sameMonth(currentMonth, min)) {
+                $buttons.slice(0, getDate(min) + firstDay - 1).addClass('disabled');
+            }
+            if (max && sameMonth(currentMonth, max)) {
+                $buttons.slice(getDate(max) + firstDay).addClass('disabled');
+            }
+            var selected = sameMonth(currentMonth, self.value);
+            if (selected || (self.mode === 'week' && sameMonth(currentMonth, stepDate('day', self.value, 6)))) {
                 switch (self.mode) {
                     case 'day':
                         $buttons.eq(getDate(self.value) + firstDay - 1).addClass('selected');
                         break;
                     case 'week':
-                        $buttons.slice(getDate(self.value) + firstDay - 1, getDate(self.value) + firstDay + 6).addClass('selected');
+                        $buttons.slice(selected ? getDate(self.value) + firstDay - 1 : 0).slice(0, 7).addClass('selected');
                         break;
                     case 'month':
                         $buttons.filter('td.cur').addClass('selected');
@@ -238,9 +273,7 @@
             });
             var mousewheelTimeout;
             $(self.element).bind('mousewheel', function (e) {
-                var dir = Typer.ui.getWheelDelta(e);
-                var curM = getMinutes(self.value);
-                self.setValue(makeTime(getHours(self.value), curM + (((dir > 0 ? self.step : 0) - (curM % self.step)) || (self.step * dir))));
+                self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
                 clearImmediate(mousewheelTimeout);
                 mousewheelTimeout = setImmediate(function () {
@@ -264,6 +297,8 @@
         renderAs: 'buttonset',
         mode: 'day',
         minuteStep: 1,
+        min: null,
+        max: null,
         controls: [
             Typer.ui.calendar({
                 name: 'calendar'
@@ -293,7 +328,11 @@
             this.setValue('clock', value);
         },
         stateChange: function (ui, self) {
-            self.getControl('calendar').set('mode', self.mode === 'datetime' ? 'day' : self.mode);
+            self.getControl('calendar').set({
+                mode: self.mode === 'datetime' ? 'day' : self.mode,
+                min: self.min,
+                max: self.max
+            });
             self.getControl('clock').set('step', self.minuteStep);
         }
     });
@@ -411,20 +450,25 @@
         options: {
             mode: 'day',
             minuteStep: 1,
+            min: null,
+            max: null,
             required: false
         },
         overrides: {
             getValue: function (preset) {
-                return preset.selectedDate ? normalizeDate(preset.options.mode, preset.selectedDate) : null;
+                return preset.selectedDate ? normalizeDate(preset.options, preset.selectedDate) : null;
             },
             setValue: function (preset, date) {
-                preset.selectedDate = date && normalizeDate(preset.options.mode, date);
-                this.invoke(function (tx) {
-                    tx.selection.select(this.element, 'contents');
-                    tx.insertText(date ? formatDate(preset.options.mode, preset.selectedDate) : '');
-                });
-                if (this === activeTyper) {
-                    callout.setValue(preset.selectedDate || new Date());
+                date = date ? normalizeDate(preset.options, date) : null;
+                if ((date && +date) !== (preset.selectedDate && +preset.selectedDate)) {
+                    preset.selectedDate = date;
+                    this.invoke(function (tx) {
+                        tx.selection.select(this.element, 'contents');
+                        tx.insertText(date ? formatDate(preset.options, date) : '');
+                    });
+                    if (this === activeTyper) {
+                        callout.setValue(date || new Date());
+                    }
                 }
             },
             hasContent: function (preset) {
@@ -434,23 +478,35 @@
                 return !preset.options.required || !!preset.selectedDate;
             }
         },
+        commands: {
+            step: function (tx, value) {
+                var options = tx.widget.options;
+                var date = stepDate(options.mode === 'datetime' ? 'minute' : options.mode, tx.typer.getValue() || new Date(), value, options.minuteStep);
+                tx.typer.setValue(date);
+            }
+        },
         contentChange: function (e) {
             if (e.typer === activeTyper && e.data !== 'script') {
                 var date = new Date(e.typer.extractText());
                 if (!isNaN(+date)) {
-                    callout.setValue(normalizeDate(e.widget.options.mode, date));
+                    callout.setValue(normalizeDate(e.widget.options, date));
                 }
             }
         },
+        click: function (e) {
+            if (e.typer === activeTyper) {
+                callout.show(e.typer.element);
+            }
+        },
         mousewheel: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), e.data));
+            e.typer.invoke('step', e.data);
             e.preventDefault();
         },
         upArrow: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), -1));
+            e.typer.invoke('step', -1);
         },
         downArrow: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), 1));
+            e.typer.invoke('step', 1);
         },
         focusin: function (e) {
             if (!callout) {
@@ -462,7 +518,9 @@
             var options = e.widget.options;
             callout.getControl('(type:datepicker)').set({
                 mode: options.mode,
-                minuteStep: options.minuteStep
+                minuteStep: options.minuteStep,
+                min: options.min,
+                max: options.max
             });
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
