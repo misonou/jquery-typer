@@ -1,3 +1,17 @@
+## 0.10.3 / 2017-09-08
+
+- Datepicker control now supports min and max date
+- Control `stateChange` event now propagates up control tree
+- Fix: snapshot does not record selection range correctly (unexpected selection range after undo)
+- Fix: `TyperCaret.getRange` returns selection range outside editable area which will trigger `focusout` event to Typer when applied
+- Fix: orphaned text contents (text nodes under `TyperNode` of type `NODE_EDITABLE`) are not normalized to paragraph
+- Fix: revert IE input event fix to earlier version
+- Fix: UI control execution context
+- Fix: infinite `focusin`/`focusout` loop due to focusing Typer instance and dialog at the same time
+- Fix: `control.set` does not copy `null` or `undefined` values specified in object
+- Fix: incorrect value assigned to textbox after reset
+- Fix: keyword control displays value instead of display text after state change
+
 ## 0.10.2 / 2017-08-30
 
 - Improved text extraction

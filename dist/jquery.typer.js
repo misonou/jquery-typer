@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.10.2
+ * jQuery Typer Plugin v0.10.3
  *
  * The MIT License (MIT)
  *
@@ -843,10 +843,23 @@
                     if (checkEditable(node)) {
                         return;
                     }
-                    if (is(node, NODE_ANY_INLINE) && !is(node.parentNode, NODE_ANY_ALLOWTEXT)) {
-                        $(node.element).wrap('<p>');
+                    if (is(node, NODE_EDITABLE)) {
+                        $(node.element).contents().each(function (i, v) {
+                            if (v.parentNode === node.element) {
+                                var contents = [];
+                                for (; v && (v.nodeType === 3 || tagName(v) === 'br' || is(typerDocument.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                    if (contents.length || v.nodeType === 1 || trim(v.data)) {
+                                        contents.push(v);
+                                    }
+                                }
+                                if (contents.length) {
+                                    $(contents).wrap('<p>');
+                                }
+                            }
+                        });
+                        return;
                     }
-                    if (is(node, NODE_ANY_ALLOWTEXT)) {
+                    if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
                         var lastBr = $('>br:last-child', node.element)[0];
@@ -858,6 +871,8 @@
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
+                    }
+                    if (is(node, NODE_ANY_ALLOWTEXT)) {
                         $('>br', node.element).each(function (i, v) {
                             if (!v.nextSibling || v.nextSibling.nodeType === 1) {
                                 $(createTextNode()).insertAfter(v);
@@ -1128,7 +1143,7 @@
                     lastNode = node;
                     lastWidget = node.widget;
                 }
-                if (!isFunction(widgetOption.text)) {
+                if (is(node, NODE_ANY_ALLOWTEXT) && !isFunction(widgetOption.text)) {
                     if (v.nodeType === 3) {
                         var value = v.nodeValue;
                         if (v === range.endContainer) {
@@ -2300,6 +2315,10 @@
                     this.textNode.nodeValue += ZWSP;
                 }
             }
+            if (!this.textNode && this.element === this.typer.element) {
+                // avoid creating range that is outside the content editable area
+                return createRange(this.element, this.offset ? 0 : -0);
+            }
             return createRange(this.textNode || this.element, this.offset);
         },
         clone: function () {
@@ -2721,6 +2740,7 @@
     var controlExtensions = {};
     var wsDelimCache = {};
     var executionContext = [];
+    var callstack = [];
     var currentPinnedElements = [];
     var currentCallouts = [];
     var currentDialog;
@@ -2799,7 +2819,7 @@
             }
             ctor.apply(this, arguments);
         });
-        var baseFn = function () {};
+        var baseFn = function () { };
         baseFn.prototype = controlExtensions;
         fn.prototype = new baseFn();
         Object.getOwnPropertyNames(base || {}).forEach(function (v) {
@@ -2838,7 +2858,7 @@
         var params = null;
         try {
             params = m[2] && JSON.parse(('{' + m[2] + '}').replace(/([{:,])\s*([^\s:,}]+)/g, '$1"$2"'));
-        } catch (e) {}
+        } catch (e) { }
         return {
             name: m[1],
             params: params || {}
@@ -2992,10 +3012,10 @@
         var holder = matchWSDelim(name, ROOT_EVENTS) ? control.ui : control;
         if (isFunction(holder[name])) {
             try {
-                executionContext.unshift(holder);
+                callstack.unshift(holder);
                 return holder[name](control.ui, control, data);
             } finally {
-                executionContext.shift();
+                callstack.shift();
             }
         }
     }
@@ -3004,10 +3024,10 @@
         var theme = definedThemes[control.ui.theme];
         if (isFunction(theme[name])) {
             try {
-                executionContext.unshift(control);
+                callstack.unshift(control);
                 return theme[name](control.ui, control, data);
             } finally {
-                executionContext.shift();
+                callstack.shift();
             }
         }
     }
@@ -3265,7 +3285,7 @@
         return control.active === true || !!callFunction(control, 'active');
     }
 
-    function updateControl(control) {
+    function updateControl(control, updateParent) {
         var ui = control.ui;
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
@@ -3298,12 +3318,15 @@
         } else {
             toggleDisplay($elm, visible);
         }
+        if (updateParent && control.parent !== control.ui && callstack.indexOf(control.parent) < 0) {
+            updateControl(control.parent);
+        }
     }
 
     function executeControlWithFinal(control, callback, optArg) {
         try {
             callback(control, optArg);
-            if (executionContext[0] !== control) {
+            if (executionContext.indexOf(control) > 0) {
                 return executionContext[0].promise;
             }
         } finally {
@@ -3410,14 +3433,14 @@
                 controls: options
             };
         }
-        if (executionContext[0]) {
-            var parentUI = executionContext[0].ui;
+        var parentControl = callstack[0] || executionContext[0];
+        if (parentControl) {
             $.extend(options, {
-                theme: parentUI.theme,
-                typer: parentUI.typer,
-                widget: parentUI.widget,
-                parent: parentUI,
-                parentControl: parentUI.getExecutingControl()
+                theme: parentControl.ui.theme,
+                typer: parentControl.ui.typer,
+                widget: parentControl.ui.widget,
+                parent: parentControl.ui,
+                parentControl: parentControl
             });
         }
         var self = $.extend(this, options);
@@ -3511,9 +3534,9 @@
             return control;
         },
         getExecutingControl: function () {
-            for (var i = 0, length = executionContext.length; i < length; i++) {
-                if (executionContext[i].ui === this) {
-                    return executionContext[i];
+            for (var i = 0, length = callstack.length; i < length; i++) {
+                if (callstack[i].ui === this) {
+                    return callstack[i];
                 }
             }
         },
@@ -3527,8 +3550,8 @@
         reset: function () {
             var self = this;
             foreachControl(self, function (control) {
-                triggerEvent(control, 'reset');
                 validateControl(control, true);
+                triggerEvent(control, 'reset');
             });
             self.update();
         },
@@ -3728,6 +3751,7 @@
         requireWidget: '',
         requireWidgetEnabled: '',
         showButtonLabel: true,
+        hideCalloutOnExecute: true,
         is: function (type) {
             return matchWSDelim(this.type, type);
         },
@@ -3743,9 +3767,11 @@
             if (isString(prop)) {
                 this[prop] = value;
             } else {
-                $.extend(this, prop);
+                for (var i in prop) {
+                    this[i] = prop[i];
+                }
             }
-            updateControl(this);
+            updateControl(this, true);
         },
         resolve: function (control) {
             return resolveControls(this, control);
@@ -3787,7 +3813,7 @@
                 } else {
                     control.value = value;
                 }
-                updateControl(control);
+                updateControl(control, true);
             }
         }
     });
@@ -3949,10 +3975,7 @@
         button: {},
         file: {},
         textbox: {
-            preset: 'textbox',
-            reset: function (ui, self) {
-                self.value = '';
-            }
+            preset: 'textbox'
         },
         textboxCombo: {
             controls: function (ui, self) {
@@ -4074,7 +4097,7 @@
         });
         $(window).focusin(function (e) {
             if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
-                typerUI.focus(currentDialog.element);
+                setImmediate(typerUI.focus, currentDialog.element);
             }
         });
         $(window).bind('resize scroll orientationchange', function (e) {
@@ -5872,15 +5895,29 @@
         return new Array(count + 1).join(str);
     }
 
+    function sameMonth(x, y) {
+        return getFullYear(x) === getFullYear(y) && getMonth(x) === getMonth(y);
+    }
+
+    function parseMaxima(d) {
+        if (typeof d === 'string' && /^today|([+-]\d+)(day|week|month|year)?$/g.test(d)) {
+            return RegExp.$1 ? stepDate(RegExp.$2 || 'day', new Date(), +RegExp.$1) : new Date();
+        }
+        d = d === null ? undefined : d instanceof Date ? d : new Date(d);
+        return isNaN(d) ? undefined : d;
+    }
+
     function makeTime(h, m) {
         var date = new Date();
         date.setHours(h, m, 0, 0);
         return date;
     }
 
-    function normalizeDate(mode, date) {
-        date = new Date(+date);
-        switch (mode) {
+    function normalizeDate(options, date) {
+        var min = parseMaxima(options.min);
+        var max = parseMaxima(options.max);
+        date = new Date(+(date < min ? min : date > max ? max : date));
+        switch (options.mode || options) {
             case 'week':
                 date.setDate(getDate(date) - date.getDay());
                 break;
@@ -5888,14 +5925,19 @@
                 date.setDate(1);
                 break;
         }
-        if (mode !== 'datetime') {
+        if ((options.mode || options) !== 'datetime') {
             date.setHours(0, 0, 0, 0);
+        } else {
+            date.setSeconds(0, 0);
         }
         return date;
     }
 
-    function stepDate(mode, date, dir) {
+    function stepDate(mode, date, dir, step) {
         switch (mode) {
+            case 'minute':
+                var d = dir / Math.abs(dir);
+                return new Date(+date + 60000 * ((((d > 0 ? step : 0) - (getMinutes(date) % step)) || (step * d)) + (step * (dir - d))));
             case 'day':
                 return new Date(+date + MS_PER_DAY * dir);
             case 'week':
@@ -5907,8 +5949,8 @@
         }
     }
 
-    function formatDate(mode, date) {
-        switch (mode) {
+    function formatDate(options, date) {
+        switch (options.mode) {
             case 'month':
                 return monthstr[getMonth(date)] + ' ' + getFullYear(date);
             case 'week':
@@ -5916,7 +5958,7 @@
                 return monthstr[getMonth(date)] + ' ' + getDate(date) + ' - ' + (getMonth(end) !== getMonth(date) ? monthstr[getMonth(end)] + ' ' : '') + getDate(end) + ', ' + getFullYear(date);
         }
         var monthPart = monthstr[getMonth(date)] + ' ' + getDate(date) + ', ' + getFullYear(date);
-        return mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
+        return options.mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
     }
 
     function initDatepicker() {
@@ -5939,11 +5981,14 @@
         defaultNS: 'calendar',
         controls: '*',
         showButtonLabel: false,
+        mode: 'day',
+        min: null,
+        max: null,
         get value() {
-            return normalizeDate(this.mode, this.selectedDate);
+            return normalizeDate(this, this.selectedDate);
         },
         set value(value) {
-            this.selectedDate = normalizeDate(this.mode, value);
+            this.selectedDate = normalizeDate(this, value);
             this.ui.trigger(this, 'showMonth', this.selectedDate);
         },
         init: function (ui, self) {
@@ -5974,13 +6019,19 @@
             if (typeof date === 'number') {
                 date = stepDate('month', self.currentMonth, date);
             }
-            var y = getFullYear(date);
-            var m = getMonth(date);
-            var currentMonth = new Date(y, m);
+            var min = parseMaxima(self.min);
+            var max = parseMaxima(self.max);
+            var currentMonth = normalizeDate({
+                mode: 'month',
+                min: min,
+                max: max
+            }, date);
             var firstDay = currentMonth.getDay();
-            var $buttons = $('td', self.element).removeClass('selected');
+            var $buttons = $('td', self.element).removeClass('selected disabled');
 
-            if (currentMonth !== self.currentMonth) {
+            if (!self.currentMonth || !sameMonth(currentMonth, self.currentMonth)) {
+                var y = getFullYear(currentMonth);
+                var m = getMonth(currentMonth);
                 var numDays = new Date(y, m + 1, 0).getDate();
                 var numDaysLast = new Date(y, m, 0).getDate();
                 $buttons.removeClass('prev cur next today');
@@ -5994,8 +6045,8 @@
                     }
                 });
                 var today = new Date();
-                if (getFullYear(today) === y && getMonth(today) === m) {
-                    $buttons.filter('.cur').eq(getDate(today) - 1).addClass('today');
+                if (sameMonth(currentMonth, today)) {
+                    $buttons.eq(getDate(today) + firstDay - 1).addClass('today');
                 }
                 $('tr:last', self.element).toggle(firstDay + numDays > 35);
 
@@ -6008,13 +6059,20 @@
                 cm.value = m;
                 self.currentMonth = currentMonth;
             }
-            if (getFullYear(self.value) === y && getMonth(self.value) === m) {
+            if (min && sameMonth(currentMonth, min)) {
+                $buttons.slice(0, getDate(min) + firstDay - 1).addClass('disabled');
+            }
+            if (max && sameMonth(currentMonth, max)) {
+                $buttons.slice(getDate(max) + firstDay).addClass('disabled');
+            }
+            var selected = sameMonth(currentMonth, self.value);
+            if (selected || (self.mode === 'week' && sameMonth(currentMonth, stepDate('day', self.value, 6)))) {
                 switch (self.mode) {
                     case 'day':
                         $buttons.eq(getDate(self.value) + firstDay - 1).addClass('selected');
                         break;
                     case 'week':
-                        $buttons.slice(getDate(self.value) + firstDay - 1, getDate(self.value) + firstDay + 6).addClass('selected');
+                        $buttons.slice(selected ? getDate(self.value) + firstDay - 1 : 0).slice(0, 7).addClass('selected');
                         break;
                     case 'month':
                         $buttons.filter('td.cur').addClass('selected');
@@ -6079,9 +6137,7 @@
             });
             var mousewheelTimeout;
             $(self.element).bind('mousewheel', function (e) {
-                var dir = Typer.ui.getWheelDelta(e);
-                var curM = getMinutes(self.value);
-                self.setValue(makeTime(getHours(self.value), curM + (((dir > 0 ? self.step : 0) - (curM % self.step)) || (self.step * dir))));
+                self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
                 clearImmediate(mousewheelTimeout);
                 mousewheelTimeout = setImmediate(function () {
@@ -6105,6 +6161,8 @@
         renderAs: 'buttonset',
         mode: 'day',
         minuteStep: 1,
+        min: null,
+        max: null,
         controls: [
             Typer.ui.calendar({
                 name: 'calendar'
@@ -6134,7 +6192,11 @@
             this.setValue('clock', value);
         },
         stateChange: function (ui, self) {
-            self.getControl('calendar').set('mode', self.mode === 'datetime' ? 'day' : self.mode);
+            self.getControl('calendar').set({
+                mode: self.mode === 'datetime' ? 'day' : self.mode,
+                min: self.min,
+                max: self.max
+            });
             self.getControl('clock').set('step', self.minuteStep);
         }
     });
@@ -6252,20 +6314,25 @@
         options: {
             mode: 'day',
             minuteStep: 1,
+            min: null,
+            max: null,
             required: false
         },
         overrides: {
             getValue: function (preset) {
-                return preset.selectedDate ? normalizeDate(preset.options.mode, preset.selectedDate) : null;
+                return preset.selectedDate ? normalizeDate(preset.options, preset.selectedDate) : null;
             },
             setValue: function (preset, date) {
-                preset.selectedDate = date && normalizeDate(preset.options.mode, date);
-                this.invoke(function (tx) {
-                    tx.selection.select(this.element, 'contents');
-                    tx.insertText(date ? formatDate(preset.options.mode, preset.selectedDate) : '');
-                });
-                if (this === activeTyper) {
-                    callout.setValue(preset.selectedDate || new Date());
+                date = date ? normalizeDate(preset.options, date) : null;
+                if ((date && +date) !== (preset.selectedDate && +preset.selectedDate)) {
+                    preset.selectedDate = date;
+                    this.invoke(function (tx) {
+                        tx.selection.select(this.element, 'contents');
+                        tx.insertText(date ? formatDate(preset.options, date) : '');
+                    });
+                    if (this === activeTyper) {
+                        callout.setValue(date || new Date());
+                    }
                 }
             },
             hasContent: function (preset) {
@@ -6275,23 +6342,35 @@
                 return !preset.options.required || !!preset.selectedDate;
             }
         },
+        commands: {
+            step: function (tx, value) {
+                var options = tx.widget.options;
+                var date = stepDate(options.mode === 'datetime' ? 'minute' : options.mode, tx.typer.getValue() || new Date(), value, options.minuteStep);
+                tx.typer.setValue(date);
+            }
+        },
         contentChange: function (e) {
             if (e.typer === activeTyper && e.data !== 'script') {
                 var date = new Date(e.typer.extractText());
                 if (!isNaN(+date)) {
-                    callout.setValue(normalizeDate(e.widget.options.mode, date));
+                    callout.setValue(normalizeDate(e.widget.options, date));
                 }
             }
         },
+        click: function (e) {
+            if (e.typer === activeTyper) {
+                callout.show(e.typer.element);
+            }
+        },
         mousewheel: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), e.data));
+            e.typer.invoke('step', e.data);
             e.preventDefault();
         },
         upArrow: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), -1));
+            e.typer.invoke('step', -1);
         },
         downArrow: function (e) {
-            e.typer.setValue(stepDate(e.widget.options.mode, e.typer.getValue(), 1));
+            e.typer.invoke('step', 1);
         },
         focusin: function (e) {
             if (!callout) {
@@ -6303,16 +6382,18 @@
             var options = e.widget.options;
             callout.getControl('(type:datepicker)').set({
                 mode: options.mode,
-                minuteStep: options.minuteStep
+                minuteStep: options.minuteStep,
+                min: options.min,
+                max: options.max
             });
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
         },
         focusout: function (e) {
             if (e.typer === activeTyper) {
-                e.typer.setValue(callout.getValue());
+                activeTyper = null;
+                callout.hide();
             }
-            callout.hide();
         }
     };
 
@@ -6326,6 +6407,19 @@
             b = document.createElement('div');
         b.appendChild(a);
         return b.innerHTML;
+    }
+
+    function valueChanged(x, y) {
+        var hash = {};
+        x.forEach(function (v) {
+            hash[v] = true;
+        });
+        y.forEach(function (v) {
+            delete hash[v];
+        });
+        for (var i in hash) {
+            return true;
+        }
     }
 
     function fuzzyMatch(haystack, needle) {
@@ -6387,6 +6481,61 @@
         return suggestions.slice(0, count);
     }
 
+    function showSuggestions(preset) {
+        var value = preset.typer.extractText();
+        var suggestions = preset.options.suggestions || preset.options.allowedValues || [];
+        if ($.isFunction(suggestions)) {
+            suggestions = suggestions(value);
+        }
+        $.when(suggestions).done(function (suggestions) {
+            suggestions = suggestions.map(function (v) {
+                if (typeof v === 'string') {
+                    return {
+                        value: v,
+                        displayText: v
+                    };
+                }
+                return v;
+            });
+            suggestions.forEach(function (v) {
+                preset.knownValues[v.value] = v.displayText;
+            });
+
+            var currentValues = preset.typer.getValue();
+            suggestions = suggestions.filter(function (v) {
+                return currentValues.indexOf(v.value) < 0;
+            });
+            suggestions = processSuggestions(suggestions, value, preset.options.suggestionCount);
+            if (value && preset.options.allowFreeInput) {
+                suggestions.push({
+                    value: value,
+                    displayText: value,
+                    formattedText: '<i>' + encode(value) + '</i>'
+                });
+            }
+            preset.suggestions = suggestions;
+
+            var html;
+            if (suggestions.length) {
+                html = '<button>' + suggestions.map(function (v) {
+                    return v.formattedText;
+                }).join('</button><button>') + '</button>';
+            } else {
+                html = '<button class="disabled">No suggestions</button>';
+            }
+            $('.typer-ui-buttonlist', preset.callout.element).html(html);
+        });
+        setTimeout(function () {
+            if (preset.typer.focused()) {
+                preset.callout.show(preset.typer.element);
+            }
+        });
+    }
+
+    function validate(preset, value) {
+        return (preset.options.allowFreeInput || preset.knownValues[value]) && preset.options.validate(value);
+    }
+
     Typer.presets.keyword = {
         options: {
             required: false,
@@ -6405,16 +6554,18 @@
                 }).get();
             },
             setValue: function (preset, values) {
-                this.invoke(function (tx) {
-                    var add = tx.typer.invoke.bind(tx.typer, 'add');
-                    tx.selection.select(tx.typer.element, 'contents');
-                    tx.insertText('');
-                    if ($.isArray(values)) {
-                        $.map(values, add);
-                    } else {
-                        String(values).replace(/\S+/g, add);
-                    }
+                values = ($.isArray(values) ? values : String(values).split(/\s+/)).filter(function (v) {
+                    return v;
                 });
+                if (valueChanged(values, this.getValue())) {
+                    this.invoke(function (tx) {
+                        tx.selection.select(tx.typer.element, 'contents');
+                        tx.insertText('');
+                        values.forEach(function (v) {
+                            tx.typer.invoke('add', v);
+                        });
+                    });
+                }
             },
             hasContent: function () {
                 return !!($('span', this.element)[0] || this.extractText());
@@ -6450,12 +6601,9 @@
                 if (typeof value === 'string') {
                     value = {
                         value: value,
-                        displayText: value
+                        displayText: tx.widget.knownValues[value] || value
                     };
                 }
-                // TODO: map display text from previous suggestions
-                // and validate from suggestions
-
                 var lastSpan = $('span:last', tx.typer.element)[0];
                 if (lastSpan) {
                     tx.selection.select(lastSpan, false);
@@ -6466,16 +6614,14 @@
                 lastSpan = $('span:last', tx.typer.element)[0];
                 tx.selection.select(Typer.createRange(lastSpan, false), Typer.createRange(tx.typer.element, -0));
                 tx.insertText('');
-
-                var preset = tx.typer.getStaticWidget('__preset__');
-                if ((!preset.options.allowFreeInput && preset.allowedValues.indexOf(value.value) < 0) || !preset.options.validate(value.value)) {
+                if (!validate(tx.widget, value.value)) {
                     $(lastSpan).addClass('invalid');
                 }
             }
         },
         init: function (e) {
             e.typer.getSelection().moveToText(e.typer.element, -0);
-            e.widget.allowedValues = [];
+            e.widget.knownValues = {};
             e.widget.suggestions = [];
             e.widget.callout = Typer.ui({
                 type: 'contextmenu',
@@ -6484,19 +6630,19 @@
             $(e.widget.callout.element).on('click', 'button', function (e2) {
                 e.typer.invoke('add', e.widget.suggestions[$(this).index()]);
                 e.typer.getSelection().focus();
-                e.widget.callout.hide();
+                showSuggestions(e.widget);
             });
         },
         click: function (e) {
             e.widget.selectedIndex = -1;
         },
+        focusin: function (e) {
+            showSuggestions(e.widget);
+        },
         focusout: function (e) {
             e.widget.selectedIndex = -1;
             e.widget.callout.hide();
-            var value = Typer.trim(e.typer.extractText());
-            if (value && e.widget.options.validate(value)) {
-                e.typer.invoke('add', value);
-            }
+            e.typer.invoke('add', e.typer.extractText());
         },
         upArrow: function (e) {
             if (e.widget.selectedIndex >= 0) {
@@ -6513,10 +6659,7 @@
                 e.typer.invoke('add', e.widget.suggestions[e.widget.selectedIndex]);
                 e.widget.selectedIndex = -1;
             } else {
-                var value = Typer.trim(e.typer.extractText());
-                if (value && e.widget.options.validate(value)) {
-                    e.typer.invoke('add', value);
-                }
+                e.typer.invoke('add', e.typer.extractText());
             }
         },
         keystroke: function (e) {
@@ -6528,56 +6671,7 @@
         },
         contentChange: function (e) {
             if (e.data === 'textInput' || e.data === 'keystroke') {
-                var value = Typer.trim(e.typer.extractText());
-                var suggestions = e.widget.options.suggestions || e.widget.options.allowedValues || [];
-                if ($.isFunction(suggestions)) {
-                    suggestions = suggestions(value);
-                }
-                $.when(suggestions).done(function (suggestions) {
-                    suggestions = suggestions.map(function (v) {
-                        if (typeof v === 'string') {
-                            return {
-                                value: v,
-                                displayText: v
-                            };
-                        }
-                        return v;
-                    });
-                    suggestions.forEach(function (v) {
-                        if (e.widget.allowedValues.indexOf(v.value) <= 0) {
-                            e.widget.allowedValues.push(v.value);
-                        }
-                    });
-
-                    var currentValues = e.typer.getValue();
-                    suggestions = suggestions.filter(function (v) {
-                        return currentValues.indexOf(v.value) < 0;
-                    });
-                    suggestions = processSuggestions(suggestions, value, e.widget.options.suggestionCount);
-                    if (value && e.widget.options.allowFreeInput) {
-                        suggestions.push({
-                            value: value,
-                            displayText: value,
-                            formattedText: '<i>' + encode(value) + '</i>'
-                        });
-                    }
-                    e.widget.suggestions = suggestions;
-
-                    var html;
-                    if (suggestions.length) {
-                        html = '<button>' + suggestions.map(function (v) {
-                            return v.formattedText;
-                        }).join('</button><button>') + '</button>';
-                    } else {
-                        html = '<button class="disabled">No suggestions</button>';
-                    }
-                    $('.typer-ui-buttonlist', e.widget.callout.element).html(html);
-                });
-                setTimeout(function () {
-                    if (e.typer.focused()) {
-                        e.widget.callout.show(e.typer.element);
-                    }
-                });
+                showSuggestions(e.widget);
             }
         }
     };
@@ -6811,10 +6905,10 @@
             var editable = $('[contenteditable]', control.element)[0];
             control.preset = Typer.preset(editable, control.preset, $.extend({}, control.presetOptions, {
                 focusin: function (e) {
-                    $(control.element).closest('.typer-ui-textbox').addClass('focused');
+                    $(control.element).addClass('focused');
                 },
                 focusout: function (e) {
-                    $(control.element).closest('.typer-ui-textbox').removeClass('focused');
+                    $(control.element).removeClass('focused');
                 },
                 stateChange: function (e) {
                     var topElement = e.typer.element;
@@ -6831,7 +6925,7 @@
                 },
                 contentChange: function (e) {
                     control.value = control.preset.getValue();
-                    $(control.element).toggleClass('empty', !control.preset.hasContent()).removeClass('error');
+                    $(control.element).toggleClass('empty', !control.preset.hasContent());
                     if (e.typer.focused()) {
                         ui.execute(control);
                     }
@@ -6848,6 +6942,10 @@
         },
         textboxStateChange: function (ui, control) {
             control.preset.setValue(control.value || '');
+        },
+        textboxReset: function (ui, control) {
+            control.preset.setValue('');
+            control.value = control.preset.getValue();
         },
         dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
         dialogOpen: function (ui, control) {
@@ -6919,7 +7017,7 @@
             });
         },
         executed: function (ui, control) {
-            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu')) {
+            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu') && control.contextualParent.hideCalloutOnExecute !== false) {
                 ui.hide(control.contextualParent);
             }
         }
