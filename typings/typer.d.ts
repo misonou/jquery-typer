@@ -15,11 +15,13 @@ declare enum TyperNodeType {
     NODE_SHOW_EDITABLE = 4096,
 }
 
-interface Map<T> {
+interface Dictionary<T> {
     [name: string]: T;
 }
 
 interface Iterator<T> {
+    previousNode(): T;
+    nextNode(): T;
 }
 
 interface Callback<T> {
@@ -32,23 +34,6 @@ interface TyperEventHandler<T extends TyperEvent> {
 
 interface TyperCommand {
     (tx: TyperTransaction, value?: any): any;
-}
-
-interface TyperDocument {
-    getNode(node: Node): TyperNode;
-    getEditableNode(node: Node): TyperNode;
-}
-
-interface TyperUndoable {
-    undo(): void;
-    redo(): void;
-    canUndo(): boolean;
-    canRedo(): boolean;
-    snapshot(milliseconds: number | boolean): void;
-}
-
-interface TyperRangeable {
-    getRange(): Range;
 }
 
 interface TyperEvent {
@@ -67,62 +52,99 @@ interface TyperDefaultPreventableEvent extends TyperEvent {
     isDefaultPrevented(): boolean;
 }
 
-interface TyperEventReceiver extends Map<TyperEventHandler<TyperEvent>> {
+interface TyperEventReceiver extends Dictionary<TyperEventHandler<TyperEvent>> {
     init?: TyperEventHandler<TyperEvent>;
     destroy?: TyperEventHandler<TyperEvent>;
-    change?: TyperEventHandler<TyperEvent>;
     beforeStateChange?: TyperEventHandler<TyperEvent>;
     stateChange?: TyperEventHandler<TyperEvent>;
+    contentChange?: TyperEventHandler<TyperEvent>;
     focusin?: TyperEventHandler<TyperEvent>;
     focusout?: TyperEventHandler<TyperEvent>;
     keystroke?: TyperEventHandler<TyperDefaultPreventableEvent>;
+    textInput?: TyperEventHandler<TyperDefaultPreventableEvent>;
+    click?: TyperEventHandler<TyperDefaultPreventableEvent>;
+    dblclick?: TyperEventHandler<TyperDefaultPreventableEvent>;
+    mousewheel?: TyperEventHandler<TyperDefaultPreventableEvent>;
     widgetInit?: TyperEventHandler<TyperWidgetEvent>;
     widgetDestroy?: TyperEventHandler<TyperWidgetEvent>;
     widgetFocusin?: TyperEventHandler<TyperWidgetEvent>;
     widgetFocusout?: TyperEventHandler<TyperWidgetEvent>;
 }
 
+interface TyperDocument {
+    getNode(node: Node): TyperNode;
+    getEditableNode(node: Node): TyperNode;
+}
+
+interface TyperUndoable {
+    getValue(): any;
+    undo(): void;
+    redo(): void;
+    canUndo(): boolean;
+    canRedo(): boolean;
+    snapshot(milliseconds: number | boolean): void;
+}
+
 interface Typer extends TyperDocument, TyperUndoable {
     readonly element: Element;
 
     hasCommand(commandName: string): boolean;
+    focused(): boolean;
     widgetEnabled(widgetName: string): boolean;
+    getStaticWidget(id: string): TyperWidget | null;
     getStaticWidgets(): TyperWidget[];
     getSelection(): TyperSelection;
-    extractText(selection: TyperSelection): string;
+    extractText(selection: Rangeable): string;
     nodeFromPoint(x: number, y: number): TyperNode;
     retainFocus(element: Element): void;
-    invoke(command: string | TyperCommand): void;
+    releaseFocus(element: Element): void;
+    invoke(command: string | TyperCommand, value?: any): void;
 }
 
-interface TyperOptions extends Map<any>, TyperEventReceiver {
+interface TyperOptions extends Dictionary<any>, TyperEventReceiver {
     element: Element;
     inline?: boolean;
-    defaultOptions?: boolean;
     disallowedElement?: string;
-    historyLevel?: number;
     widgets?: TyperWidgetDefinition[];
+}
+
+interface TyperTransaction {
+    readonly typer: Typer;
+    readonly selection: TyperSelection;
+    readonly widget: TyperWidget;
+
+    insertText(text: string): void;
+    insertHtml(content: string | Node): void;
+    insertWidget(name: string, options: Dictionary<any>): void;
+    removeWidget(widget: TyperWidget): void;
+    execCommand(commandName: string, ...args): void;
 }
 
 interface TyperWidget {
     readonly typer: TyperDocument | Typer;
     readonly id: number;
     readonly element: Element;
-    readonly options: Map<any>;
+    readonly options: Dictionary<any>;
 
     remove(): void;
 }
 
-interface TyperWidgetDefinition extends Map<any>, TyperEventReceiver {
+interface TyperWidgetDefinition extends Dictionary<any>, TyperEventReceiver {
     element?: string | Element;
     editable?: string;
     inline?: boolean;
     allowedWidgets?: string;
-    disallowedWidgets?: string;
-    commands?: Map<TyperCommand>;
+    textFlow?: boolean;
+    options?: Dictionary<any>;
+    accept?: 'text' | 'html';
+    commands?: Dictionary<TyperCommand>;
+    text?: (widget: TyperWidget) => string;
+    insert?: (tx: TyperTransaction, options: Dictionary<any>) => void;
+    remove?: 'keepText' | ((tx: TyperTransaction, widget: TyperWidget) => void);
 }
 
-interface TyperWidgetOptions extends Map<any> {
+interface TyperRangeable {
+    getRange(): Range;
 }
 
 interface TyperCaret extends TyperRangeable {
@@ -147,14 +169,22 @@ interface TyperSelection extends TyperRangeable {
     readonly typer: Typer;
     readonly baseCaret: TyperCaret;
     readonly extendCaret: TyperCaret;
+    readonly focusNode: TyperNode;
     readonly direction: number;
     readonly isCaret: boolean;
-    readonly focusNode: TyperNode;
-    readonly timestamp: number;
     readonly isSingleEditable: boolean;
 
-    getCaret(point?: string): TyperCaret;
-    getEditableElements(): Element[];
+    readonly startNode: TyperNode;
+    readonly startElement: Element;
+    readonly startTextNode: Text | null;
+    readonly startOffset: number;
+
+    readonly endNode: TyperNode;
+    readonly endElement: Element;
+    readonly endTextNode: Text | null;
+    readonly endOffset: number;
+
+    getCaret(point?: CaretPoint): TyperCaret;
     getEditableRanges(): Range[];
     getParagraphElements(): Element[];
     getRange(collapse?: boolean): Range;
@@ -164,7 +194,6 @@ interface TyperSelection extends TyperRangeable {
     getWidgets(): TyperWidget[];
 
     createTreeWalker(whatToShow: number, filter?: (node: TyperNode) => NodeFilterResult): TyperTreeWalker;
-    createDOMNodeIterator(whatToShow: number, filter?: (node: Node) => NodeFilterResult): TyperDOMNodeIterator;
 
     select(mode: SelectMode): boolean;
     select(range: TyperRangeable): boolean;
@@ -180,20 +209,10 @@ interface TyperSelection extends TyperRangeable {
     moveByWord(direction: number): boolean;
     moveByCharacter(direction: number): boolean;
 
+    selectAll(): boolean;
+    collapse(point?: CaretPoint): boolean;
     focus(): void;
     clone(): TyperSelection;
-}
-
-interface TyperTransaction {
-    readonly typer: Typer;
-    readonly selection: TyperSelection;
-    readonly widget: TyperWidget;
-
-    insertText(text: string): void;
-    insertHtml(content: string | Node): void;
-    insertWidget(name: string, options: TyperWidgetOptions): void;
-    removeWidget(widget: TyperWidget): void;
-    execCommand(commandName: string, ...args): void;
 }
 
 interface TyperNode {
@@ -238,13 +257,19 @@ interface TyperStatic {
     readonly NODE_INLINE_WIDGET: TyperNodeType;
     readonly NODE_INLINE_EDITABLE: TyperNodeType;
     readonly NODE_SHOW_EDITABLE: TyperNodeType;
+    readonly NODE_ANY_ALLOWTEXT: TyperNodeType,
+    readonly NODE_ANY_BLOCK_EDITABLE: TyperNodeType,
+    readonly NODE_ANY_INLINE: TyperNodeType,
     readonly ZWSP: string;
     readonly ZWSP_ENTITY: string;
 
-    new (options: TyperOptions): Typer;
+    new(options: TyperOptions): Typer;
 
-    widgets: Map<TyperWidgetDefinition>;
-    defaultOptions: TyperOptions;
+    readonly widgets: Dictionary<TyperWidgetDefinition>;
+    readonly presets: Dictionary<TyperOptions>;
+    readonly defaultOptions: TyperOptions;
+    readonly ui: TyperUIStatic;
+    historyLevel: number;
 
     iterate<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): void;
     iterateToArray<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): any[];
@@ -256,17 +281,193 @@ interface TyperStatic {
     rangeCovers(a: Rangeable, b: Rangeable): boolean;
     rangeEquals(a: Rangeable, b: Rangeable): boolean;
     rectEquals(a: ClientRect, b: ClientRect): boolean;
+    rectCovers(a: ClientRect, b: ClientRect): boolean;
+    pointInRect(x: number, y: number, b: ClientRect): boolean;
     caretRangeFromPoint(x: number, y: number, within?: Element): Range;
     createElement(tagName: string): Element;
     createTextNode(nodeValue?: string): Text;
     createDocumentFragment(content: Node | string): DocumentFragment
     trim(str: string): string;
+    is(a: Object, b: Function): Object | false;
+    is(a: TyperNode, b: TyperNodeType): TyperNode | false;
+    is(a: Element, b: string): Element | false;
 
     createRange(range: TyperRangeable): Range;
     createRange(startNode: Node, collapse?: boolean): Range;
     createRange(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): Range;
     createRange(range: Range, collapse?: boolean): Range;
     createRange(start: Range, end: Range): Range;
+
+    preset(element: Element, name: string, options: TyperOptions): Typer;
+}
+
+type Direction = 'left' | 'top' | 'right' | 'bottom';
+
+interface Origin {
+    readonly percentX: number;
+    readonly percentY: number;
+    readonly offsetX: number;
+    readonly offsetY: number;
+}
+
+type TyperControlEventHandler = (ui: TyperUI, control: TyperControl, data: any) => void;
+type TyperControlStateHandler = (ui: TyperUI, control: TyperControl) => boolean;
+type TyperControlBinder = (ui: TyperUI, control: TyperControl, value: any) => any;
+
+interface TyperControl {
+    readonly name: string;
+    readonly type: string;
+    readonly controls: TyperControl[];
+
+    is(type: string): boolean;
+    parentOf(control: TyperControl): boolean;
+    resolve(control: string): TyperControl[];
+    resolveOne(control: string): TyperControl | null;
+    set(prop: string, value: any): void;
+    set(value: any): void;
+    getValue(): any;
+    setValue(value: any): void;
+}
+
+interface TyperControlDefinition {
+}
+
+interface TyperControlOptions extends Dictionary<any>, Dictionary<TyperControlEventHandler> {
+    name?: string;
+    icon?: string;
+    label?: string;
+    defaultNS?: string;
+    controls?: string | TyperControlDefinition[] | ((ui: TyperUI, control: TyperControl) => string | TyperControlDefinition[]);
+
+    buttonsetGroup?: 'left' | 'right';
+    hiddenWhenDisabled?: boolean;
+    markdown?: boolean;
+    renderAs?: string,
+    requireChildControls?: boolean;
+    requireTyper?: boolean;
+    requireWidget?: string,
+    requireWidgetEnabled?: string,
+    showButtonLabel?: boolean,
+    hideCalloutOnExecute?: boolean,
+
+    init?: TyperControlEventHandler;
+    stateChange?: TyperControlEventHandler;
+    validate?: TyperControlEventHandler;
+    execute?: TyperControlEventHandler;
+    destroy?: TyperControlEventHandler;
+
+    dialog?: (ui: TyperUI, control: TyperControl) => Promise<any> | null;
+    enabled?: boolean | TyperControlStateHandler;
+    visible?: boolean | TyperControlStateHandler;
+    active?: boolean | TyperControlStateHandler;
+}
+
+interface TyperUI {
+    readonly element: Element;
+
+    update(): void;
+    destroy(): void;
+    getControl(element: Element): TyperControl | null;
+    resolve(control: string): TyperControl[];
+    trigger(control: string | TyperControl, event: string, data?: any): void;
+    show(control: string | TyperControl, element: Element, ref: Element, pos: Direction): void;
+    hide(control: string | TyperControl): void;
+    enabled(control: string | TyperControl): boolean;
+    active(control: string | TyperControl): boolean;
+    getIcon(control: TyperControl): string;
+    getLabel(control: TyperControl): string;
+    validate(): boolean;
+    reset(): void;
+    getValue(): any;
+    getValue(control: string | TyperControl): any;
+    setValue(value: any): void;
+    setValue(control: string | TyperControl, value: any): void;
+    set(control: string, prop: string, value: any): void;
+    execute(control: string | TyperControl, value: any): void;
+}
+
+interface TyperUIOptions extends Dictionary<any>, Dictionary<TyperControlEventHandler> {
+    language?: string;
+    theme?: string;
+    controls: string;
+
+    init?: TyperControlEventHandler;
+    executing?: TyperControlEventHandler;
+    executed?: TyperControlEventHandler;
+    cancelled?: TyperControlEventHandler;
+}
+
+interface TyperTheme extends Dictionary<any>, Dictionary<TyperControlEventHandler>, Dictionary<TyperControlBinder> {
+    controlActiveClass: string;
+    controlDisabledClass: string;
+    controlHiddenClass: string;
+    controlPinActiveClass: string;
+    controlErrorClass: string;
+    iconset: string;
+
+    init?: TyperControlEventHandler;
+    executing?: TyperControlEventHandler;
+    executed?: TyperControlEventHandler;
+    cancelled?: TyperControlEventHandler;
+    postValidate?: TyperControlEventHandler;
+    showCallout?: TyperControlEventHandler;
+    afterShow?: TyperControlEventHandler;
+    beforeHide?: TyperControlEventHandler;
+    positionUpdate?: TyperControlEventHandler;
+
+    bind: TyperControlBinder;
+    bindIcon: TyperControlBinder;
+    bindShortcut: TyperControlBinder;
+}
+
+interface TyperUIStatic {
+    (options?: TyperUIOptions): TyperUI;
+    (controls: string, options?: TyperUIOptions): TyperUI;
+
+    readonly controls: Dictionary<TyperControlDefinition>;
+    readonly themes: Dictionary<TyperTheme>;
+    readonly controlExtensions: Dictionary<any>;
+
+    matchWSDelim(needle: string, haystack: string): string | false;
+    getWheelDelta(e: MouseWheelEvent): number;
+    parseOrigin(value: string): Origin;
+    listen(obj: object, prop: string, callback: (obj: object, prop: string, value: any) => void): void;
+
+    getZIndex(element: Element, pseudo?: string): number;
+    getZIndexOver(element: Element): number;
+    setZIndex(element: Element, over: Element): void;
+
+    define(name: string, base?: object, ctor?: Function): Function;
+
+    getShortcut(command: string): string | null;
+    setShortcut(command: string, keystroke: string): void;
+
+    addHook(keystroke: string, hook: Function): void;
+    addControls(values: Dictionary<TyperControlDefinition>): void;
+    addControls(ns: string, values: Dictionary<TyperControlDefinition>): void;
+    addLabels(lang: string, values: Dictionary<string>): void;
+    addLabels(lang: string, ns: string, values: Dictionary<string>): void;
+    addIcons(iconSet: string, values: Dictionary<string>): void;
+    addIcons(iconSet: string, ns: string, values: Dictionary<string>): void;
+
+    pin(control: TyperControl, element: Element, ref: Element, dir: Direction): void;
+    unpin(control: TyperControl): void;
+    focus(element: Element, inputOnly?: boolean): void;
+
+    alert(message): Promise<any>;
+    confirm(message): Promise<any>;
+    prompt(message, value): Promise<any>;
+
+    group(options: TyperControlOptions): TyperControlDefinition;
+    dropdown(options: TyperControlOptions): TyperControlDefinition;
+    callout(options: TyperControlOptions): TyperControlDefinition;
+    label(options: TyperControlOptions): TyperControlDefinition;
+    button(options: TyperControlOptions): TyperControlDefinition;
+    link(options: TyperControlOptions): TyperControlDefinition;
+    file(options: TyperControlOptions): TyperControlDefinition;
+    textbox(options: TyperControlOptions): TyperControlDefinition;
+    checkbox(options: TyperControlOptions): TyperControlDefinition;
+    dialog(options: TyperControlOptions): TyperControlDefinition;
 }
 
 declare module "typer" {

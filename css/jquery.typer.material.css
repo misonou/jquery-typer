@@ -23,6 +23,10 @@
     color: #555;
 }
 
+.typer-ui label a {
+    color: inherit !important;
+}
+
 .typer-ui *:active,
 .typer-ui *:focus {
     outline: none;
@@ -100,6 +104,10 @@
 
 .typer-ui-label .material-icons + span {
     margin-left: 0.5em;
+}
+
+.typer-ui-label p {
+    margin: 0;
 }
 
 .typer-ui-label span:empty {
@@ -506,6 +514,7 @@ label.typer-ui-callout {
 .typer-ui-buttonlist .typer-ui-textbox [contenteditable],
 .typer-ui-buttonset .typer-ui-textbox [contenteditable] {
     white-space: nowrap;
+    overflow: hidden;
 }
 
 .typer-ui-buttonlist .typer-ui-textbox.empty [contenteditable],
@@ -580,7 +589,7 @@ label.typer-ui-callout {
     opacity: 0;
 }
 
-.typer-ui-dialog-wrapper:before {
+.typer-ui-dialog-wrapper.is-modal:before {
     content: '';
     display: block;
     position: fixed;
@@ -1046,6 +1055,7 @@ label.typer-ui-callout {
     border-spacing: 0.5em 0;
     table-layout: fixed;
     font-size: 90%;
+    line-height: 1.2;
 }
 
 .typer-ui-calendar.select-range table {

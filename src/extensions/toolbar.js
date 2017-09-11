@@ -118,6 +118,11 @@
                     y: e.clientY
                 });
             });
+            $(typer.element).bind('click', function (e) {
+                if (e.which === 1)  {
+                    toolbar.hide();
+                }
+            });
         }
         return toolbar;
     }

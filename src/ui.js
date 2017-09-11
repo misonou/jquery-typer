@@ -55,7 +55,7 @@
     var wsDelimCache = {};
     var executionContext = [];
     var callstack = [];
-    var currentPinnedElements = [];
+    var snaps = [];
     var currentCallouts = [];
     var currentDialog;
     var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
@@ -219,16 +219,27 @@
         }
     }
 
+    function toggleClass(element, prefix, values) {
+        var re = new RegExp('\\s*\\b' + prefix + '(-\\S+|\\b)|\\s*$', 'ig');
+        var replacement = values && values[0] ? ' ' + prefix + [''].concat(values).join(' ' + prefix + '-') : '';
+        $(element).attr('class', function (i, v) {
+            var replaced = 0;
+            return (v || '').replace(re, function () {
+                return replaced++ ? '' : replacement;
+            });
+        });
+    }
+
     function updatePinnedPositions() {
         var windowSize = getBoundingClientRect();
 
-        $.each(currentPinnedElements, function (i, v) {
+        $.each(snaps, function (i, v) {
             var dialog = $(v.element).find('.typer-ui-dialog')[0];
             var dialogSize = getBoundingClientRect(dialog);
             var rect = getBoundingClientRect(v.reference);
             var stick = {};
 
-            var $r = $(v.element).css({
+            $(v.element).css({
                 top: rect.top,
                 left: rect.left,
                 width: rect.width,
@@ -278,16 +289,24 @@
                 break;
             }
         }
+
+        var rect = currentCallouts[0];
+        if (!rect || rect.control !== control) {
+            rect = {};
+            currentCallouts.unshift(rect);
+        } else if (rect.promise.state() === 'pending') {
+            return;
+        }
+        rect = $.extend(rect, {
+            control: control,
+            element: element,
+            focusedElement: Typer.is(document.activeElement, SELECTOR_FOCUSABLE)
+        });
+
         $(element).appendTo(document.body).css({
             position: 'fixed',
             zIndex: getZIndexOver(currentCallouts[0] ? currentCallouts[0].element : document.body)
         });
-
-        var rect = {
-            control: control,
-            element: element,
-            focusedElement: Typer.is(document.activeElement, SELECTOR_FOCUSABLE)
-        };
         if (ref.getBoundingClientRect) {
             var xrel = matchWSDelim(pos, 'left right') || 'left';
             var yrel = matchWSDelim(pos, 'top bottom') || 'bottom';
@@ -306,15 +325,11 @@
             left: (rect.left + elmRect.width > winRect.width ? rect.right - elmRect.width : rect.left) + 'px',
             top: (rect.top + elmRect.height > winRect.height ? rect.bottom - elmRect.height : rect.top) + 'px'
         });
-        currentCallouts.unshift(rect);
-        callThemeFunction(control, 'afterShow', rect);
+        rect.promise = $.when(callThemeFunction(control, 'afterShow', rect));
     }
 
     function hideCallout(control) {
-        var i = currentCallouts.length - 1;
-        if (control) {
-            for (; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
-        }
+        for (var i = currentCallouts.length - 1; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
         $.each(currentCallouts.splice(0, i + 1), function (i, v) {
             $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
                 $(v.element).detach();
@@ -322,35 +337,36 @@
         });
     }
 
-    function callFunction(control, name, data) {
-        var holder = matchWSDelim(name, ROOT_EVENTS) ? control.ui : control;
-        if (isFunction(holder[name])) {
-            try {
-                callstack.unshift(holder);
-                return holder[name](control.ui, control, data);
-            } finally {
-                callstack.shift();
-            }
+    function runInContext(control, callback) {
+        try {
+            callstack.unshift(control);
+            return callback();
+        } finally {
+            callstack.shift();
         }
+    }
+
+    function callFunction(control, name, data, optArg, holder) {
+        holder = holder || control;
+        return !isFunction(holder[name]) ? void 0 : runInContext(control, function () {
+            return holder[name](control.ui, control, data, optArg);
+        });
     }
 
     function callThemeFunction(control, name, data) {
-        var theme = definedThemes[control.ui.theme];
-        if (isFunction(theme[name])) {
-            try {
-                callstack.unshift(control);
-                return theme[name](control.ui, control, data);
-            } finally {
-                callstack.shift();
-            }
-        }
+        return callFunction(control, name, data, null, definedThemes[control.ui.theme]);
     }
 
     function triggerEvent(control, name, data) {
-        callFunction(control, name, data);
         if (control.ui === control || matchWSDelim(name, ROOT_EVENTS)) {
+            callFunction(control, name, data, null, control.ui);
             callThemeFunction(control, name, data);
         } else {
+            var proto = control.constructor.prototype;
+            if (control[name] !== proto[name]) {
+                callFunction(control, name, data, null, proto);
+            }
+            callFunction(control, name, data);
             callThemeFunction(control, control.type + capfirst(name), data);
         }
     }
@@ -538,28 +554,11 @@
             return element;
         }
 
-        function executeFromEvent(e) {
-            if ($(e.target).is(':checkbox')) {
-                setImmediate(function () {
-                    ui.execute(control, !!e.target.checked);
-                });
-            } else {
-                ui.execute(control);
-            }
-        }
-
         control.element = replacePlaceholder(control.renderAs || control.type);
-        $(control.element).attr('role', control.name);
+        $(control.element).attr('role', control.name).addClass(control.cssClass).data('typerControl', control);
         $.each(bindedProperties, function (i, v) {
             propertyChanged(i, control[i]);
         });
-
-        var executeEvent = definedThemes[ui.theme][control.type + 'ExecuteOn'];
-        if (isString(executeEvent)) {
-            $(control.element).bind(executeEvent, executeFromEvent);
-        } else if (executeEvent) {
-            $(executeEvent.of, control.element).bind(executeEvent.on, executeFromEvent);
-        }
         return control.element;
     }
 
@@ -599,15 +598,18 @@
         return control.active === true || !!callFunction(control, 'active');
     }
 
-    function updateControl(control, updateParent) {
+    function updateControl(control) {
         var ui = control.ui;
+        var theme = definedThemes[ui.theme];
+        var $elm = $(control.element);
+
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
             control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
             suppressStateChange = !control.widget;
         }
-        if (!suppressStateChange) {
-            if (control.validateOnChange) {
+        if (!suppressStateChange && callstack.indexOf(control, 1) < 0) {
+            if ($elm.hasClass(theme.controlErrorClass)) {
                 validateControl(control);
             }
             triggerEvent(control, 'stateChange');
@@ -616,8 +618,6 @@
         var disabled = !isEnabled(control);
         var visible = (!control.hiddenWhenDisabled || !disabled) && control.visible !== false && callFunction(control, 'visible') !== false;
 
-        var $elm = $(control.element);
-        var theme = definedThemes[ui.theme];
         if ($elm.is(':input')) {
             $elm.prop('disabled', disabled);
         }
@@ -631,9 +631,6 @@
             $elm.toggleClass(theme.controlHiddenClass, !visible);
         } else {
             toggleDisplay($elm, visible);
-        }
-        if (updateParent && control.parent !== control.ui && callstack.indexOf(control.parent) < 0) {
-            updateControl(control.parent);
         }
     }
 
@@ -651,36 +648,37 @@
     }
 
     function executeControl(control) {
-        var ui = control.ui;
-        if (ui.typer) {
+        var typer = control.ui.typer;
+        if (typer) {
             if (isFunction(control.execute)) {
-                ui.typer.invoke(function (tx) {
-                    control.execute(ui, control, tx, control.value);
+                typer.invoke(function (tx) {
+                    callFunction(control, 'execute', tx, control.getValue());
                 });
-            } else if (ui.typer.hasCommand(control.execute)) {
-                ui.typer.invoke(control.execute, control.value);
+            } else if (typer.hasCommand(control.execute)) {
+                typer.invoke(control.execute, control.getValue());
             }
-        } else if (isFunction(control.execute)) {
-            control.execute(ui, control, null, control.value);
+        } else {
+            callFunction(control, 'execute', null, control.getValue());
         }
         triggerEvent(control, 'executed');
     }
 
-    function validateControl(control, reset) {
-        var valid = true;
-        if (!reset && isEnabled(control)) {
-            triggerEvent(control, 'validate', {
-                get isFailed() {
-                    return valid;
-                },
-                fail: function () {
-                    valid = false;
-                }
-            });
-        }
-        control.validateOnChange = !valid;
-        $(control.element).toggleClass(typerUI.themes[control.ui.theme].controlErrorClass, !valid);
-        return valid;
+    function validateControl(control) {
+        var errors = [];
+        var flags = {};
+        callFunction(control, 'validate', function (assertion, type, description) {
+            if (!assertion) {
+                type = type || 'generic';
+                flags[type] = true;
+                errors.push({
+                    type: type,
+                    description: description || ''
+                });
+            }
+        });
+        toggleClass(control.element, definedThemes[control.ui.theme].controlErrorClass, Object.keys(flags));
+        callThemeFunction(control, 'validate', errors);
+        return errors[0] && control;
     }
 
     function foreachControl(control, fn, optArg, fnArg) {
@@ -698,40 +696,35 @@
         var deferred = $.Deferred();
         var execute = function (value, submitControl) {
             if (ui.validate()) {
-                submitControl = submitControl || control.getControl(control.resolveBy);
-                var promise = $.when(isFunction(control.submit) && control.submit(ui, control, submitControl));
+                submitControl = submitControl || ui.resolveOne(control.resolveBy);
+                var promise = $.when(callFunction(control, 'submit', submitControl));
                 if (promise.state() === 'pending') {
-                    ui.trigger(control, 'waiting', submitControl);
+                    triggerEvent(control, 'waiting', submitControl);
                 }
                 promise.done(function (returnValue) {
-                    ui.trigger(control, 'success', returnValue);
+                    triggerEvent(control, 'success', returnValue);
                     deferred.resolve(value);
                 });
                 promise.fail(function (err) {
-                    ui.trigger(control, 'error', err);
+                    triggerEvent(control, 'error', err);
                     typerUI.focus(control.element, true);
                 });
-            } else {
-                ui.trigger(control, 'validateError');
-                typerUI.focus(control.element, true);
             }
         };
         var defaultResolve = function () {
-            var resolveWith = control.getControl(control.resolveWith) || control;
-            execute(ui.getValue(resolveWith), this);
+            var resolveWith = ui.resolveOne(control.resolveWith) || control;
+            execute(resolveWith.getValue(), this);
         };
         var defaultReject = function () {
             deferred.reject();
         };
-        $.each(control.resolve(control.resolveBy), function (i, v) {
+        control.resolve(control.resolveBy).forEach(function (v) {
             v.execute = defaultResolve;
         });
-        $.each(control.resolve(control.rejectBy), function (i, v) {
+        control.resolve(control.rejectBy).forEach(function (v) {
             v.execute = defaultReject;
         });
-        if (isFunction(control.setup)) {
-            control.setup(ui, control, execute, defaultReject);
-        }
+        callFunction(control, 'setup', execute, defaultReject);
         return {
             promise: deferred.promise(),
             resolve: defaultResolve,
@@ -739,9 +732,11 @@
         };
     }
 
-    var typerUI = Typer.ui = define('TyperUI', {
-        language: 'en'
-    }, function (options, values) {
+    function resolveControlParam(ui, control) {
+        return isString(control) ? ui.resolveOne(control) : control || ui.controls[0];
+    }
+
+    var typerUI = Typer.ui = define('TyperUI', null, function (options, values) {
         if (isString(options)) {
             options = {
                 controls: options
@@ -780,6 +775,7 @@
     });
 
     $.extend(typerUI.prototype, {
+        language: 'en',
         update: function () {
             var self = this;
             self._widgets = {};
@@ -793,43 +789,47 @@
             foreachControl(this, updateControl);
         },
         destroy: function () {
-            foreachControl(this, triggerEvent, 'destroy');
+            var self = this;
+            foreachControl(self, triggerEvent, 'destroy');
+            for (var i = snaps.length - 1; i >= 0; i--) {
+                if (snaps[i].control.ui === self) {
+                    $(snaps.splice(i, 1)[0].reference).removeClass(definedThemes[self.theme].controlPinActiveClass);
+                }
+            }
+            $(self.element).remove();
+        },
+        getControl: function (element) {
+            var parents = $(element).parents('[role]').addBack('[role]').get().reverse();
+            return $.map(parents, function (v) {
+                return $(v).data('typerControl');
+            })[0];
         },
         resolve: function (control) {
-            return resolveControls(this.getExecutingControl() || this, control);
+            var cur = callstack[0];
+            return resolveControls(cur && cur.ui === this ? cur : this, control);
         },
         trigger: function (control, event, data) {
-            if (isString(control)) {
-                control = this.getControl(control) || {};
-            }
+            control = resolveControlParam(this, control);
             triggerEvent(control, event, data);
         },
         show: function (control, element, ref, pos) {
-            if (isString(control)) {
-                control = this.getControl(control) || {};
-            }
-            if (control.ui === this) {
-                showCallout(control, element, ref, pos);
-            } else {
+            if (!control || control.ui !== this) {
                 showCallout(this, this.element, control, element);
+            } else {
+                control = resolveControlParam(this, control);
+                showCallout(control, element, ref, pos);
             }
         },
         hide: function (control) {
-            if (isString(control)) {
-                control = this.getControl(control) || {};
-            }
-            hideCallout(control || this);
+            control = control === undefined ? this : resolveControlParam(this, control);
+            return control && hideCallout(control);
         },
         enabled: function (control) {
-            if (isString(control)) {
-                control = this.getControl(control);
-            }
+            control = resolveControlParam(this, control);
             return control && isEnabled(control);
         },
         active: function (control) {
-            if (isString(control)) {
-                control = this.getControl(control);
-            }
+            control = resolveControlParam(this, control);
             return control && isActive(control);
         },
         getIcon: function (control) {
@@ -847,46 +847,56 @@
             }
             return control;
         },
-        getExecutingControl: function () {
-            for (var i = 0, length = callstack.length; i < length; i++) {
-                if (callstack[i].ui === this) {
-                    return callstack[i];
-                }
-            }
-        },
         validate: function () {
-            var failed;
+            var failed, cur;
             foreachControl(this, function (control) {
-                failed |= !validateControl(control);
+                failed = (control.validate && isEnabled(control) && (cur = validateControl(control)), (failed || cur));
             });
+            if (failed) {
+                typerUI.focus(failed.element, true);
+            }
             return !failed;
         },
         reset: function () {
             var self = this;
+            var theme = definedThemes[self.theme];
             foreachControl(self, function (control) {
-                validateControl(control, true);
+                if (control.validate) {
+                    toggleClass(control.element, theme.controlErrorClass);
+                }
                 triggerEvent(control, 'reset');
             });
             self.update();
         },
-        execute: function (control, value) {
-            var self = this;
-            if (isString(control)) {
-                control = self.getControl(control);
-            } else if (!control) {
-                control = self.controls[0];
+        getValue: function (control) {
+            control = resolveControlParam(this, control);
+            return control && control.getValue();
+        },
+        setValue: function (control, value) {
+            if (arguments.length < 2) {
+                return this.setValue(this.controls[0], control);
             }
+            control = resolveControlParam(this, control);
+            return control && control.setValue(value);
+        },
+        set: function (control, prop, value) {
+            this.resolve(control).forEach(function (v) {
+                v.set(prop, value);
+            });
+        },
+        execute: function (control, value) {
+            control = resolveControlParam(this, control);
             if (control && executionContext.indexOf(control) < 0 && isEnabled(control)) {
                 if (value !== undefined) {
-                    self.setValue(control, value);
+                    control.setValue(value);
                 }
                 executionContext.unshift(control);
                 triggerEvent(control, 'executing');
                 if (isFunction(control.dialog)) {
-                    var promise = control.promise = $.when(control.dialog(self, control));
+                    var promise = control.promise = $.when(callFunction(control, 'dialog'));
                     promise.done(function (value) {
                         executeControlWithFinal(control, function () {
-                            self.setValue(control, value);
+                            control.setValue(value);
                             executeControl(control);
                         });
                     });
@@ -999,22 +1009,17 @@
                 element.style.position = 'relative';
             }
         },
-        pin: function (control, element, reference, direction) {
-            currentPinnedElements.push({
+        pin: function (control, reference, direction) {
+            var theme = definedThemes[control.ui.theme];
+            snaps.push({
                 control: control,
-                element: element,
+                element: control.element,
                 reference: reference,
                 direction: direction
             });
+            toggleClass(control.element, theme.controlPinnedClass, [direction]);
+            $(reference).addClass(theme.controlPinActiveClass);
             updatePinnedPositions();
-        },
-        unpin: function (control) {
-            $.each(currentPinnedElements, function (i, v) {
-                if (v.control === control) {
-                    currentPinnedElements.splice(i, 1);
-                    return false;
-                }
-            });
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
@@ -1037,6 +1042,11 @@
                 input: value
             }).execute();
         },
+        hint: function (message) {
+            return typerUI('dialog:hint', {
+                message: message
+            }).execute();
+        },
         getWheelDelta: function (e) {
             e = e.originalEvent || e;
             var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
@@ -1057,6 +1067,7 @@
 
     $.extend(controlExtensions, {
         buttonsetGroup: 'left',
+        cssClass: '',
         hiddenWhenDisabled: false,
         markdown: false,
         renderAs: '',
@@ -1077,58 +1088,50 @@
             }
             return false;
         },
-        set: function (prop, value) {
-            if (isString(prop)) {
-                this[prop] = value;
-            } else {
-                for (var i in prop) {
-                    this[i] = prop[i];
-                }
-            }
-            updateControl(this, true);
-        },
         resolve: function (control) {
             return resolveControls(this, control);
         },
-        getControl: function (control) {
+        resolveOne: function (control) {
             return this.resolve(control)[0];
         },
-        getValue: function (control) {
+        set: function (prop, value) {
             var self = this;
-            if (isString(control)) {
-                control = self.getControl(control);
-            } else if (!control || !Typer.is(control.ui, typerUI)) {
-                control = self === self.ui ? self.controls[0] : self;
-            }
-            if (control) {
-                if (!control.valueMap) {
-                    return control.value;
+            runInContext(self, function () {
+                if (isString(prop)) {
+                    self[prop] = value;
+                } else {
+                    for (var i in prop) {
+                        self[i] = prop[i];
+                    }
                 }
-                var value = {};
-                $.each(control.valueMap, function (i, v) {
-                    value[i] = control.getValue(v);
-                });
-                return value;
-            }
+            });
+            updateControl(self);
         },
-        setValue: function (control, value) {
+        getValue: function () {
             var self = this;
-            if (isString(control)) {
-                control = self.getControl(control);
-            } else if (control === undefined || control === null || !Typer.is(control.ui, typerUI)) {
-                value = control;
-                control = self === self.ui ? self.controls[0] : self;
-            }
-            if (control) {
-                if (control.valueMap) {
-                    $.each(value || {}, function (i, v) {
-                        control.setValue(control.valueMap[i], v);
+            return runInContext(self, function () {
+                if (self.valueMap) {
+                    var value = {};
+                    $.each(self.valueMap, function (i, v) {
+                        value[i] = self.ui.getValue(v);
+                    });
+                    return value;
+                }
+                return self.value;
+            });
+        },
+        setValue: function (value) {
+            var self = this;
+            runInContext(self, function () {
+                if (self.valueMap) {
+                    $.each(self.valueMap, function (i, v) {
+                        self.ui.setValue(v, (value || '')[i]);
                     });
                 } else {
-                    control.value = value;
+                    self.value = value;
                 }
-                updateControl(control, true);
-            }
+            });
+            updateControl(self);
         }
     });
 
@@ -1136,6 +1139,7 @@
     typerUI.themeExtensions = typerUI.theme.prototype;
 
     $.extend(typerUI.themeExtensions, {
+        textboxPresetOptions: null,
         bind: function (ui, control, value) {
             value = ui.getLabel(value) || '';
             if (control.markdown) {
@@ -1237,10 +1241,8 @@
                     }
                 }
             },
-            validate: function (ui, self, opt) {
-                if (!self.allowEmpty && self.selectedIndex < 0) {
-                    opt.fail();
-                }
+            validate: function (ui, self, assert) {
+                assert(self.allowEmpty || self.selectedIndex >= 0, 'required');
             },
             reset: function (ui, self) {
                 self.value = self.defaultEmpty ? '' : (self.resolve(self.optionFilter).filter(isEnabled)[0] || '').value;
@@ -1249,13 +1251,6 @@
         callout: {
             allowButtonMode: false,
             controls: '*',
-            init: function (ui, self) {
-                $(self.element).click(function () {
-                    if (isEnabled(self) && (!self.allowButtonMode || self.resolve('*:*').filter(isEnabled).length > 1)) {
-                        callThemeFunction(self, 'showCallout');
-                    }
-                });
-            },
             stateChange: function (ui, self) {
                 if (self.allowButtonMode) {
                     var enabled = self.resolve('*:*').filter(isEnabled);
@@ -1274,8 +1269,10 @@
                     var enabled = self.resolve('*:*').filter(isEnabled);
                     if (enabled.length === 1) {
                         ui.execute(enabled[0]);
+                        return;
                     }
                 }
+                callThemeFunction(self, 'showCallout');
             }
         },
         label: {
@@ -1287,32 +1284,49 @@
             }
         },
         button: {},
+        link: {},
         file: {},
         textbox: {
-            preset: 'textbox'
-        },
-        textboxCombo: {
-            controls: function (ui, self) {
-                var controls = [];
-                self.valueMap = {};
-                (self.format || '').replace(/\{([^}]+)\}|[^{]+/g, function (v, property) {
-                    var control = property ? typerUI.textbox(self[property]) : typerUI.label(v);
-                    control.name = self.name + ':' + (property || randomId());
-                    controls.push(control);
-                    if (property) {
-                        self.valueMap[property] = control.name;
+            preset: 'textbox',
+            get value() {
+                return this.preset.getValue();
+            },
+            set value(value) {
+                this.preset.setValue(value);
+            },
+            validate: function (ui, self, assert) {
+                self.preset.validate(assert);
+            },
+            reset: function (ui, self) {
+                self.preset.setValue('');
+            },
+            init: function (ui, self) {
+                var editable = $(definedThemes[ui.theme].textboxElement, self.element)[0];
+                var presetOptions = $.extend({}, definedThemes[ui.theme].textboxPresetOptions, self.presetOptions, {
+                    contentChange: function (e) {
+                        validateControl(self);
+                        if (e.typer.focused()) {
+                            ui.execute(self);
+                        }
                     }
                 });
-                return controls;
+                self.preset = Typer.preset(editable, self.preset, presetOptions);
+                self.preset.parentControl = self;
+                self.presetOptions = self.preset.getStaticWidget('__preset__').options;
             }
         },
         checkbox: {
+            required: false,
+            validate: function (ui, self, assert) {
+                assert(!self.required || self.value, 'required');
+            },
             reset: function (ui, self) {
                 self.value = false;
             }
         },
         dialog: {
             pinnable: false,
+            modal: true,
             keyboardResolve: true,
             keyboardReject: true,
             resolveBy: 'dialog:buttonOK',
@@ -1321,12 +1335,25 @@
                 var previousDialog = currentDialog;
                 var previousActiveElement = document.activeElement;
                 var form = createForm(self);
+                var data = {
+                    control: self,
+                    element: self.element
+                };
                 ui.update();
-                ui.trigger(self, 'open');
-                setImmediate(typerUI.focus, self.element);
+                $(ui.element).appendTo(document.body);
+                setImmediate(function () {
+                    var parent = ui.parentControl;
+                    var dir = parent && matchWSDelim(parent.pinDirection || parent.contextualParent.pinDirection || parent.ui.pinDirection, 'left right top bottom');
+                    if (self.pinnable && dir) {
+                        Typer.ui.pin(self, parent.element, dir);
+                    }
+                    callThemeFunction(self, 'afterShow', data);
+                    typerUI.focus(self.element);
+                });
                 form.promise.always(function () {
-                    ui.trigger(self, 'close');
-                    ui.destroy();
+                    $.when(callThemeFunction(self, 'beforeHide', data)).always(function () {
+                        ui.destroy();
+                    });
                     currentDialog = previousDialog;
                     if (previousActiveElement) {
                         previousActiveElement.focus();
@@ -1335,6 +1362,7 @@
                 typerUI.setZIndex(ui.element, document.body);
                 currentDialog = {
                     element: self.element,
+                    clickReject: !self.modal && form.reject,
                     keyboardResolve: self.keyboardResolve && form.resolve,
                     keyboardReject: self.keyboardReject && form.reject
                 };
@@ -1369,6 +1397,12 @@
             defaultNS: 'dialog',
             controls: 'message input buttonset',
             resolveWith: 'input'
+        }),
+        hint: typerUI.dialog({
+            pinnable: true,
+            modal: false,
+            defaultNS: 'dialog',
+            controls: 'message'
         })
     });
 
@@ -1422,6 +1456,9 @@
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
         $(document.body).mousedown(function (e) {
+            if (currentDialog && currentDialog.clickReject && !Typer.containsOrEquals(currentDialog.element, e.target)) {
+                currentDialog.clickReject();
+            }
             $.each(currentCallouts.slice(0), function (i, v) {
                 if (!Typer.containsOrEquals(v.element, e.target) && (!v.focusedElement || !Typer.containsOrEquals(v.focusedElement, e.target))) {
                     hideCallout(v.control);

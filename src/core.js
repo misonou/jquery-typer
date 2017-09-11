@@ -705,7 +705,9 @@
                     nodeMap.set(v, node);
                     if (childOnly && unvisited) {
                         visitElement(v);
-                        fixIE(v);
+                        if (IS_IE) {
+                            fixIE(v);
+                        }
                     }
                     stack.unshift(node);
                 });

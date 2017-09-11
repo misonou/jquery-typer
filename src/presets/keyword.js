@@ -169,12 +169,9 @@
             hasContent: function () {
                 return !!($('span', this.element)[0] || this.extractText());
             },
-            validate: function (preset) {
-                var value = this.getValue();
-                if (preset.options.required && !value.length) {
-                    return false;
-                }
-                return !$('.invalid', this.element)[0];
+            validate: function (preset, assert) {
+                assert(!preset.options.required || this.getValue().length, 'required');
+                assert(!$('.invalid', this.element)[0], 'invalid-value');
             }
         },
         widgets: {

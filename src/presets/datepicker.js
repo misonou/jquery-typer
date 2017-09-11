@@ -186,8 +186,8 @@
                 }
                 $('tr:last', self.element).toggle(firstDay + numDays > 35);
 
-                var cy = self.getControl('year');
-                var cm = self.getControl('month');
+                var cy = ui.resolveOne('year');
+                var cm = ui.resolveOne('month');
                 $.each(cy.controls, function (i, v) {
                     v.label = v.value = y + i - 5;
                 });
@@ -284,10 +284,10 @@
         },
         stateChange: function (ui, self) {
             var date = self.value;
-            self.getControl('minute').presetOptions.step = self.step;
-            self.setValue('hour', getHours(date));
-            self.setValue('minute', getMinutes(date));
-            self.setValue('meridiem', getHours(date) >= 12 ? 'pm' : 'am');
+            ui.resolveOne('minute').presetOptions.step = self.step;
+            ui.setValue('hour', getHours(date));
+            ui.setValue('minute', getMinutes(date));
+            ui.setValue('meridiem', getHours(date) >= 12 ? 'pm' : 'am');
             $('s[hand="h"]', self.element).css('transform', 'rotate(' + (getHours(date) * 30 + getMinutes(date) * 0.5 - 90) + 'deg)');
             $('s[hand="m"]', self.element).css('transform', 'rotate(' + (getMinutes(date) * 6 - 90) + 'deg)');
         }
@@ -312,9 +312,9 @@
             })
         ],
         get value() {
-            var date = new Date(+this.getValue('calendar'));
+            var date = this.ui.getValue('calendar');
             if (this.ui.enabled('clock')) {
-                var time = this.getValue('clock');
+                var time = this.ui.getValue('clock');
                 date.setHours(getHours(time), getMinutes(time), 0, 0);
             }
             return date;
@@ -324,16 +324,16 @@
             if (isNaN(+value)) {
                 value = new Date();
             }
-            this.setValue('calendar', value);
-            this.setValue('clock', value);
+            this.ui.setValue('calendar', value);
+            this.ui.setValue('clock', value);
         },
         stateChange: function (ui, self) {
-            self.getControl('calendar').set({
+            ui.set('calendar', {
                 mode: self.mode === 'datetime' ? 'day' : self.mode,
                 min: self.min,
                 max: self.max
             });
-            self.getControl('clock').set('step', self.minuteStep);
+            ui.set('clock', 'step', self.minuteStep);
         }
     });
 
@@ -459,23 +459,25 @@
                 return preset.selectedDate ? normalizeDate(preset.options, preset.selectedDate) : null;
             },
             setValue: function (preset, date) {
-                date = date ? normalizeDate(preset.options, date) : null;
-                if ((date && +date) !== (preset.selectedDate && +preset.selectedDate)) {
-                    preset.selectedDate = date;
+                preset.selectedDate = date ? normalizeDate(preset.options, date) : null;
+                preset.softSelectedDate = null;
+
+                var text = date ? formatDate(preset.options, preset.selectedDate) : '';
+                if (text !== this.extractText()) {
                     this.invoke(function (tx) {
-                        tx.selection.select(this.element, 'contents');
-                        tx.insertText(date ? formatDate(preset.options, date) : '');
+                        tx.selection.selectAll();
+                        tx.insertText(text);
                     });
                     if (this === activeTyper) {
-                        callout.setValue(date || new Date());
+                        callout.setValue(preset.selectedDate || new Date());
                     }
                 }
             },
             hasContent: function (preset) {
-                return !!preset.selectedDate;
+                return !!this.extractText();
             },
-            validate: function (preset) {
-                return !preset.options.required || !!preset.selectedDate;
+            validate: function (preset, assert) {
+                assert(!preset.options.required || !!preset.selectedDate, 'required');
             }
         },
         commands: {
@@ -491,6 +493,7 @@
                 if (!isNaN(+date)) {
                     callout.setValue(normalizeDate(e.widget.options, date));
                 }
+                e.widget.softSelectedDate = date;
             }
         },
         click: function (e) {
@@ -516,7 +519,7 @@
             activeTyper = e.typer;
 
             var options = e.widget.options;
-            callout.getControl('(type:datepicker)').set({
+            callout.set('(type:datepicker)', {
                 mode: options.mode,
                 minuteStep: options.minuteStep,
                 min: options.min,
@@ -529,6 +532,9 @@
             if (e.typer === activeTyper) {
                 activeTyper = null;
                 callout.hide();
+                if (e.widget.softSelectedDate) {
+                    e.typer.setValue(isNaN(+e.widget.softSelectedDate) ? e.widget.selectedDate : e.widget.softSelectedDate);
+                }
             }
         }
     };

@@ -33,8 +33,8 @@
                 }
                 if (value !== this.extractText()) {
                     this.invoke(function (tx) {
-                        tx.selection.select(this.element, 'contents');
-                        tx.insertText(String(value));
+                        tx.selection.selectAll();
+                        tx.insertText(value);
                     });
                 }
             },

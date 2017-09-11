@@ -109,15 +109,38 @@
             requireWidget: 'link',
             execute: 'unlink'
         }),
-        'link:selectLink:text': Typer.ui.textbox(),
-        'link:selectLink:url': Typer.ui.textbox(),
+        'link:selectLink:text': Typer.ui.textbox({
+            presetOptions: {
+                required: true
+            }
+        }),
+        'link:selectLink:url': Typer.ui.textbox({
+            presetOptions: {
+                required: true
+            }
+        }),
         'link:selectLink:blank': Typer.ui.checkbox(),
+        'link:selectLink:buttonset': Typer.ui.group('dialog:buttonOK dialog:buttonCancel remove', 'buttonset'),
+        'link:selectLink:buttonset:remove': Typer.ui.button({
+            hiddenWhenDisabled: true,
+            buttonsetGroup: 'left',
+            cssClass: 'warn',
+            enabled: function (ui) {
+                return !!ui.parentControl.widget;
+            }
+        }),
         'link:selectLink': Typer.ui.dialog({
-            controls: '* dialog:buttonset',
+            controls: '*',
             valueMap: {
                 text: 'text',
                 href: 'url',
                 blank: 'blank'
+            },
+            setup: function (ui, self, resolve, reject) {
+                self.resolveOne('buttonset').resolveOne('remove').execute = function () {
+                    ui.parentControl.widget.remove();
+                    reject();
+                };
             }
         })
     });
@@ -132,6 +155,7 @@
         'link:selectLink:text': 'Text',
         'link:selectLink:url': 'URL',
         'link:selectLink:blank': 'Open in new window',
+        'link:selectLink:buttonset:remove': 'Remove'
     });
 
     Typer.ui.addIcons('material', 'typer', {

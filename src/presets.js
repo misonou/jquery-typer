@@ -1,6 +1,20 @@
 (function ($, Typer) {
     'use strict';
 
+    function fixTextOverflow(typer) {
+        var topElement = typer.element;
+        var style = window.getComputedStyle(topElement);
+        if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
+            var rect = topElement.getBoundingClientRect();
+            var pos = typer.getSelection().extendCaret.getRange().getBoundingClientRect();
+            if (pos.left - rect.right >= 1) {
+                topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
+            } else if (rect.left - pos.left >= 1) {
+                topElement.style.textIndent = Math.min(0, parseInt(style.textIndent) + (rect.left - pos.left + 5)) + 'px';
+            }
+        }
+    }
+
     Typer.presets = {};
 
     Typer.preset = function (element, name, options) {
@@ -14,6 +28,9 @@
             defaultOptions: false,
             disallowedElement: '*',
             widgets: {},
+            stateChange: function (e) {
+                fixTextOverflow(e.typer);
+            },
             __preset__: $.extend({}, options)
         };
         $.each(preset, function (i, v) {

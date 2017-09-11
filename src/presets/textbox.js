@@ -20,12 +20,8 @@
             hasContent: function () {
                 return !!this.getValue();
             },
-            validate: function (preset) {
-                var value = this.getValue();
-                if (preset.options.required && !value) {
-                    return false;
-                }
-                return true;
+            validate: function (preset, assert) {
+                assert(!preset.options.required || this.getValue(), 'required');
             }
         },
         init: function (e) {
