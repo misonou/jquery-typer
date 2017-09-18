@@ -529,12 +529,14 @@
             callout.show(e.typer.element);
         },
         focusout: function (e) {
-            if (e.typer === activeTyper) {
-                activeTyper = null;
-                callout.hide();
-                if (e.widget.softSelectedDate) {
-                    e.typer.setValue(isNaN(+e.widget.softSelectedDate) ? e.widget.selectedDate : e.widget.softSelectedDate);
+            setImmediate(function () {
+                if (e.typer === activeTyper) {
+                    activeTyper = null;
+                    callout.hide();
                 }
+            });
+            if (e.typer === activeTyper && e.widget.softSelectedDate) {
+                e.typer.setValue(isNaN(+e.widget.softSelectedDate) ? e.widget.selectedDate : e.widget.softSelectedDate);
             }
         }
     };

@@ -295,6 +295,9 @@
             rect = {};
             currentCallouts.unshift(rect);
         } else if (rect.promise.state() === 'pending') {
+            rect.promise.always(function () {
+                showCallout(control, element, ref, pos);
+            });
             return;
         }
         rect = $.extend(rect, {
@@ -330,10 +333,14 @@
 
     function hideCallout(control) {
         for (var i = currentCallouts.length - 1; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
-        $.each(currentCallouts.splice(0, i + 1), function (i, v) {
-            $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
-                $(v.element).detach();
-            });
+        $.each(currentCallouts.slice(0, i + 1), function (i, v) {
+            if (v.promise.state() !== 'pending' && !v.isClosing) {
+                v.isClosing = true;
+                v.promise = $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
+                    currentCallouts.splice(currentCallouts.indexOf(v), 1);
+                    $(v.element).detach();
+                });
+            }
         });
     }
 

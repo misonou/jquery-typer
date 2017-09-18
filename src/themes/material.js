@@ -34,13 +34,15 @@
     }
 
     function runCSSTransition(element, className) {
-        var deferred = $.Deferred();
-        $(element).addClass(className).one(TRANSITION_END, function () {
-            if ($(element).hasClass(className)) {
-                deferred.resolve();
-            }
-        });
-        return deferred.promise();
+        if (!$(element).hasClass(className)) {
+            var deferred = $.Deferred();
+            $(element).addClass(className).one(TRANSITION_END, function () {
+                if ($(element).hasClass(className)) {
+                    deferred.resolve();
+                }
+            });
+            return deferred.promise();
+        }
     }
 
     function detachCallout(control) {
