@@ -2371,12 +2371,20 @@
                 }
             }
             var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
-            iterator.currentNode = this.textNode || this.element;
+            var lastNode = this.textNode || this.element;
+            var lastLength = RegExp.$1.length;
+            iterator.currentNode = lastNode;
             while (iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
                 str = direction < 0 ? iterator.currentNode.nodeValue + str : str + iterator.currentNode.nodeValue;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
+                    // avoid unnecessarily expanding selection over multiple text nodes or elements
+                    if (RegExp.$1.length === lastLength) {
+                        return this.moveToText(lastNode, -direction * 0);
+                    }
                     return this.moveToText(iterator.currentNode, direction * (RegExp.$1.length - (str.length - iterator.currentNode.length)));
                 }
+                lastNode = iterator.currentNode;
+                lastLength = RegExp.$1.length;
             }
             return !matched || !iterator.currentNode ? false : this.moveToText(iterator.currentNode, 0 * -direction);
         },
