@@ -171,6 +171,11 @@
                 var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
                 d.className = className;
                 d.removeAttribute('style');
+                if (css && css.toJSON) {
+                    // Chrome update v61.0 toJSON is enumerable can cause
+                    // illegal invocation exception
+                    css = css.toJSON();
+                }
                 $(d).css(css || '', value);
                 domCount++;
                 return d;

@@ -45,6 +45,10 @@
                 toolbar.position = 'fixed';
             } else if (toolbar.position !== 'fixed') {
                 var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
+                if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+                    // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
+                    return;
+                }
                 position = {
                     position: 'fixed',
                     left: rect.left,
