@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.10.3
+ * jQuery Typer Plugin v0.10.4
  *
  * The MIT License (MIT)
  *
@@ -2397,12 +2397,20 @@
                 }
             }
             var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
-            iterator.currentNode = this.textNode || this.element;
+            var lastNode = this.textNode || this.element;
+            var lastLength = RegExp.$1.length;
+            iterator.currentNode = lastNode;
             while (iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
                 str = direction < 0 ? iterator.currentNode.nodeValue + str : str + iterator.currentNode.nodeValue;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
+                    // avoid unnecessarily expanding selection over multiple text nodes or elements
+                    if (RegExp.$1.length === lastLength) {
+                        return this.moveToText(lastNode, -direction * 0);
+                    }
                     return this.moveToText(iterator.currentNode, direction * (RegExp.$1.length - (str.length - iterator.currentNode.length)));
                 }
+                lastNode = iterator.currentNode;
+                lastLength = RegExp.$1.length;
             }
             return !matched || !iterator.currentNode ? false : this.moveToText(iterator.currentNode, 0 * -direction);
         },
@@ -3000,6 +3008,9 @@
             rect = {};
             currentCallouts.unshift(rect);
         } else if (rect.promise.state() === 'pending') {
+            rect.promise.always(function () {
+                showCallout(control, element, ref, pos);
+            });
             return;
         }
         rect = $.extend(rect, {
@@ -3035,10 +3046,14 @@
 
     function hideCallout(control) {
         for (var i = currentCallouts.length - 1; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
-        $.each(currentCallouts.splice(0, i + 1), function (i, v) {
-            $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
-                $(v.element).detach();
-            });
+        $.each(currentCallouts.slice(0, i + 1), function (i, v) {
+            if (v.promise.state() !== 'pending' && !v.isClosing) {
+                v.isClosing = true;
+                v.promise = $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
+                    currentCallouts.splice(currentCallouts.indexOf(v), 1);
+                    $(v.element).detach();
+                });
+            }
         });
     }
 
@@ -5356,6 +5371,10 @@
                 toolbar.position = 'fixed';
             } else if (toolbar.position !== 'fixed') {
                 var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
+                if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+                    // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
+                    return;
+                }
                 position = {
                     position: 'fixed',
                     left: rect.left,
@@ -5834,6 +5853,11 @@
                 var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
                 d.className = className;
                 d.removeAttribute('style');
+                if (css && css.toJSON) {
+                    // Chrome update v61.0 toJSON is enumerable can cause
+                    // illegal invocation exception
+                    css = css.toJSON();
+                }
                 $(d).css(css || '', value);
                 domCount++;
                 return d;
@@ -6508,12 +6532,14 @@
             callout.show(e.typer.element);
         },
         focusout: function (e) {
-            if (e.typer === activeTyper) {
-                activeTyper = null;
-                callout.hide();
-                if (e.widget.softSelectedDate) {
-                    e.typer.setValue(isNaN(+e.widget.softSelectedDate) ? e.widget.selectedDate : e.widget.softSelectedDate);
+            setImmediate(function () {
+                if (e.typer === activeTyper) {
+                    activeTyper = null;
+                    callout.hide();
                 }
+            });
+            if (e.typer === activeTyper && e.widget.softSelectedDate) {
+                e.typer.setValue(isNaN(+e.widget.softSelectedDate) ? e.widget.selectedDate : e.widget.softSelectedDate);
             }
         }
     };
@@ -6938,13 +6964,15 @@
     }
 
     function runCSSTransition(element, className) {
-        var deferred = $.Deferred();
-        $(element).addClass(className).one(TRANSITION_END, function () {
-            if ($(element).hasClass(className)) {
-                deferred.resolve();
-            }
-        });
-        return deferred.promise();
+        if (!$(element).hasClass(className)) {
+            var deferred = $.Deferred();
+            $(element).addClass(className).one(TRANSITION_END, function () {
+                if ($(element).hasClass(className)) {
+                    deferred.resolve();
+                }
+            });
+            return deferred.promise();
+        }
     }
 
     function detachCallout(control) {

@@ -1,3 +1,15 @@
+## 0.10.4 / 2017-09-21
+
+- Validate event
+- New control type: `link`
+- New extension: `stateclass`
+- New method: `Typer.ui.hint`
+- Update to link extension and datepicker preset
+- UI code refactoring
+- Fix: show/hide callouts with transition or animation
+- Fix: `TyperCaret.moveByWord` avoid unnecessarily expanding selection over multiple text nodes or elements
+- Fix: minor bugs in toolbar and visualizer
+
 ## 0.10.3 / 2017-09-08
 
 - Datepicker control now supports min and max date
