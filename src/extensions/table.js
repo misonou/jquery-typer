@@ -130,7 +130,6 @@
 
     $.extend(Typer.ui.themeExtensions, {
         tableGrid: '<div class="typer-ui-grid"><div class="typer-ui-grid-wrapper"></div><br x:t="label"/></div>',
-        tableGridExecuteOn: 'click',
         tableGridInit: function (toolbar, self) {
             var html = repeat('<div class="typer-ui-grid-row">' + repeat('<div class="typer-ui-grid-cell"></div>', 7) + '</div>', 7);
             $(self.element).find('.typer-ui-grid-wrapper').append(html);
@@ -143,6 +142,9 @@
             });
             self.label = '0 \u00d7 0';
             self.value = {};
+            $(self.element).click(function () {
+                toolbar.execute(self);
+            });
         }
     });
 
