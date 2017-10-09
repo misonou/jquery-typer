@@ -181,13 +181,13 @@
         beforeStateChange: function (e) {
             var elements = e.typer.getSelection().getSelectedElements();
             $.extend(e.widget, {
-                bold: Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
+                bold: !!Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
                 italic: computePropertyValue(elements, 'fontStyle') === 'italic',
                 underline: computePropertyValue(elements, 'textDecoration') === 'underline',
                 strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
                 superscript: !!$(elements).filter('sup')[0],
                 subscript: !!$(elements).filter('sub')[0],
-                inlineClass: computePropertyValue(elements, 'inlineClass')
+                inlineClass: computePropertyValue($(elements).filter('span'), 'inlineClass')
             });
         },
         commands: {
