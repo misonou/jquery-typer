@@ -121,6 +121,11 @@
                     x: e.clientX,
                     y: e.clientY
                 });
+                setTimeout(function () {
+                    // fix IE11 rendering issue when mousedown on contextmenu
+                    // without moving focus beforehand
+                    toolbar.element.focus();
+                });
             });
             $(typer.element).bind('click', function (e) {
                 if (e.which === 1)  {
