@@ -2189,9 +2189,12 @@
             }
         },
         clone: function () {
-            var inst = new TyperSelection(this.typer);
-            inst.baseCaret.moveTo(this.baseCaret);
-            inst.extendCaret.moveTo(this.extendCaret);
+            var self = this;
+            var inst = new TyperSelection(self.typer);
+            selectionAtomic(inst, function () {
+                inst.baseCaret.moveTo(self.baseCaret);
+                inst.extendCaret.moveTo(self.extendCaret);
+            });
             return inst;
         }
     });
