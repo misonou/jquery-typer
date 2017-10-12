@@ -1,3 +1,17 @@
+## 0.10.5 / 2017-10-12
+
+- Fix: `removeElement` exception
+- Fix: `TyperSelection.clone` exception
+- Fix: cater ZWSP and avoid unnecessary splitting when splitting text nodes for current selection
+- Fix: IE textInput event not triggered on root element
+- Fix: caret position when inserting new paragraph
+- Fix: avoid empty inline widget on the inserted new paragraph
+- Fix: extra empty lines when extracting text
+- Fix: detection for `textInput` event whether `Event.data` is provided
+- Fix: formatting extension incorrect state
+- Fix: table extension toolbar control
+- Fix: IE11 rendering issue when clicking on custom context menu
+
 ## 0.10.4 / 2017-09-21
 
 - Validate event

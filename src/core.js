@@ -508,7 +508,6 @@
         var tracker = new TyperChangeTracker(typer);
         var undoable = {};
         var currentSelection;
-        var typerDocument;
         var typerFocused = false;
         var $self = $(topElement);
 
@@ -846,7 +845,7 @@
                         $(element).contents().each(function (i, v) {
                             if (v.parentNode === element) {
                                 var contents = [];
-                                for (; v && (isText(v) || tagName(v) === 'br' || is(typerDocument.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                for (; v && (isText(v) || tagName(v) === 'br' || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
                                     if (contents.length || isElm(v) || trim(v.data)) {
                                         contents.push(v);
                                     }
@@ -1002,7 +1001,7 @@
                 var hasInsertedBlock;
                 var formattingNodes = [];
 
-                var cur = typerDocument.getNode(state.startElement);
+                var cur = typer.getNode(state.startElement);
                 if (is(cur, NODE_ANY_INLINE)) {
                     for (; cur !== state.startNode; cur = cur.parentNode) {
                         if (is(cur, NODE_INLINE)) {
@@ -1021,15 +1020,15 @@
                     var isLineBreak = tagName(nodeToInsert) === 'br';
                     if (isElm(nodeToInsert) && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
-                        node = typerDocument.getNode(nodeToInsert);
+                        node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
                         if (node.widget.id === WIDGET_UNKNOWN || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
                             nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
                             node = new TyperNode(NODE_INLINE, nodeToInsert);
                         }
                     }
-                    if ((isLineBreak && !is(typerDocument.getEditableNode(caretPoint.startContainer), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
-                        var splitLastNode = typerDocument.getEditableNode(caretPoint.startContainer);
+                    if ((isLineBreak && !is(typer.getEditableNode(caretPoint.startContainer), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
+                        var splitLastNode = typer.getEditableNode(caretPoint.startContainer);
                         while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
@@ -1040,7 +1039,7 @@
                             splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
                         }
                         var splitFirstNode = splitContent.firstChild;
-                        for (var cur1 = typerDocument.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
+                        for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
                             if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
                                 // avoid empty inline widget at the start of splitted line
                                 if (cur1.element.firstChild) {
@@ -1053,7 +1052,7 @@
                         }
                         splitEnd.insertNode(splitContent);
                         tracker.track(splitEnd.startContainer);
-                        for (var w = new TyperTreeWalker(typerDocument.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
+                        for (var w = new TyperTreeWalker(typer.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
 
                         if (!/\S/.test(splitLastNode.element.textContent)) {
                             caretPoint.insertNode(createTextNode());
@@ -1098,7 +1097,7 @@
                         }
                         paragraphAsInline = forcedInline;
                     } else {
-                        var caretNode = typerDocument.getEditableNode(caretPoint.startContainer);
+                        var caretNode = typer.getEditableNode(caretPoint.startContainer);
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                             caretPoint.insertNode(nodeToInsert);
                         } else {
@@ -1113,7 +1112,7 @@
                 });
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     if (caretPoint) {
-                        var caretNode2 = typerDocument.getNode(caretPoint.startContainer);
+                        var caretNode2 = typer.getNode(caretPoint.startContainer);
                         while (is(caretNode2, NODE_ANY_INLINE)) {
                             caretNode2 = caretNode2.parentNode;
                         }
@@ -1139,7 +1138,7 @@
                 return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
             });
             iterate(iterator, function (v) {
-                var node = typerDocument.getNode(v);
+                var node = typer.getNode(v);
                 var widgetOption = widgetOptions[node.widget.id];
                 if (node !== lastNode) {
                     if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
@@ -1193,7 +1192,7 @@
 
             function setMarker(node, offset, start) {
                 if (isText(node)) {
-                    $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typerDocument.getNode(node), node) + offset);
+                    $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typer.getNode(node), node) + offset);
                 } else if (node) {
                     $(node).attr(MARKER_ATTR[+start], '');
                 }
@@ -1503,7 +1502,7 @@
             });
 
             $self.bind('mousedown mouseup mscontrolselect', function (e) {
-                var node = typerDocument.getNode(e.target);
+                var node = typer.getNode(e.target);
                 if (activeWidget !== node.widget) {
                     triggerWidgetFocusout();
                 }
@@ -1683,9 +1682,8 @@
         initWidgets();
         normalizeInputEvent();
         $self.attr('contenteditable', 'true');
-        typerDocument = createTyperDocument(topElement, true);
 
-        extend(typer, undoable, typerDocument, {
+        extend(typer, undoable, createTyperDocument(topElement, true), {
             element: topElement,
             hasCommand: function (command) {
                 return !!findWidgetWithCommand(command);
@@ -1712,7 +1710,7 @@
             },
             nodeFromPoint: function (x, y) {
                 var range = caretRangeFromPoint(x, y, topElement);
-                return range && typerDocument.getNode(range.commonAncestorContainer);
+                return range && typer.getNode(range.commonAncestorContainer);
             },
             retainFocus: function (element) {
                 if (!relatedElements.has(element)) {
