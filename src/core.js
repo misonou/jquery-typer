@@ -773,10 +773,6 @@
                     }
                     return nodeMap.get(element);
                 }
-                if (!containsOrEquals(document, element)) {
-                    for (var detachedRoot = element; detachedRoot.parentNode; detachedRoot = detachedRoot.parentNode);
-                    return (nodeMap.get(detachedRoot) || createTyperDocument(detachedRoot)).getNode(element);
-                }
             }
 
             if (!rootElement.parentNode) {
@@ -1036,6 +1032,9 @@
                             splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
                         }
                         var splitFirstNode = splitContent.firstChild;
+                        splitEnd.insertNode(splitContent);
+                        tracker.track(splitEnd.startContainer);
+
                         for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
                             if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
                                 // avoid empty inline widget at the start of splitted line
@@ -1047,9 +1046,6 @@
                                 break;
                             }
                         }
-                        splitEnd.insertNode(splitContent);
-                        tracker.track(splitEnd.startContainer);
-
                         if (splitLastNode.element.textContent.slice(-1) === ' ') {
                             var n1 = iterateToArray(createNodeIterator(splitLastNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
                             n1.data = n1.data.slice(0, -1) + '\u00a0';
@@ -2235,8 +2231,8 @@
         }
     });
 
-    function caretTextNodeIterator(inst, root) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(is(root, TyperNode) || inst.typer.getNode(root || inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
+    function caretTextNodeIterator(inst, root, whatToShow) {
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(is(root, TyperNode) || inst.typer.getNode(root || inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), whatToShow | 4);
         iterator.currentNode = inst.textNode || inst.element;
         return iterator;
     }
@@ -2418,49 +2414,54 @@
         },
         moveByWord: function (direction) {
             var self = this;
+            var node = self.textNode;
             var re = direction < 0 ? /\b(\S*\s+|\S+)$/ : /^(\s+\S*|\S+)\b/;
             var str = '';
             var matched;
-            if (self.textNode) {
-                str = direction < 0 ? self.textNode.data.substr(0, self.offset) : self.textNode.data.slice(self.offset);
+            if (node) {
+                str = direction < 0 ? node.data.substr(0, self.offset) : node.data.slice(self.offset);
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
-                    return self.moveToText(self.textNode, self.offset + direction * RegExp.$1.length);
+                    return self.moveToText(node, self.offset + direction * RegExp.$1.length);
                 }
             }
             var iterator = caretTextNodeIterator(self, self.node);
             var lastNode = iterator.currentNode;
             var lastLength = RegExp.$1.length;
-            while (iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
-                str = direction < 0 ? iterator.currentNode.data + str : str + iterator.currentNode.data;
+            while ((node = iterator[direction < 0 ? 'previousNode' : 'nextNode']())) {
+                str = direction < 0 ? node.data + str : str + node.data;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
                     // avoid unnecessarily expanding selection over multiple text nodes or elements
                     if (RegExp.$1.length === lastLength) {
                         return self.moveToText(lastNode, -direction * 0);
                     }
-                    return self.moveToText(iterator.currentNode, direction * (RegExp.$1.length - (str.length - iterator.currentNode.length)));
+                    return self.moveToText(node, direction * (RegExp.$1.length - (str.length - node.length)));
                 }
-                lastNode = iterator.currentNode;
+                lastNode = node;
                 lastLength = RegExp.$1.length;
             }
-            return !matched || !iterator.currentNode ? false : self.moveToText(iterator.currentNode, 0 * -direction);
+            return !matched || !node ? false : self.moveToText(node, 0 * -direction);
         },
         moveByCharacter: function (direction) {
             var self = this;
-            var iterator = caretTextNodeIterator(self);
             var rect = computeTextRects(self)[0];
+            var iterator = caretTextNodeIterator(self, null, 5);
+            var node = isText(iterator.currentNode);
             var offset = self.offset;
+            var overBr = false;
             while (true) {
-                while (isElm(iterator.currentNode) || offset === getOffset(iterator.currentNode, 0 * -direction)) {
-                    if (!iterator[direction < 0 ? 'previousNode' : 'nextNode']()) {
-                        return false;
+                if (!node || offset === getOffset(node, 0 * -direction)) {
+                    while (!(node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) || !node.length) {
+                        if (!node) {
+                            return false;
+                        }
+                        overBr |= tagName(node) === 'br';
                     }
-                    var node = caretGetNode(self.typer.getNode(iterator.currentNode));
-                    offset = (direction < 0 ? iterator.currentNode.length : 0) + (node !== self.node && -direction);
+                    offset = (direction < 0 ? node.length : 0) + ((overBr || caretGetNode(self.typer.getNode(node)) !== self.node) && -direction);
                 }
                 offset += direction;
-                var newRect = computeTextRects(createRange(iterator.currentNode, offset))[0];
+                var newRect = computeTextRects(createRange(node, offset))[0];
                 if (!rect || (newRect && !rectEquals(rect, newRect))) {
-                    return self.moveToText(iterator.currentNode, offset);
+                    return self.moveToText(node, offset);
                 }
             }
         }
