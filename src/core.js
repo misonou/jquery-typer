@@ -738,7 +738,7 @@
 
             function handleMutations(mutations) {
                 var changedElements = $.map(mutations, function (v) {
-                    return v.addedNodes[0] || v.removedNodes[0] ? v.target : null;
+                    return (v.addedNodes[0] || v.removedNodes[0]) && tagName(v.target) !== 'br' ? v.target : null;
                 });
                 array.push.apply(dirtyElements, changedElements);
             }
@@ -1037,7 +1037,7 @@
 
                         for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
                             if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
-                                // avoid empty inline widget at the start of splitted line
+                                // avoid empty inline widget at the start of inserted line
                                 if (cur1.element.firstChild) {
                                     $(cur1.element).contents().unwrap();
                                 } else {
@@ -1045,6 +1045,9 @@
                                 }
                                 break;
                             }
+                        }
+                        if (is(splitLastNode, NODE_ANY_ALLOWTEXT) && !splitLastNode.element.firstChild) {
+                            $(createTextNode()).appendTo(splitLastNode.element);
                         }
                         if (splitLastNode.element.textContent.slice(-1) === ' ') {
                             var n1 = iterateToArray(createNodeIterator(splitLastNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
@@ -2269,7 +2272,8 @@
     function caretSetPosition(inst, element, offset, end) {
         var node, textNode, textOffset;
         if (tagName(element) === 'br') {
-            textNode = element.nextSibling;
+            textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
+            element = textNode.parentNode;
             offset = 0;
         } else if (isElm(element) && element.firstChild) {
             if (offset === element.childNodes.length || (end && isElm(element.childNodes[(offset || 1) - 1]))) {
