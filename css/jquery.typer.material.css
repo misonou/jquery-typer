@@ -504,7 +504,7 @@ label.typer-ui-callout {
     vertical-align: top;
     color: #212121;
     white-space: normal;
-    word-break: break-all;
+    word-wrap: break-word;
     cursor: text;
     -webkit-user-select: text;
     -moz-user-select: text;
@@ -622,7 +622,7 @@ label.typer-ui-callout {
 
 .typer-ui-dialog {
     position: absolute;
-    padding: 2em 0.5em 1em;
+    padding: 2em 1em 1em;
     min-width: 350px;
     background-color: rgba(255, 255, 255, 0.95);
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
@@ -631,6 +631,12 @@ label.typer-ui-callout {
     -moz-transform: translate(-50%, -50%);
     -ms-transform: translate(-50%, -50%);
     transform: translate(-50%, -50%);
+}
+
+[role="dialog:hint"] .typer-ui-dialog {
+    padding: 0.25em 0.5em;
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .pinned-bottom .typer-ui-dialog {
@@ -801,7 +807,6 @@ label.typer-ui-callout {
 
 .typer-ui-dialog-content {
     position: relative;
-    padding: 0 0.5em;
 }
 
 .typer-ui-dialog-content.pop {

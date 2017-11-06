@@ -1,3 +1,15 @@
+## 0.10.6 / 2017-11-06
+
+- Datepicker allow customizing date format
+- Fix: visibility on root node of `TyperTreeWalker`
+- Fix: unable to edit content after inserting content with trailing `<br>`
+- Fix: ZWSP not inserted when splitting empty line
+- Fix: `moveByCharacter` should count `<br>` as one character
+- Fix: `moveToLineEnd` cannot move to line end on negative direction
+- Fix: `getParagraphElements` returns incorrect set of elements
+- Fix: improved caret position on inline style boundary
+- Fix: preset function-valued options not passed
+
 ## 0.10.5 / 2017-10-12
 
 - Fix: `removeElement` exception
@@ -43,7 +55,7 @@
 - Improved text extraction
 - New methods for controls: `control.getControl`, `control.set`, `callout.allowButtonMode`
 - New method for UI: `ui.reset`
-- New UI events `executing`, `executed`, `cancelled` replacing `controlExecuting` and `controlExecuted`
+- (Breaking) New UI events `executing`, `executed`, `cancelled` replacing `controlExecuting` and `controlExecuted`
 - Number control now supports loop mode
 - Datepicker control now supports time component
 - Fix: detection for Edge browser
