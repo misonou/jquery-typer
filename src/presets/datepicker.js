@@ -85,8 +85,8 @@
         }
     }
 
-    function formatDate(options, date) {
-        switch (options.mode) {
+    function formatDate(mode, date) {
+        switch (mode) {
             case 'month':
                 return monthstr[getMonth(date)] + ' ' + getFullYear(date);
             case 'week':
@@ -94,7 +94,7 @@
                 return monthstr[getMonth(date)] + ' ' + getDate(date) + ' - ' + (getMonth(end) !== getMonth(date) ? monthstr[getMonth(end)] + ' ' : '') + getDate(end) + ', ' + getFullYear(date);
         }
         var monthPart = monthstr[getMonth(date)] + ' ' + getDate(date) + ', ' + getFullYear(date);
-        return options.mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
+        return mode === 'datetime' ? monthPart + ' ' + (getHours(date) || 12) + ':' + ('0' + getMinutes(date)).slice(-2) + ' ' + (getHours(date) >= 12 ? 'PM' : 'AM') : monthPart;
     }
 
     function initDatepicker() {
@@ -443,7 +443,8 @@
 
     $.extend(Typer.ui.themeExtensions, {
         calendar: '<div class="typer-ui-calendar"><div class="typer-ui-calendar-header"><br x:t="buttonset"/></div><div class="typer-ui-calendar-body"><table></table></div></div>',
-        clock: '<div class="typer-ui-clock"><div class="typer-ui-clock-face"><s hand="h"></s><s hand="m"></s></div><br x:t="buttonset"/></div>'
+        clock: '<div class="typer-ui-clock"><div class="typer-ui-clock-face"><s hand="h"></s><s hand="m"></s></div><br x:t="buttonset"/></div>',
+        formatDate: null
     });
 
     Typer.presets.datepicker = {
@@ -452,7 +453,8 @@
             minuteStep: 1,
             min: null,
             max: null,
-            required: false
+            required: false,
+            formatDate: null
         },
         overrides: {
             getValue: function (preset) {
@@ -462,7 +464,15 @@
                 preset.selectedDate = date ? normalizeDate(preset.options, date) : null;
                 preset.softSelectedDate = null;
 
-                var text = date ? formatDate(preset.options, preset.selectedDate) : '';
+                var text = '';
+                if (date) {
+                    var format = function (fn) {
+                        return $.isFunction(fn) && fn(preset.options.mode, date);
+                    };
+                    text = format(preset.options.formatDate) ||
+                           format(preset.typer.parentControl && Typer.ui.themes[preset.typer.parentControl.ui.theme].formatDate) ||
+                           format(formatDate);
+                }
                 if (text !== this.extractText()) {
                     this.invoke(function (tx) {
                         tx.selection.selectAll();

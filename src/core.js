@@ -1864,7 +1864,7 @@
     }
 
     function treeWalkerAcceptNode(inst, node, checkWidget) {
-        if (checkWidget && !treeWalkerIsNodeVisible(inst, node)) {
+        if (checkWidget && node !== inst.root && !treeWalkerIsNodeVisible(inst, node)) {
             return 2;
         }
         if (is(node, NODE_WIDGET) && is(node.parentNode, NODE_WIDGET)) {
@@ -2390,15 +2390,16 @@
         },
         moveToLineEnd: function (direction) {
             var self = this;
+            var iterator = caretTextNodeIterator(self, self.node);
             var rect = computeTextRects(self)[0];
             var minx = rect.left;
-            iterate(caretTextNodeIterator(self, self.node), function (v) {
-                $.each(computeTextRects(v), function (i, v) {
+            do {
+                $.each(computeTextRects(iterator.currentNode), function (i, v) {
                     if (v.top <= rect.bottom && v.bottom >= rect.top) {
                         minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.right);
                     }
                 });
-            });
+            } while (iterator[direction < 0 ? 'previousNode' : 'nextNode']());
             return self.moveToPoint(minx, rect.top + rect.height / 2);
         },
         moveByLine: function (direction) {
