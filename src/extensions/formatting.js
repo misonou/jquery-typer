@@ -464,7 +464,7 @@
                 return self.widget && Typer.is(self.widget.element, 'ul');
             },
             enabled: function (toolbar) {
-                return isEnabled(toolbar, false);
+                return isEnabled(toolbar, false) && toolbar.typer.getSelection().widgetAllowed('list');
             }
         }),
         orderedList: Typer.ui.callout({
@@ -480,7 +480,7 @@
                 return self.widget && Typer.is(self.widget.element, 'ol');
             },
             enabled: function (toolbar) {
-                return isEnabled(toolbar, false);
+                return isEnabled(toolbar, false) && toolbar.typer.getSelection().widgetAllowed('list');
             }
         }),
         indent: simpleCommandButton('indent', 'list'),

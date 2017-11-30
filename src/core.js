@@ -1011,19 +1011,21 @@
                 }
 
                 content.forEach(function (nodeToInsert) {
+                    var cur = typer.getEditableNode(caretPoint.startContainer);
                     var node = new TyperNode(NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
+
                     if (isElm(nodeToInsert) && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (node.widget.id === WIDGET_UNKNOWN || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
+                        if (node.widget.id === WIDGET_UNKNOWN || (is(cur, NODE_EDITABLE_PARAGRAPH) && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
                             nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
                             node = new TyperNode(NODE_INLINE, nodeToInsert);
                         }
                     }
-                    if ((isLineBreak && !is(typer.getEditableNode(caretPoint.startContainer), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
-                        var splitLastNode = typer.getEditableNode(caretPoint.startContainer);
+                    if ((isLineBreak && !is(cur, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
+                        var splitLastNode = cur;
                         while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
                             splitLastNode = splitLastNode.parentNode;
                         }
@@ -1685,6 +1687,9 @@
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
             },
+            getWidgetOption: function (id, name) {
+                return widgetOptions[id] && widgetOptions[id][name];
+            },
             getStaticWidget: function (id) {
                 return any(widgets.slice(1, -1), function (v) {
                     return v.id === id;
@@ -2194,6 +2199,14 @@
                 inst.extendCaret.moveTo(self.extendCaret);
             });
             return inst;
+        },
+        widgetAllowed: function (id) {
+            var self = this;
+            if (is(self.focusNode, NODE_EDITABLE_PARAGRAPH) && !self.typer.getWidgetOption(self.focusNode.widget.id, 'inline')) {
+                return false;
+            }
+            var allowedWidgets = self.typer.getWidgetOption(self.focusNode.widget.id, 'allowedWidgets');
+            return !allowedWidgets || allowedWidgets === '*' ||  (' __root__ ' + allowedWidgets + ' ').indexOf(' ' + id + ' ') >= 0;
         }
     });
 

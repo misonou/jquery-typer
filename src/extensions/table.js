@@ -151,7 +151,12 @@
     Typer.ui.addControls('typer', {
         'insert:table': Typer.ui.callout({
             requireWidgetEnabled: 'table',
-            hiddenWhenDisabled: true
+            enabled: function (toolbar) {
+                return toolbar.typer.getSelection().widgetAllowed('table');
+            },
+            visible: function (toolbar) {
+                return toolbar.typer.widgetEnabled('table');
+            }
         }),
         'insert:table:create': Typer.ui.tableGrid({
             execute: function (toolbar, self, tx) {

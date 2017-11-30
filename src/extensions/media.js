@@ -23,7 +23,6 @@
     function insertMediaButton(type) {
         return Typer.ui.button({
             requireWidgetEnabled: 'media',
-            hiddenWhenDisabled: true,
             dialog: function (toolbar) {
                 if (typeof toolbar.options.selectMedia === 'function') {
                     return toolbar.options.selectMedia(type);
@@ -32,6 +31,12 @@
             },
             execute: function (toolbar, self, tx, value) {
                 tx.insertWidget('media', value);
+            },
+            enabled: function (toolbar) {
+                return toolbar.typer.getSelection().widgetAllowed('media');
+            },
+            visible: function (toolbar) {
+                return toolbar.typer.widgetEnabled('media');
             }
         });
     }
