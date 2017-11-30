@@ -674,16 +674,18 @@
                             triggerEvent(null, node.widget, 'destroy');
                         }
                     }
-                    delete node.widget;
                     $.each(widgetOptions, function (i, v) {
                         if (is(node.element, v.element)) {
                             node.widget = new TyperWidget(nodeSource, i, node.element, v.options);
+                            if (fireEvent && node.widget.id !== WIDGET_UNKNOWN) {
+                                triggerEvent(null, node.widget, 'init');
+                            }
                             return false;
                         }
                     });
-                    if (fireEvent && node.widget && node.widget.id !== WIDGET_UNKNOWN) {
-                        triggerEvent(null, node.widget, 'init');
-                    }
+                }
+                if (node.widget && node.widget.destroyed) {
+                    delete node.widget;
                 }
                 if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
                     node.widget = context.widget;
