@@ -902,6 +902,7 @@
         }
 
         function extractContents(range, mode, callback) {
+            var dir = is(range, TyperSelection) ? range.direction : 1;
             range = is(range, Range) || createRange(range);
 
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
@@ -964,8 +965,8 @@
                     }));
                 }
                 if (isFunction(callback)) {
-                    var startPoint = createRange(range, true);
-                    var endPoint = !allowTextFlow ? startPoint : createRange(range, false);
+                    var startPoint = createRange(range, dir > 0);
+                    var endPoint = !allowTextFlow ? startPoint : createRange(range, dir < 0);
                     var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
 
                     // check if current insertion point is an empty editable element
