@@ -2135,7 +2135,7 @@
         getParagraphElements: function () {
             var self = this;
             if (self.startNode === self.endNode) {
-                return [self.startNode.element];
+                return is(self.startNode, NODE_PARAGRAPH) ? [self.startNode.element] : [];
             }
             return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE), mapFn('element'), self.startNode, self.endNode);
         },
