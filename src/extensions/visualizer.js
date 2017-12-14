@@ -58,6 +58,15 @@
         });
     }
 
+    function toWidthHeight(v) {
+        return {
+            top: v.top,
+            left: v.left,
+            width: v.width,
+            height: v.height
+        };
+    }
+
     function toRightBottom(v) {
         return {
             top: v.top | 0,
@@ -171,11 +180,6 @@
                 var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
                 d.className = className;
                 d.removeAttribute('style');
-                if (css && css.toJSON) {
-                    // Chrome update v61.0 toJSON is enumerable can cause
-                    // illegal invocation exception
-                    css = css.toJSON();
-                }
                 $(d).css(css || '', value);
                 domCount++;
                 return d;
@@ -203,11 +207,11 @@
                 }
             } else if (v.type.substr(0, 5) === 'block') {
                 var bRect = v.element.getBoundingClientRect();
-                drawLayer('border', bRect);
+                drawLayer('border', toWidthHeight(bRect));
                 if (v.type === 'block') {
-                    drawLayer('elm', bRect).setAttribute('elm', getElementMarker(v.element));
+                    drawLayer('elm', toWidthHeight(bRect)).setAttribute('elm', getElementMarker(v.element));
                 } else if (v.type === 'block-fill') {
-                    drawLayer('fill', bRect);
+                    drawLayer('fill', toWidthHeight(bRect));
                 } else if (v.type === 'block-margin') {
                     var style = window.getComputedStyle(v.element);
                     var s = toScreenRightBottom(bRect);
@@ -223,7 +227,7 @@
                         style.marginLeft].join(' ');
                     drawLayer('fill-margin', s);
                     $('br', v.element).each(function (i, v) {
-                        drawLayer('newline', v.getBoundingClientRect());
+                        drawLayer('newline', toWidthHeight(v.getBoundingClientRect()));
                     });
                 }
             }
