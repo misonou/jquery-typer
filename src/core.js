@@ -20,10 +20,12 @@
     var NODE_INLINE_WIDGET = 64;
     var NODE_INLINE_EDITABLE = 128;
     var NODE_SHOW_EDITABLE = 4096;
+    var NODE_SHOW_HIDDEN = 8192;
     var NODE_ANY_BLOCK_EDITABLE = NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH;
     var NODE_ANY_BLOCK = NODE_WIDGET | NODE_PARAGRAPH | NODE_ANY_BLOCK_EDITABLE;
     var NODE_ANY_INLINE = NODE_INLINE | NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE;
     var NODE_ANY_ALLOWTEXT = NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_INLINE | NODE_INLINE_EDITABLE;
+    var NODE_ALL_VISIBLE = -1 & ~NODE_SHOW_HIDDEN;
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
@@ -915,7 +917,7 @@
             codeUpdate(null, function () {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
-                    iterate(state.createTreeWalker(-1, function (node) {
+                    iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
                         var element = node.element;
                         var content;
                         // skip focused editable element because all selected content is within the editable element
@@ -1128,7 +1130,7 @@
             var range = createRange(content || topElement);
             var lastNode, lastWidget;
             var text = '';
-            var iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(-1), 5, function (v) {
+            var iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(NODE_ALL_VISIBLE), 5, function (v) {
                 return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
             });
             iterate(iterator, function (v) {
@@ -1868,7 +1870,7 @@
     });
 
     function treeWalkerIsNodeVisible(inst, node) {
-        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && node;
+        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && ((inst.whatToShow & NODE_SHOW_HIDDEN) || is(node.element, ':visible')) && node;
     }
 
     function treeWalkerAcceptNode(inst, node, checkWidget) {
@@ -1988,7 +1990,7 @@
                     return null;
                 }
                 node = node.nextSibling;
-                if (treeWalkerNodeAccepted(self, node)) {
+                if (treeWalkerNodeAccepted(self, node, true)) {
                     return node;
                 }
                 rv = treeWalkerAcceptNode.returnValue;
