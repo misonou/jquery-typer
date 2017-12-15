@@ -1635,7 +1635,7 @@
         }
 
         function activateWidget(name, settings) {
-            if ((options[name] || (options.widgets || '')[name]) && (settings.inline || topNodeType === NODE_EDITABLE)) {
+            if (options[name] || (options.widgets || '')[name]) {
                 widgetOptions[name] = Object.create(settings);
                 widgetOptions[name].options = extend(Object.create(settings.options || null), options[name]);
                 if (!settings.element) {

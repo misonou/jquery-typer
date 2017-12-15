@@ -177,7 +177,6 @@
     }
 
     Typer.widgets.inlineStyle = {
-        inline: true,
         beforeStateChange: function (e) {
             var elements = e.typer.getSelection().getSelectedElements();
             $.extend(e.widget, {
@@ -280,7 +279,6 @@
     };
 
     Typer.widgets.lineBreak = {
-        inline: true,
         enter: function (e) {
             e.typer.invoke('insertLineBreak');
         },

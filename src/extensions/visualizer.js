@@ -281,7 +281,6 @@
     }
 
     Typer.widgets.visualizer = {
-        inline: true,
         options: {
             layout: true
         },

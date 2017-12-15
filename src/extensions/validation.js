@@ -2,7 +2,6 @@
     'use strict';
 
     Typer.widgets.validation = {
-        inline: true,
         init: function (e) {
             var options = e.widget.options;
             if (options.invalidChars) {

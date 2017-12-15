@@ -6,7 +6,6 @@
     }
 
     Typer.widgets.stateclass = {
-        inline: true,
         options: {
             target: null,
             focused: 'focused',
