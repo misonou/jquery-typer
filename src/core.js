@@ -967,8 +967,8 @@
                     }));
                 }
                 if (isFunction(callback)) {
-                    var startPoint = createRange(range, dir > 0);
-                    var endPoint = !allowTextFlow ? startPoint : createRange(range, dir < 0);
+                    var startPoint = createRange(range, allowTextFlow ? true : dir > 0);
+                    var endPoint = !allowTextFlow ? startPoint : createRange(range, false);
                     var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
 
                     // check if current insertion point is an empty editable element
