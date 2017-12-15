@@ -341,7 +341,6 @@ interface TyperControlOptions extends Dictionary<any>, Dictionary<TyperControlEv
 
     buttonsetGroup?: 'left' | 'right';
     hiddenWhenDisabled?: boolean;
-    markdown?: boolean;
     renderAs?: string,
     requireChildControls?: boolean;
     requireTyper?: boolean;

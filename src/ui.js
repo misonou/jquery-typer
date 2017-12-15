@@ -10,6 +10,7 @@
     var isPlainObject = $.isPlainObject;
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var defineProperty = Object.defineProperty;
+    var dummyDiv = document.createElement('div');
 
     var FLIP_POS = {
         left: 'right',
@@ -1148,17 +1149,8 @@
     $.extend(typerUI.themeExtensions, {
         textboxPresetOptions: null,
         bind: function (ui, control, value) {
-            value = ui.getLabel(value) || '';
-            if (control.markdown) {
-                return new showdown.Converter({
-                    simplifiedAutoLink: true,
-                    excludeTrailingPunctuationFromURLs: true,
-                    simpleLineBreaks: true
-                }).makeHtml(String(value));
-            }
-            var elm = document.createElement('div');
-            elm.textContent = value;
-            return elm.innerHTML;
+            dummyDiv.textContent = ui.getLabel(value) || '';
+            return dummyDiv.innerHTML.replace(/(^|\s)\*\*(.+)\*\*(?=\s|$)/g, '$1<b>$2</b>').replace('\n', '<br>');
         },
         bindIcon: function (ui, control, value) {
             return ui.getIcon(value);
