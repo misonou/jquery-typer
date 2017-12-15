@@ -2482,7 +2482,7 @@
                     offset = (direction < 0 ? node.length : 0) + ((overBr || caretGetNode(self.typer.getNode(node)) !== self.node) && -direction);
                 }
                 offset += direction;
-                var newRect = computeTextRects(createRange(node, offset))[0];
+                var newRect = node.data.charAt(offset) !== ZWSP && computeTextRects(createRange(node, offset))[0];
                 if (!rect || (newRect && !rectEquals(rect, newRect))) {
                     return self.moveToText(node, offset);
                 }
