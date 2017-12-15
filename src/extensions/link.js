@@ -159,20 +159,23 @@
     });
 
     Typer.ui.addIcons('material', 'typer', {
-        'toolbar:link': '\ue250',  // insert_link
-        'link:url': '\ue250'       // insert_link
+        'toolbar:link': '\ue250', // insert_link
+        'link:url': '\ue250' // insert_link
     });
 
     Typer.ui.addHook('space', function (typer) {
         if (typer.widgetEnabled('link')) {
             var selection = typer.getSelection().clone();
-            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^[a-z]+:\/\//g.test(selection.getSelectedText())) {
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/^s+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
+                var originalSelection = typer.getSelection().clone();
+                var link = (RegExp.$2 || 'mailto:') + RegExp.$1;
                 typer.snapshot(true);
-                typer.getSelection().select(selection);
+                typer.select(selection);
                 typer.invoke(function (tx) {
-                    tx.insertWidget('link');
+                    tx.insertWidget('link', link);
                 });
-                typer.getSelection().collapse('end');
+                typer.select(originalSelection);
+                return true;
             }
         }
     });
