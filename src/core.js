@@ -2465,7 +2465,7 @@
             }
             var iterator = caretTextNodeIterator(self, self.node);
             var lastNode = iterator.currentNode;
-            var lastLength = RegExp.$1.length;
+            var lastLength = matched && RegExp.$1.length;
             while ((node = iterator[direction < 0 ? 'previousNode' : 'nextNode']())) {
                 str = direction < 0 ? node.data + str : str + node.data;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
@@ -2478,7 +2478,7 @@
                 lastNode = node;
                 lastLength = RegExp.$1.length;
             }
-            return !matched || !node ? false : self.moveToText(node, 0 * -direction);
+            return !matched || (!node && !lastLength) ? false : self.moveToText(node || lastNode, 0 * -direction);
         },
         moveByCharacter: function (direction) {
             var self = this;
