@@ -149,7 +149,7 @@
         overrides: {
             getValue: function (preset) {
                 return $('span', this.element).map(function (i, v) {
-                    return $(v).data('value');
+                    return String($(v).data('value'));
                 }).get();
             },
             setValue: function (preset, values) {
