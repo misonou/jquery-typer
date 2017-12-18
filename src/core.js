@@ -1696,20 +1696,20 @@
             };
         }
 
-        var retainFocusHandlers = {
-            focusout: function (e) {
-                if (!containsOrEquals(e.currentTarget, e.relatedTarget)) {
-                    if (userFocus.get(typer) === e.currentTarget) {
-                        userFocus.delete(typer);
-                    }
-                    if (topElement === e.relatedTarget) {
-                        currentSelection.focus();
-                    } else {
-                        $self.trigger('focusout');
-                    }
+        function retainFocusHandler(e) {
+            if (!containsOrEquals(e.currentTarget, e.relatedTarget)) {
+                if (userFocus.get(typer) === e.currentTarget) {
+                    userFocus.delete(typer);
+                }
+                if (topElement === e.relatedTarget) {
+                    currentSelection.focus();
+                } else {
+                    $self.trigger($.Event('focusout', {
+                        relatedTarget: e.relatedTarget
+                    }));
                 }
             }
-        };
+        }
 
         initUndoable();
         initWidgets();
@@ -1751,12 +1751,12 @@
             retainFocus: function (element) {
                 if (!relatedElements.has(element)) {
                     relatedElements.set(element, true);
-                    $(element).bind(retainFocusHandlers);
+                    $(element).bind('focusout', retainFocusHandler);
                 }
             },
             releaseFocus: function (element) {
                 relatedElements.delete(element);
-                $(element).unbind(retainFocusHandlers);
+                $(element).unbind('focusout', retainFocusHandler);
             },
             invoke: function (command, value) {
                 var tx = new TyperTransaction();
