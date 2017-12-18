@@ -745,6 +745,14 @@
         return isString(control) ? ui.resolveOne(control) : control || ui.controls[0];
     }
 
+    function defineShortcut(keystroke, type, value) {
+        definedShortcuts[keystroke] = definedShortcuts[keystroke] || {
+            hooks: [],
+            commands: []
+        };
+        definedShortcuts[keystroke][type].push(value);
+    }
+
     var typerUI = Typer.ui = define('TyperUI', null, function (options, values) {
         if (isString(options)) {
             options = {
@@ -976,10 +984,7 @@
                 return;
             }
             (keystroke || '').replace(/\S+/g, function (v) {
-                definedShortcuts[v] = definedShortcuts[v] || [];
-                definedShortcuts[v].push({
-                    hook: hook
-                });
+                defineShortcut(v, 'hooks', hook);
             });
         },
         setShortcut: function (command, keystroke) {
@@ -998,8 +1003,7 @@
                     before.splice(index, 1);
                 } else {
                     current[current.length] = v;
-                    definedShortcuts[v] = definedShortcuts[v] || [];
-                    definedShortcuts[v].push({
+                    defineShortcut(v, 'commands', {
                         command: command.name,
                         value: (command.params || '').value
                     });
@@ -1424,12 +1428,9 @@
 
     Typer.widgets.shortcut = {
         keystroke: function (e) {
-            if (!e.isDefaultPrevented()) {
-                $.each(definedShortcuts[e.data] || [], function (i, v) {
-                    if (v.hook && v.hook(e.typer)) {
-                        e.preventDefault();
-                        return false;
-                    }
+            var dict = definedShortcuts[e.data] || {};
+            if (!e.isDefaultPrevented() && dict.commands) {
+                $.each(dict.commands, function (i, v) {
                     if (e.typer.hasCommand(v.command)) {
                         e.typer.invoke(v.command, v.value);
                         e.preventDefault();
@@ -1437,6 +1438,9 @@
                     }
                 });
             }
+            $.each(dict.hooks || [], function (i, v) {
+                v(e);
+            });
         }
     };
 

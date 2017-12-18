@@ -556,10 +556,10 @@
         justifyRight: 'ctrlShiftR'
     });
 
-    Typer.ui.addHook('tab', function (typer) {
-        if (typer.widgetEnabled('list')) {
-            typer.invoke(indentCommand);
-            return true;
+    Typer.ui.addHook('tab', function (e) {
+        if (!e.isDefaultPrevented() && e.typer.widgetEnabled('list')) {
+            e.typer.invoke(indentCommand);
+            e.preventDefault();
         }
     });
 

@@ -163,19 +163,24 @@
         'link:url': '\ue250' // insert_link
     });
 
-    Typer.ui.addHook('space', function (typer) {
-        if (typer.widgetEnabled('link')) {
-            var selection = typer.getSelection().clone();
+    Typer.ui.addHook('space enter', function (e) {
+        if (e.typer.widgetEnabled('link')) {
+            var originalSelection = e.typer.getSelection().clone();
+            var selection = originalSelection.clone();
+            if (e.data === 'enter') {
+                selection.moveByCharacter(-1);
+            }
             if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/^s+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
-                var originalSelection = typer.getSelection().clone();
                 var link = (RegExp.$2 || 'mailto:') + RegExp.$1;
-                typer.snapshot(true);
-                typer.select(selection);
-                typer.invoke(function (tx) {
+                e.typer.snapshot(true);
+                e.typer.select(selection);
+                e.typer.invoke(function (tx) {
                     tx.insertWidget('link', link);
                 });
-                typer.select(originalSelection);
-                return true;
+                e.typer.select(originalSelection);
+                if (e.data === 'space') {
+                    e.preventDefault();
+                }
             }
         }
     });
