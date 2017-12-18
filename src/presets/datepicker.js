@@ -537,6 +537,11 @@
             });
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
+            if (e.source === 'touch') {
+                setImmediate(function () {
+                    callout.focus();
+                });
+            }
         },
         focusout: function (e) {
             setImmediate(function () {
