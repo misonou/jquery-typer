@@ -4,7 +4,7 @@
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
     var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
     var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
-    var SOURCE_PRIORITY = 'keystroke textInput mouse touch cut paste'.split(' ');
+    var SOURCE_PRIORITY = 'script keystroke textInput mouse touch cut paste'.split(' ');
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
@@ -47,6 +47,7 @@
     var windowFocusedOut;
     var permitFocusEvent;
     var supportTextInputEvent;
+    var currentSource = [];
 
     function TyperSelection(typer, range) {
         var self = this;
@@ -69,6 +70,8 @@
     function TyperEvent(eventName, typer, widget, data, props) {
         var self = extend(this, props);
         self.eventName = eventName;
+        self.source = currentSource[currentSource.length - 1][1];
+        self.timestamp = +new Date();
         self.typer = typer;
         self.widget = widget || null;
         self.data = data !== undefined ? data : null;
@@ -124,6 +127,28 @@
                 }
             }
         };
+    }
+
+    function eventSource(typer, source, callback, args, thisArg) {
+        var len = currentSource.length;
+        var cur = currentSource[len - 1] || (currentSource.push([typer, source || 'script']), currentSource[len]);
+        if (cur[0] && typer && cur[0] !== typer) {
+            currentSource.push([typer, 'script']);
+        } else if (cur === currentSource[0] && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(cur[1])) {
+            cur[1] = source;
+        }
+        try {
+            return (callback || $.noop).apply(thisArg || null, args);
+        } finally {
+            if (!len) {
+                cur[0] = null;
+                setImmediate(function () {
+                    currentSource.splice(len);
+                });
+            } else {
+                currentSource.splice(len);
+            }
+        }
     }
 
     function defineProperty(obj, name, value, freeze) {
@@ -524,14 +549,12 @@
         var $self = $(topElement);
 
         var codeUpdate = (function () {
-            var currentSource = 'script';
             var run = transaction(function () {
-                var source = currentSource;
+                var source = currentSource[currentSource.length - 1][1];
                 codeUpdate.executing = false;
                 if (codeUpdate.needSnapshot || tracker.changes[0]) {
                     undoable.snapshot();
                 }
-                currentSource = 'script';
                 setImmediate(function () {
                     codeUpdate.suppressTextEvent = false;
                     tracker.collect(function (changedWidgets) {
@@ -547,18 +570,12 @@
                     });
                 });
             });
-            return function (source, callback) {
+            return function (source, callback, args, thisArg) {
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
                 codeUpdate.suppressTextEvent = true;
                 codeUpdate.executing = true;
-                if (source !== currentSource && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource)) {
-                    currentSource = source || 'script';
-                }
-                var args = slice(arguments, 2);
-                return run(function () {
-                    return callback.apply(null, args);
-                });
+                return eventSource(typer, source, run, [callback, args, thisArg]);
             };
         }());
 
@@ -1299,6 +1316,10 @@
                 triggerEvent(source, EVENT_HANDLER, getEventName(e, 'click'), null, props);
             }
 
+            function ensureFocused(source) {
+                eventSource(typer, source, currentSelection.focus, null, currentSelection);
+            }
+
             function updateFromNativeInput() {
                 var activeRange = getActiveRange(topElement);
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
@@ -1357,7 +1378,7 @@
                         }
                         currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
-                            currentSelection.focus();
+                            ensureFocused('mouse');
                         });
                         e.preventDefault();
                     },
@@ -1368,7 +1389,7 @@
                 };
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                    currentSelection.focus();
+                    ensureFocused('mouse');
                     $(document.body).bind(handlers);
                     mousedown = true;
                 }
@@ -1516,7 +1537,7 @@
                     // disable resize handle on image element on IE and Firefox
                     // also select the whole widget when clicking on uneditable elements
                     setImmediate(function () {
-                        currentSelection.focus();
+                        ensureFocused('mouse');
                     });
                     currentSelection.select(node.widget.element);
                     if (activeWidget !== node.widget) {
@@ -1529,7 +1550,7 @@
             $self.bind('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
-                    currentSelection.focus();
+                    ensureFocused('touch');
                     triggerClick('touch', e, touchObj);
                     e.preventDefault();
                 }
@@ -2225,7 +2246,7 @@
                 return false;
             }
             var allowedWidgets = self.typer.getWidgetOption(self.focusNode.widget.id, 'allowedWidgets');
-            return !allowedWidgets || allowedWidgets === '*' ||  (' __root__ ' + allowedWidgets + ' ').indexOf(' ' + id + ' ') >= 0;
+            return !allowedWidgets || allowedWidgets === '*' || (' __root__ ' + allowedWidgets + ' ').indexOf(' ' + id + ' ') >= 0;
         }
     });
 
@@ -2556,6 +2577,19 @@
         if (IS_IE ? !e.relatedTarget : e.target === window) {
             windowFocusedOut = e.type === 'focusout';
         }
+    });
+
+    var EVT_SOURCES = {
+        mouse: 'mousedown mouseup click',
+        keystroke: 'keydown keyup keypress',
+        touch: 'touchstart touchmove touchend'
+    };
+    $(function () {
+        $.each(EVT_SOURCES, function (i, v) {
+            $(document.body).bind(v, function () {
+                eventSource(null, i);
+            });
+        });
     });
 
     // polyfill for WeakMap
