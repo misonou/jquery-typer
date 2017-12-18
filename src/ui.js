@@ -60,6 +60,7 @@
     var currentCallouts = [];
     var currentDialog;
     var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
+    var IS_TOUCH = 'ontouchstart' in window;
 
     function randomId() {
         return Math.random().toString(36).substr(2, 8);
@@ -915,6 +916,9 @@
                 }
                 return executeControlWithFinal(control, executeControl);
             }
+        },
+        focus: function () {
+            typerUI.focus((resolveControlParam(this) || this).element);
         }
     });
 
@@ -1031,7 +1035,7 @@
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
-                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf().eq(0).focus();
+                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf()[0].focus();
             }
         },
         alert: function (message) {
@@ -1454,7 +1458,7 @@
             // IE does not focus on focusable element when clicking containing LABEL element
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
-        $(document.body).mousedown(function (e) {
+        $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
             if (currentDialog && currentDialog.clickReject && !Typer.containsOrEquals(currentDialog.element, e.target)) {
                 currentDialog.clickReject();
             }
@@ -1464,6 +1468,23 @@
                 }
             });
         });
+
+        if (IS_TOUCH) {
+            // focusout event is not fired immediately after the element loses focus when user touches other element
+            // manually blur and trigger focusout event to notify Typer and other component
+            var lastActiveElement;
+            $(document.body).bind('focusin focusout', function (e) {
+                lastActiveElement = e.type === 'focusin' ? e.target : null;
+            });
+            $(document.body).bind('touchend', function (e) {
+                if (lastActiveElement && !Typer.containsOrEquals(lastActiveElement, e.target)) {
+                    lastActiveElement.blur();
+                    $(lastActiveElement).trigger($.Event('focusout', {
+                        relatedTarget: e.target
+                    }));
+                }
+            });
+        }
     });
 
 }(jQuery, window.Typer, Object, RegExp, window, document));
