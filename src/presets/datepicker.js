@@ -102,7 +102,7 @@
             type: 'contextmenu',
             controls: [Typer.ui.datepicker()],
             executed: function (ui, control) {
-                if (control.is('calendar clock')) {
+                if (activeTyper && control.is('calendar clock')) {
                     activeTyper.setValue(ui.getValue());
                     if (control.is('calendar')) {
                         ui.hide();
@@ -234,40 +234,41 @@
             $(repeat('<i></i>', 12)).appendTo($face).each(function (i, v) {
                 $(v).css('transform', 'rotate(' + (i * 30) + 'deg)');
             });
-            $('s', self.element).mousedown(function (e) {
+            $('s', self.element).bind('mousedown touchstart', function (e) {
                 var elm = e.target;
-                var center = elm.parentNode.getBoundingClientRect();
+                var center = Typer.ui.getRect(elm.parentNode);
                 center = {
                     top: (center.top + center.bottom) / 2,
                     left: (center.left + center.right) / 2
                 };
-                var handlers = {
-                    mousemove: function (e) {
-                        if (e.which !== 1) {
-                            return handlers.mouseup();
+                var isTouch = e.type === 'touchstart';
+                var handlers = {};
+                handlers[isTouch ? 'touchmove' : 'mousemove'] = function (e) {
+                    if (!isTouch && e.which !== 1) {
+                        return handlers.mouseup();
+                    }
+                    var point = isTouch ? e.originalEvent.touches[0] : e;
+                    var rad = Math.atan2(point.clientY - center.top, point.clientX - center.left) / Math.PI;
+                    var curM = getMinutes(self.value);
+                    var curH = getHours(self.value);
+                    if (elm.getAttribute('hand') === 'm') {
+                        var m = (Math.round((rad * 30 + 75) / self.step) * self.step) % 60;
+                        if (m !== curM) {
+                            var deltaH = Math.floor(Math.abs(curM - m) / 30) * (m > curM ? -1 : 1);
+                            self.setValue(makeTime(curH + deltaH, m));
                         }
-                        var rad = Math.atan2(e.clientY - center.top, e.clientX - center.left) / Math.PI;
-                        var curM = getMinutes(self.value);
-                        var curH = getHours(self.value);
-                        if (elm.getAttribute('hand') === 'm') {
-                            var m = (Math.round((rad * 30 + 75) / self.step) * self.step) % 60;
-                            if (m !== curM) {
-                                var deltaH = Math.floor(Math.abs(curM - m) / 30) * (m > curM ? -1 : 1);
-                                self.setValue(makeTime(curH + deltaH, m));
-                            }
-                        } else {
-                            var h = Math.round(rad * 6 + 15) % 12 + (ui.getValue('meridiem') === 'am' ? 0 : 12);
-                            if (h !== curH) {
-                                self.setValue(makeTime(h, curM));
-                            }
+                    } else {
+                        var h = Math.round(rad * 6 + 15) % 12 + (ui.getValue('meridiem') === 'am' ? 0 : 12);
+                        if (h !== curH) {
+                            self.setValue(makeTime(h, curM));
                         }
-                    },
-                    mouseup: function () {
-                        $(document.body).unbind(handlers);
-                        ui.execute(self);
                     }
                 };
-                if (e.which === 1) {
+                handlers[isTouch ? 'touchend' : 'mouseup'] = function () {
+                    $(document.body).unbind(handlers);
+                    ui.execute(self);
+                };
+                if (e.which === 1 || (e.originalEvent.touches || '').length === 1) {
                     $(document.body).bind(handlers);
                 }
             });

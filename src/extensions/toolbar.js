@@ -44,7 +44,7 @@
             if (position) {
                 toolbar.position = 'fixed';
             } else if (toolbar.position !== 'fixed') {
-                var rect = (toolbar.widget || toolbar.typer).element.getBoundingClientRect();
+                var rect = Typer.ui.getRect((toolbar.widget || toolbar.typer).element);
                 if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
                     // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
                     return;
@@ -58,7 +58,7 @@
             if (position) {
                 var range = toolbar.typer.getSelection().getRange();
                 if (range) {
-                    var r = range.getClientRects()[0] || range.getBoundingClientRect();
+                    var r = range.getClientRects()[0] || Typer.ui.getRect(range);
                     if (r.top >= position.top && r.top <= position.top + height) {
                         position.top = r.bottom + 10;
                     }

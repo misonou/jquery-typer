@@ -570,10 +570,40 @@ label.typer-ui-callout {
 
 /* Dialog */
 
-.typer-ui-dialog-wrapper {
+.typer-ui-dialog-wrapper.is-modal:before {
+    content: '';
+    display: block;
     position: fixed;
-    top: 50%;
-    left: 50%;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url("data:image/gif;,") rgba(0, 0, 0, 0.05);
+}
+
+.typer-ui-dialog {
+    position: fixed;
+    margin: 10px;
+    min-width: 350px;
+    box-sizing: border-box;
+}
+
+.typer-ui-dialog[role="dialog:hint"] {
+    min-width: 0;
+}
+
+@media (max-width: 370px) {
+    .typer-ui-dialog {
+        min-width: 0;
+        width: calc(100vw - 20px);
+    }
+}
+
+.typer-ui-dialog-inner {
+    padding: 2em 1em 1em;
+    background-color: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
     -webkit-transition: 0.1s ease-in;
     -moz-transition: 0.1s ease-in;
     -ms-transition: 0.1s ease-in;
@@ -589,18 +619,7 @@ label.typer-ui-callout {
     opacity: 0;
 }
 
-.typer-ui-dialog-wrapper.is-modal:before {
-    content: '';
-    display: block;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: url("data:image/gif;,") rgba(0, 0, 0, 0.05);
-}
-
-.typer-ui-dialog-wrapper.open {
+.typer-ui-dialog-inner.open {
     -webkit-filter: none;
     -moz-filter: none;
     -ms-filter: none;
@@ -608,83 +627,40 @@ label.typer-ui-callout {
     opacity: 1;
 }
 
-.typer-ui-dialog-wrapper.closing {
+.typer-ui-dialog-inner.closing {
     -webkit-transform: scale(0.75);
     -moz-transform: scale(0.75);
     -ms-transform: scale(0.75);
     transform: scale(0.75);
-    -webkit-filter: blur(20px);
-    -moz-filter: blur(20px);
-    -ms-filter: blur(20px);
-    filter: blur(20px);
-    opacity: 0;
 }
 
-.typer-ui-dialog {
-    position: absolute;
-    padding: 2em 1em 1em;
-    min-width: 350px;
-    background-color: rgba(255, 255, 255, 0.95);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
-    overflow: hidden;
-    -webkit-transform: translate(-50%, -50%);
-    -moz-transform: translate(-50%, -50%);
-    -ms-transform: translate(-50%, -50%);
-    transform: translate(-50%, -50%);
-}
-
-[role="dialog:hint"] .typer-ui-dialog {
+[role="dialog:hint"] .typer-ui-dialog-inner {
     padding: 0.25em 0.5em;
-    min-width: 0;
     white-space: nowrap;
 }
 
-.pinned-bottom .typer-ui-dialog {
-    top: 100%;
-    left: 50%;
-    -webkit-transform: translate(-50%, 0);
-    -moz-transform: translate(-50%, 0);
-    -ms-transform: translate(-50%, 0);
-    transform: translate(-50%, 0);
+.typer-ui-dialog-inner.pop {
+    -webkit-animation: dialog-content-pop 0.1s linear;
+    -moz-animation: dialog-content-pop 0.1s linear;
+    animation: dialog-content-pop 0.1s linear;
 }
 
-.pinned-top .typer-ui-dialog {
-    bottom: 100%;
-    left: 50%;
-    -webkit-transform: translate(-50%, 0);
-    -moz-transform: translate(-50%, 0);
-    -ms-transform: translate(-50%, 0);
-    transform: translate(-50%, 0);
+@-webkit-keyframes dialog-content-pop {
+    0% {
+        -webkit-transform: scale(1.05);
+    }
 }
 
-.pinned-left .typer-ui-dialog {
-    right: 100%;
-    top: 50%;
-    -webkit-transform: translate(0, -50%);
-    -moz-transform: translate(0, -50%);
-    -ms-transform: translate(0, -50%);
-    transform: translate(0, -50%);
+@-moz-keyframes dialog-content-pop {
+    0% {
+        -moz-transform: scale(1.05);
+    }
 }
 
-.pinned-right .typer-ui-dialog {
-    left: 100%;
-    top: 50%;
-    -webkit-transform: translate(0, -50%);
-    -moz-transform: translate(0, -50%);
-    -ms-transform: translate(0, -50%);
-    transform: translate(0, -50%);
-}
-
-.stick-left .typer-ui-dialog,
-.stick-right .typer-ui-dialog {
-    left: auto;
-    transform: none;
-}
-
-.stick-top .typer-ui-dialog,
-.stick-bottom .typer-ui-dialog {
-    top: auto;
-    transform: none;
+@keyframes dialog-content-pop {
+    0% {
+        transform: scale(1.05);
+    }
 }
 
 .typer-ui-dialog .typer-ui-textbox [contenteditable] {
@@ -720,22 +696,6 @@ label.typer-ui-callout {
     color: #103492;
 }
 
-.loading .typer-ui-dialog-content {
-    pointer-events: none;
-}
-
-.typer-ui-dialog-content > .typer-ui-label {
-    display: block;
-}
-
-.typer-ui-dialog-content > .typer-ui-buttonset {
-    display: -ms-flexbox;
-    display: -webkit-flex;
-    display: flex;
-    margin: 1.5em -0.5em -0.5em;
-    text-align: right;
-}
-
 .typer-ui-dialog-pin {
     display: none;
     position: absolute;
@@ -749,30 +709,6 @@ label.typer-ui-callout {
 
 .pinned .typer-ui-dialog-pin {
     display: block;
-}
-
-.pinned-bottom .typer-ui-dialog-pin {
-    bottom: 0;
-    left: 50%;
-    margin-left: -1em;
-}
-
-.pinned-top .typer-ui-dialog-pin {
-    top: 0;
-    left: 50%;
-    margin-left: -1em;
-}
-
-.pinned-left .typer-ui-dialog-pin {
-    left: 0;
-    top: 50%;
-    margin-top: -1em;
-}
-
-.pinned-right .typer-ui-dialog-pin {
-    right: 0;
-    top: 50%;
-    margin-top: -1em;
 }
 
 .typer-ui-dialog-pin:before {
@@ -805,35 +741,30 @@ label.typer-ui-callout {
     right: -0.6em;
 }
 
-.typer-ui-dialog-content {
+.typer-ui-dialog .typer-ui-form {
     position: relative;
+    -webkit-transform: scale(1);
+    -moz-transform: scale(1);
+    transform: scale(1);
 }
 
-.typer-ui-dialog-content.pop {
-    -webkit-animation: dialog-content-pop 0.1s linear;
-    -moz-animation: dialog-content-pop 0.1s linear;
-    animation: dialog-content-pop 0.1s linear;
+.typer-ui-dialog .typer-ui-form > .typer-ui-label {
+    display: block;
 }
 
-@-webkit-keyframes dialog-content-pop {
-    0% {
-        -webkit-transform: scale(1.05);
-    }
+.typer-ui-dialog .typer-ui-form > .typer-ui-buttonset {
+    display: -ms-flexbox;
+    display: -webkit-flex;
+    display: flex;
+    margin: 1.5em -0.5em -0.5em;
+    text-align: right;
 }
 
-@-moz-keyframes dialog-content-pop {
-    0% {
-        -moz-transform: scale(1.05);
-    }
+.loading .typer-ui-dialog-inner {
+    pointer-events: none;
 }
 
-@keyframes dialog-content-pop {
-    0% {
-        transform: scale(1.05);
-    }
-}
-
-.loading .typer-ui-dialog:before {
+.loading .typer-ui-dialog-inner:before {
     content: '';
     position: absolute;
     top: 0;
@@ -1127,6 +1058,9 @@ label.typer-ui-callout {
     -webkit-align-self: stretch;
     -ms-flex-item-align: stretch;
     align-self: stretch;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
 }
 
 .typer-ui-calendar + .typer-ui-clock {

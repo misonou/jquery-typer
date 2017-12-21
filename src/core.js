@@ -1697,11 +1697,11 @@
         }
 
         function retainFocusHandler(e) {
-            if (!containsOrEquals(e.currentTarget, e.relatedTarget)) {
+            if (!containsOrEquals(e.currentTarget, e.relatedTarget || Typer.ui.activeElement)) {
                 if (userFocus.get(typer) === e.currentTarget) {
                     userFocus.delete(typer);
                 }
-                if (topElement === e.relatedTarget) {
+                if (topElement === e.relatedTarget || !e.relatedTarget) {
                     currentSelection.focus();
                 } else {
                     $self.trigger($.Event('focusout', {

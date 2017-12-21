@@ -421,6 +421,7 @@
             }
         }),
         inlineStyle: Typer.ui.dropdown({
+            allowEmpty: true,
             requireWidget: 'inlineStyle',
             requireCommand: 'applyClass',
             hiddenWhenDisabled: true,

@@ -27,8 +27,8 @@
             '.has-N::selection,.has-N ::selection{background-color:transparent;}' +
             '.has-N::-moz-selection,.has-N ::-moz-selection{background-color:transparent;}' +
             '.N{position:fixed;pointer-events:none;width:100%;height:100%;font-family:monospace;font-size:10px;}' +
-            '.N>div{position:fixed;box-sizing:border-box;}' +
-            '.N>.border{border:1px solid rgba(0,31,81,0.2);}' +
+            '.N>div{position:fixed;}' +
+            '.N>.border{box-sizing:border-box;border:1px solid rgba(0,31,81,0.2);}' +
             '.N>.fill{background-color:rgba(0,31,81,0.2);}' +
             '.N>.fill-margin{border:solid rgba(255,158,98,0.2);}' +
             '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:before,.N>.tl-r:before,.N>.br-r:after,.N>.tr-r:after{content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);}}' +
@@ -58,33 +58,6 @@
         });
     }
 
-    function toWidthHeight(v) {
-        return {
-            top: v.top,
-            left: v.left,
-            width: v.width,
-            height: v.height
-        };
-    }
-
-    function toRightBottom(v) {
-        return {
-            top: v.top | 0,
-            left: v.left | 0,
-            right: (v.right || v.left + v.width) | 0,
-            bottom: (v.bottom || v.top + v.height) | 0
-        };
-    }
-
-    function toScreenRightBottom(v) {
-        return {
-            top: v.top,
-            left: v.left,
-            right: windowWidth - (v.right || v.left + v.width),
-            bottom: windowHeight - (v.bottom || v.top + v.height)
-        };
-    }
-
     function getElementMarker(element) {
         var node = activeTyper.getNode(element);
         var arr = [];
@@ -104,8 +77,15 @@
 
     function computeTextRects(range) {
         var container = range.commonAncestorContainer;
-        var bRect = (container.nodeType === 1 ? container : container.parentNode).getBoundingClientRect();
-        var rects = $.map(range.getClientRects(), toRightBottom);
+        var bRect = Typer.ui.getRect(container.nodeType === 1 ? container : container.parentNode);
+        var rects = $.map(range.getClientRects(), function (v) {
+            return {
+                top: v.top,
+                left: v.left,
+                right: v.right,
+                bottom: v.bottom
+            };
+        });
         var result = [];
         rects.sort(function (a, b) {
             return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
@@ -176,11 +156,11 @@
             var dom = v.dom = v.dom || [];
             var domCount = 0;
 
-            function drawLayer(className, css, value) {
+            function drawLayer(className, rect, extraCSS) {
                 var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
                 d.className = className;
                 d.removeAttribute('style');
-                $(d).css(css || '', value);
+                $(d).css(Typer.ui.cssFromRect(rect)).css(extraCSS || {});
                 domCount++;
                 return d;
             }
@@ -195,7 +175,7 @@
                 $.each(rects, function (i, v) {
                     var prev = rects[i - 1] || INVALID;
                     var next = rects[i + 1] || INVALID;
-                    var dom = drawLayer(type === 'text-fill' ? 'fill' : 'border', toScreenRightBottom(v));
+                    var dom = drawLayer(type === 'text-fill' ? 'fill' : 'border', v);
                     dom.className += [
                         v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
                         v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
@@ -206,15 +186,15 @@
                     drawLayer('elm', rects[rects.length - 1]).setAttribute('elm', getElementMarker(v.element));
                 }
             } else if (v.type.substr(0, 5) === 'block') {
-                var bRect = v.element.getBoundingClientRect();
-                drawLayer('border', toWidthHeight(bRect));
+                var bRect = Typer.ui.getRect(v.element);
+                drawLayer('border', bRect);
                 if (v.type === 'block') {
-                    drawLayer('elm', toWidthHeight(bRect)).setAttribute('elm', getElementMarker(v.element));
+                    drawLayer('elm', bRect).setAttribute('elm', getElementMarker(v.element));
                 } else if (v.type === 'block-fill') {
-                    drawLayer('fill', toWidthHeight(bRect));
+                    drawLayer('fill', bRect);
                 } else if (v.type === 'block-margin') {
                     var style = window.getComputedStyle(v.element);
-                    var s = toScreenRightBottom(bRect);
+                    var s = {};
                     s.margin = [
                         -parseFloat(style.marginTop),
                         -parseFloat(style.marginRight),
@@ -225,9 +205,9 @@
                         style.marginRight,
                         style.marginBottom,
                         style.marginLeft].join(' ');
-                    drawLayer('fill-margin', s);
+                    drawLayer('fill-margin', bRect, s);
                     $('br', v.element).each(function (i, v) {
-                        drawLayer('newline', toWidthHeight(v.getBoundingClientRect()));
+                        drawLayer('newline', Typer.ui.getRect(v));
                     });
                 }
             }
@@ -241,7 +221,7 @@
 
     function redrawSelection() {
         if (activeTyper) {
-            var currentRect = activeTyper.element.getBoundingClientRect();
+            var currentRect = Typer.ui.getRect(activeTyper.element);
             if (!previousRect || !rectEquals(previousRect, currentRect)) {
                 previousRect = currentRect;
                 draw(selectionLayers);

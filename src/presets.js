@@ -5,8 +5,8 @@
         var topElement = typer.element;
         var style = window.getComputedStyle(topElement);
         if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
-            var rect = topElement.getBoundingClientRect();
-            var pos = typer.getSelection().extendCaret.getRange().getBoundingClientRect();
+            var rect = Typer.ui.getRect(topElement);
+            var pos = Typer.ui.getRect(typer.getSelection().extendCaret.getRange());
             if (pos.left - rect.right >= 1) {
                 topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
             } else if (rect.left - pos.left >= 1) {

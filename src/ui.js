@@ -1,31 +1,29 @@
-(function ($, Typer, Object, RegExp, window, document) {
+(function ($, Typer, Object, RegExp, Node, window, document) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
     var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
     var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
     var ROOT_EVENTS = 'executing executed cancelled';
-
-    var isFunction = $.isFunction;
-    var isPlainObject = $.isPlainObject;
-    var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
-    var defineProperty = Object.defineProperty;
-    var dummyDiv = document.createElement('div');
+    var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
+    var IS_TOUCH = 'ontouchstart' in window;
+    var XFORM_VALUES = 'none translate(-50%,0) translate(0,-50%) translate(-50%,-50%)'.split(' ');
 
     var FLIP_POS = {
+        top: 'bottom',
         left: 'right',
         right: 'left',
-        top: 'bottom',
         bottom: 'top'
     };
-    var ZERO_ORIGIN = {
-        percentX: 0,
-        percentY: 0,
-        offsetX: 0,
-        offsetY: 0
+    var MARGIN_PROP = {
+        top: 'marginTop',
+        left: 'marginLeft',
+        right: 'marginRight',
+        bottom: 'marginBottom'
     };
-    var ORIGIN_TO_PERCENT = {
-        center: 0.5,
+    var DIR_SIGN = {
+        top: -1,
+        left: -1,
         right: 1,
         bottom: 1
     };
@@ -47,6 +45,13 @@
         end: '\u2b68'
     };
 
+    var data = $._data;
+    var isFunction = $.isFunction;
+    var isPlainObject = $.isPlainObject;
+    var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+    var containsOrEquals = Typer.containsOrEquals;
+    var dummyDiv = document.createElement('div');
+
     var definedControls = {};
     var definedIcons = {};
     var definedLabels = {};
@@ -59,8 +64,7 @@
     var snaps = [];
     var currentCallouts = [];
     var currentDialog;
-    var IS_MAC = navigator.userAgent.indexOf('Macintosh') >= 0;
-    var IS_TOUCH = 'ontouchstart' in window;
+    var originDiv;
 
     function randomId() {
         return Math.random().toString(36).substr(2, 8);
@@ -78,6 +82,11 @@
     function lowfirst(v) {
         v = String(v || '');
         return v.charAt(0).toLowerCase() + v.slice(1);
+    }
+
+    function setImmediateOnce(fn) {
+        clearImmediate(fn._timeout);
+        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
     }
 
     function exclude(haystack, needle) {
@@ -114,11 +123,27 @@
         }
     }
 
-    function defineHiddenProperty(obj, prop, value) {
-        defineProperty(obj, prop, {
-            configurable: true,
-            writable: true,
-            value: value
+    function defineProperty(obj, prop, flag, getter, setter) {
+        var desc = {};
+        desc.configurable = flag.indexOf('c') >= 0;
+        desc.enumerable = flag.indexOf('e') >= 0;
+        if (flag.indexOf('g') >= 0) {
+            desc.get = getter;
+            desc.set = setter || null;
+        } else {
+            desc.writable = true;
+            desc.value = getter;
+        }
+        Object.defineProperty(obj, prop, desc);
+    }
+
+    function inheritProperty(obj, prop) {
+        var initialValue = obj[prop];
+        defineProperty(obj, prop, 'ceg', function () {
+            var parent = this.contextualParent;
+            return parent ? parent[prop] : initialValue;
+        }, function (value) {
+            defineProperty(this, prop, 'ce', value);
         });
     }
 
@@ -139,32 +164,26 @@
         baseFn.prototype = controlExtensions;
         fn.prototype = new baseFn();
         Object.getOwnPropertyNames(base || {}).forEach(function (v) {
-            defineProperty(fn.prototype, v, getOwnPropertyDescriptor(base, v));
+            Object.defineProperty(fn.prototype, v, getOwnPropertyDescriptor(base, v));
         });
-        defineHiddenProperty(fn.prototype, 'constructor', fn);
+        defineProperty(fn.prototype, 'constructor', 'c', fn);
         return fn;
     }
 
     function listen(obj, prop, callback) {
         var desc = getPropertyDescriptor(obj, prop) || {
-            enumerable: true,
             value: obj[prop]
         };
-        defineProperty(obj, prop, {
-            enumerable: desc.enumerable,
-            configurable: false,
-            get: function () {
-                return desc.get ? desc.get.call(obj) : desc.value;
-            },
-            set: function (value) {
-                if (value !== this[prop]) {
-                    if (desc.set) {
-                        desc.set.call(obj, value);
-                    } else {
-                        desc.value = value;
-                    }
-                    callback.call(this, prop, value);
+        defineProperty(obj, prop, desc.enumerable !== false ? 'eg' : 'g', function () {
+            return desc.get ? desc.get.call(obj) : desc.value;
+        }, function (value) {
+            if (value !== this[prop]) {
+                if (desc.set) {
+                    desc.set.call(obj, value);
+                } else {
+                    desc.value = value;
                 }
+                callback.call(this, prop, value);
             }
         });
     }
@@ -179,6 +198,23 @@
             name: m[1],
             params: params || {}
         };
+    }
+
+    function getState(element, name) {
+        var re = new RegExp('(^|\\s)\\s*' + name + '(?:-(\\S+)|\\b)$', 'ig');
+        var t = [false];
+        (element.className || '').replace(re, function (v, a) {
+            t[a ? t.length : 0] = a || true;
+        });
+        return t[1] ? t.slice(1) : t[0];
+    }
+
+    function setState(element, name, values) {
+        var re = new RegExp('(^|\\s)\\s*' + name + '(?:-(\\S+)|\\b)|\\s*$', 'ig');
+        var replaced = 0;
+        element.className = (element.className || '').replace(re, function () {
+            return replaced++ || !values || values.length === 0 ? '' : (' ' + name + (values[0] ? [''].concat(values).join(' ' + name + '-') : ''));
+        });
     }
 
     function getZIndex(element, pseudo) {
@@ -204,84 +240,93 @@
         return maxZIndex + 1;
     }
 
-    function getBoundingClientRect(elm) {
-        return (elm || document.documentElement).getBoundingClientRect();
+    function getRect(elm) {
+        var rect = $.extend({}, (elm || document.documentElement).getBoundingClientRect());
+        return delete rect.x, delete rect.y, delete rect.toJSON, rect;
     }
 
-    function toggleDisplay($elm, visible) {
-        if (!visible) {
-            if ($elm.css('display') !== 'none') {
-                $elm.data('original-display', $elm.css('display'));
-            }
-            $elm.hide();
-        } else if ($elm.data('original-display')) {
-            $elm.css('display', $elm.data('original-display'));
-        } else {
-            $elm.show();
+    function cssFromPoint(x, y, origin, parent) {
+        parent = Typer.is(parent || origin, Node);
+        var refRect = getRect(parent || originDiv);
+        var winRect = getRect(parent);
+        var dirX = matchWSDelim(origin || y, 'left right') || 'left';
+        var dirY = matchWSDelim(origin || y, 'top bottom') || 'top';
+        var style = {};
+        y = (((x.top || x.clientY || x.y || y) | 0) - refRect.top);
+        x = (((x.left || x.clientX || x.x || x) | 0) - refRect.left);
+        style[dirX] = (dirX === 'left' ? x : winRect.width - x) + 'px';
+        style[dirY] = (dirY === 'top' ? y : winRect.height - y) + 'px';
+        style[FLIP_POS[dirX]] = 'auto';
+        style[FLIP_POS[dirY]] = 'auto';
+        return style;
+    }
+
+    function cssFromRect(rect) {
+        var style = cssFromPoint(rect);
+        style.width = ((rect.width || rect.right - rect.left) | 0) + 'px';
+        style.height = ((rect.height || rect.bottom - rect.top) | 0) + 'px';
+        return style;
+    }
+
+    function snapToElement(elm, of, at, within) {
+        var refRect = isPlainObject(of) || !of ? {} : getRect(of);
+        if (!('left' in refRect)) {
+            refRect.left = refRect.right = (of.left || of.clientX || of.x) | 0;
+            refRect.top = refRect.bottom = (of.right || of.clientY || of.y) | 0;
         }
-    }
-
-    function toggleClass(element, prefix, values) {
-        var re = new RegExp('\\s*\\b' + prefix + '(-\\S+|\\b)|\\s*$', 'ig');
-        var replacement = values && values[0] ? ' ' + prefix + [''].concat(values).join(' ' + prefix + '-') : '';
-        $(element).attr('class', function (i, v) {
-            var replaced = 0;
-            return (v || '').replace(re, function () {
-                return replaced++ ? '' : replacement;
-            });
-        });
-    }
-
-    function updatePinnedPositions() {
-        var windowSize = getBoundingClientRect();
-
-        $.each(snaps, function (i, v) {
-            var dialog = $(v.element).find('.typer-ui-dialog')[0];
-            var dialogSize = getBoundingClientRect(dialog);
-            var rect = getBoundingClientRect(v.reference);
-            var stick = {};
-
-            $(v.element).css({
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height
-            });
-            if (v.direction === 'bottom' || v.direction === 'top') {
-                stick.left = rect.left + rect.width / 2 < dialogSize.width / 2;
-                stick.right = windowSize.width - rect.left - rect.width / 2 < dialogSize.width / 2;
+        var inset = matchWSDelim(at, 'inset-x inset-y inset') || 'inset-x';
+        var winRect = inset === 'inset' ? refRect : getRect(within);
+        var elmRect = getRect(elm);
+        var elmStyle = window.getComputedStyle(elm);
+        var margin = {};
+        var point = {};
+        var fn = function (dir, inset, p, pSize) {
+            if (!FLIP_POS[dir]) {
+                var center = (refRect[FLIP_POS[p]] + refRect[p]);
+                dir = center - winRect[p] * 2 < elmRect[pSize] ? p : winRect[FLIP_POS[p]] * 2 - center < elmRect[pSize] ? FLIP_POS[p] : '';
+                point[p] = (dir ? winRect[dir] : center / 2) + margin[dir || p];
+                return dir;
             }
-            if (v.direction === 'left' || v.direction === 'right') {
-                stick.top = rect.top + rect.height / 2 < dialogSize.height / 2;
-                stick.bottom = windowSize.height - rect.top - rect.height / 2 < dialogSize.height / 2;
+            // determine cases of 'normal', 'flip' and 'fit' by available rooms
+            var rDir = inset ? FLIP_POS[dir] : dir;
+            if (refRect[dir] * DIR_SIGN[rDir] + elmRect[pSize] <= winRect[rDir] * DIR_SIGN[rDir]) {
+                point[p] = refRect[dir] + margin[FLIP_POS[rDir]];
+            } else if (refRect[FLIP_POS[dir]] * DIR_SIGN[rDir] - elmRect[pSize] > winRect[FLIP_POS[rDir]] * DIR_SIGN[rDir]) {
+                dir = FLIP_POS[dir];
+                point[p] = refRect[dir] + margin[rDir];
+            } else {
+                point[p] = winRect[dir] + margin[dir];
+                return dir;
             }
-            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
-                dialog.style[v] = stick[v] ? -(Math.abs(windowSize[v] - rect[v]) - 10) + 'px' : '';
-            });
-            callThemeFunction(v.control, 'positionUpdate', {
-                element: v.element,
-                position: rect,
-                stick: stick
-            });
+            return inset ? dir : FLIP_POS[dir];
+        };
+
+        Object.keys(FLIP_POS).forEach(function (v) {
+            margin[v] = (parseFloat(elmStyle[MARGIN_PROP[v]]) || 0) * DIR_SIGN[v];
+            winRect[v] -= margin[v];
         });
+        var oDirX = matchWSDelim(at, 'left right center') || 'left';
+        var oDirY = matchWSDelim(at, 'top bottom center') || 'bottom';
+        var dirX = fn(oDirX, FLIP_POS[oDirY] && inset === 'inset-x', 'left', 'width');
+        var dirY = fn(oDirY, FLIP_POS[oDirX] && inset === 'inset-y', 'top', 'height');
+
+        var style = cssFromPoint(point, dirX + ' ' + dirY);
+        style.position = 'fixed';
+        style.transform = XFORM_VALUES[((!dirY) << 1) | (!dirX)];
+        $(elm).css(style);
     }
 
-    function getFullClientRect(element) {
-        var rect = getBoundingClientRect(element);
-        if (rect.width && rect.height) {
-            return rect;
-        }
-        rect = $.extend({}, rect);
-        $(element).children().each(function (i, v) {
-            var r = getBoundingClientRect(v);
-            rect.top = Math.min(rect.top, r.top);
-            rect.left = Math.min(rect.left, r.left);
-            rect.right = Math.max(rect.right, r.right);
-            rect.bottom = Math.max(rect.bottom, r.bottom);
+    function updateSnaps() {
+        snaps.forEach(function (v) {
+            if (Typer.is(v.ref, ':visible') && !Typer.rectEquals(getRect(v.ref), v.rect || {})) {
+                v.list.forEach(function (w) {
+                    if (Typer.is(w.elm, ':visible')) {
+                        snapToElement(w.elm, v.ref, w.dir);
+                    }
+                });
+                v.rect = getRect(v.ref);
+            }
         });
-        rect.width = rect.right - rect.left;
-        rect.height = rect.bottom - rect.top;
-        return rect;
     }
 
     function showCallout(control, element, ref, pos) {
@@ -291,52 +336,29 @@
                 break;
             }
         }
-
-        var rect = currentCallouts[0];
-        if (!rect || rect.control !== control) {
-            rect = {};
-            currentCallouts.unshift(rect);
-        } else if (rect.promise.state() === 'pending') {
-            rect.promise.always(function () {
-                showCallout(control, element, ref, pos);
+        var item = currentCallouts[0];
+        if (!item || item.control !== control) {
+            item = {};
+            currentCallouts.unshift(item);
+        }
+        $.when(item.promise).always(function () {
+            $(element).appendTo(document.body).css({
+                position: 'fixed',
+                zIndex: getZIndexOver(control.element)
             });
-            return;
-        }
-        rect = $.extend(rect, {
-            control: control,
-            element: element,
-            focusedElement: Typer.is(document.activeElement, SELECTOR_FOCUSABLE)
+            item.control = control;
+            item.element = element;
+            item.focusedElement = Typer.is(document.activeElement, SELECTOR_FOCUSABLE);
+            (isPlainObject(ref) ? snapToElement : typerUI.snap)(element, ref, pos || 'left bottom');
+            item.promise = $.when(callThemeFunction(control, 'afterShow', item));
         });
-
-        $(element).appendTo(document.body).css({
-            position: 'fixed',
-            zIndex: getZIndexOver(currentCallouts[0] ? currentCallouts[0].element : document.body)
-        });
-        if (ref.getBoundingClientRect) {
-            var xrel = matchWSDelim(pos, 'left right') || 'left';
-            var yrel = matchWSDelim(pos, 'top bottom') || 'bottom';
-            var refRect = getBoundingClientRect(ref);
-            rect[xrel] = refRect.left;
-            rect[yrel] = refRect.top;
-            rect[FLIP_POS[xrel]] = refRect.right;
-            rect[FLIP_POS[yrel]] = refRect.bottom;
-        } else {
-            rect.left = rect.right = ref.x;
-            rect.top = rect.bottom = ref.y;
-        }
-        var winRect = getBoundingClientRect();
-        var elmRect = getFullClientRect(element);
-        $(element).css({
-            left: (rect.left + elmRect.width > winRect.width ? rect.right - elmRect.width : rect.left) + 'px',
-            top: (rect.top + elmRect.height > winRect.height ? rect.bottom - elmRect.height : rect.top) + 'px'
-        });
-        rect.promise = $.when(callThemeFunction(control, 'afterShow', rect));
     }
 
     function hideCallout(control) {
         for (var i = currentCallouts.length - 1; i >= 0 && control !== currentCallouts[i].control && !control.parentOf(currentCallouts[i].control); i--);
         $.each(currentCallouts.slice(0, i + 1), function (i, v) {
             if (v.promise.state() !== 'pending' && !v.isClosing) {
+                typerUI.unsnap(v.element);
                 v.isClosing = true;
                 v.promise = $.when(callThemeFunction(v.control, 'beforeHide', v)).done(function () {
                     currentCallouts.splice(currentCallouts.indexOf(v), 1);
@@ -383,7 +405,7 @@
     function findControls(control, needle, defaultNS, haystack, exclusions) {
         haystack = haystack || control.all || control.contextualParent.all;
         if (!haystack._cache) {
-            defineHiddenProperty(haystack, '_cache', {});
+            defineProperty(haystack, '_cache', 'c', {});
         }
         defaultNS = defaultNS || control.defaultNS;
         exclusions = exclusions || {};
@@ -610,7 +632,6 @@
     function updateControl(control) {
         var ui = control.ui;
         var theme = definedThemes[ui.theme];
-        var $elm = $(control.element);
 
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
@@ -618,29 +639,19 @@
             suppressStateChange = !control.widget;
         }
         if (!suppressStateChange && callstack.indexOf(control, 1) < 0) {
-            if ($elm.hasClass(theme.controlErrorClass)) {
+            if (control.getState(theme.controlErrorClass || 'error')) {
                 validateControl(control);
             }
             triggerEvent(control, 'stateChange');
         }
 
         var disabled = !isEnabled(control);
-        var visible = (!control.hiddenWhenDisabled || !disabled) && control.visible !== false && callFunction(control, 'visible') !== false;
-
-        if ($elm.is(':input')) {
-            $elm.prop('disabled', disabled);
+        if (control.element.disabled !== undefined) {
+            control.element.disabled = disabled;
         }
-        if (theme.controlDisabledClass) {
-            $elm.toggleClass(theme.controlDisabledClass, disabled);
-        }
-        if (theme.controlActiveClass) {
-            $elm.toggleClass(theme.controlActiveClass, isActive(control));
-        }
-        if (theme.controlHiddenClass) {
-            $elm.toggleClass(theme.controlHiddenClass, !visible);
-        } else {
-            toggleDisplay($elm, visible);
-        }
+        control.setState(theme.controlDisabledClass || 'disabled', disabled);
+        control.setState(theme.controlActiveClass || 'active', isActive(control));
+        control.setState(theme.controlHiddenClass || 'hidden', (disabled && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false);
     }
 
     function executeControlWithFinal(control, callback, optArg) {
@@ -685,7 +696,7 @@
                 });
             }
         });
-        toggleClass(control.element, definedThemes[control.ui.theme].controlErrorClass, Object.keys(flags));
+        setState(control.element, definedThemes[control.ui.theme].controlErrorClass || 'error', Object.keys(flags));
         callThemeFunction(control, 'validate', errors);
         return errors[0] && control;
     }
@@ -808,11 +819,7 @@
         destroy: function () {
             var self = this;
             foreachControl(self, triggerEvent, 'destroy');
-            for (var i = snaps.length - 1; i >= 0; i--) {
-                if (snaps[i].control.ui === self) {
-                    $(snaps.splice(i, 1)[0].reference).removeClass(definedThemes[self.theme].controlPinActiveClass);
-                }
-            }
+            typerUI.unsnap(self.element);
             $(self.element).remove();
         },
         getControl: function (element) {
@@ -876,10 +883,10 @@
         },
         reset: function () {
             var self = this;
-            var theme = definedThemes[self.theme];
+            var errorClass = definedThemes[self.theme].controlErrorClass || 'error';
             foreachControl(self, function (control) {
                 if (control.validate) {
-                    toggleClass(control.element, theme.controlErrorClass);
+                    control.setState(errorClass, false);
                 }
                 triggerEvent(control, 'reset');
             });
@@ -895,6 +902,15 @@
             }
             control = resolveControlParam(this, control);
             return control && control.setValue(value);
+        },
+        getState: function (control, name) {
+            control = resolveControlParam(this, control);
+            return control && control.getState(name);
+        },
+        setState: function (control, name, value) {
+            this.resolve(control).forEach(function (v) {
+                v.setState(name, value);
+            });
         },
         set: function (control, prop, value) {
             this.resolve(control).forEach(function (v) {
@@ -931,13 +947,19 @@
     });
 
     $.extend(typerUI, {
+        activeElement: null,
         controls: definedControls,
         themes: definedThemes,
         controlExtensions: controlExtensions,
         matchWSDelim: matchWSDelim,
         getZIndex: getZIndex,
         getZIndexOver: getZIndexOver,
+        getRect: getRect,
         listen: listen,
+        cssFromPoint: cssFromPoint,
+        cssFromRect: cssFromRect,
+        getState: getState,
+        setState: setState,
         define: function (name, base, ctor) {
             if (isPlainObject(name)) {
                 $.each(name, typerUI.define);
@@ -1025,17 +1047,27 @@
                 element.style.position = 'relative';
             }
         },
-        pin: function (control, reference, direction) {
-            var theme = definedThemes[control.ui.theme];
-            snaps.push({
-                control: control,
-                element: control.element,
-                reference: reference,
-                direction: direction
+        snap: function (element, to, dir) {
+            typerUI.unsnap(element);
+            to = Typer.is(to, Node) || document.documentElement;
+            var s = data(to).typerSnaps || (data(to).typerSnaps = snaps[snaps.push({ ref: to, list: [] }) - 1]);
+            s.list.push({
+                elm: element,
+                dir: dir
             });
-            toggleClass(control.element, theme.controlPinnedClass, [direction]);
-            $(reference).addClass(theme.controlPinActiveClass);
-            updatePinnedPositions();
+            snapToElement(element, to, dir);
+        },
+        unsnap: function (element) {
+            for (var i = snaps.length - 1; i >= 0; i--) {
+                for (var j = snaps[i].list.length - 1; j >= 0; j--) {
+                    if (containsOrEquals(element, snaps[i].list[j].elm)) {
+                        snaps[i].list.splice(j, 1);
+                    }
+                }
+                if (!snaps[i].list[0]) {
+                    delete data(snaps.splice(i, 1)[0].ref).typerSnaps;
+                }
+            }
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
@@ -1067,17 +1099,6 @@
             e = e.originalEvent || e;
             var dir = -e.wheelDeltaY || -e.wheelDelta || e.detail;
             return dir / Math.abs(dir) * (IS_MAC ? -1 : 1);
-        },
-        parseOrigin: function (value) {
-            if (/(left|center|right)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?(?:\s+(top|center|bottom)?(?:((?:^|\s|[+-]?)\d+(?:\.\d+)?)(px|%))?)?/g.test(value)) {
-                return {
-                    percentX: (ORIGIN_TO_PERCENT[RegExp.$1] || 0) + (RegExp.$3 === '%' && +RegExp.$2),
-                    percentY: (ORIGIN_TO_PERCENT[RegExp.$4 || (!RegExp.$5 && RegExp.$1)] || 0) + (RegExp.$6 === '%' && +RegExp.$5),
-                    offsetX: +(RegExp.$3 === 'px' && +RegExp.$2),
-                    offsetY: +(RegExp.$6 === 'px' && +RegExp.$5)
-                };
-            }
-            return $.extend({}, ZERO_ORIGIN);
         }
     });
 
@@ -1085,7 +1106,7 @@
         buttonsetGroup: 'left',
         cssClass: '',
         hiddenWhenDisabled: false,
-        markdown: false,
+        pinDirection: 'none',
         renderAs: '',
         requireChildControls: false,
         requireTyper: false,
@@ -1094,7 +1115,7 @@
         showButtonLabel: true,
         hideCalloutOnExecute: true,
         is: function (type) {
-            return matchWSDelim(this.type, type);
+            return type.charAt(0) === ':' ? getState(this.element, type) : matchWSDelim(this.type, type);
         },
         parentOf: function (control) {
             for (; control; control = control.parent) {
@@ -1148,6 +1169,12 @@
                 }
             });
             updateControl(self);
+        },
+        getState: function (name) {
+            return getState(this.element, name);
+        },
+        setState: function (name, value) {
+            return setState(this.element, name, value);
         }
     });
 
@@ -1171,6 +1198,8 @@
             return IS_MAC ? (flag.alt || '') + (flag.shift || '') + (flag.ctrl || '') + (MAC_CTRLKEY[lowfirst(str)] || str) : str;
         }
     });
+
+    inheritProperty(controlExtensions, 'pinDirection');
 
     /* ********************************
      * Built-in Control Types
@@ -1349,11 +1378,6 @@
                 ui.update();
                 $(ui.element).appendTo(document.body);
                 setImmediate(function () {
-                    var parent = ui.parentControl;
-                    var dir = parent && matchWSDelim(parent.pinDirection || parent.contextualParent.pinDirection || parent.ui.pinDirection, 'left right top bottom');
-                    if (self.pinnable && dir) {
-                        Typer.ui.pin(self, parent.element, dir);
-                    }
                     callThemeFunction(self, 'afterShow', data);
                     typerUI.focus(self.element);
                 });
@@ -1395,9 +1419,7 @@
             type: 'button',
             buttonsetGroup: 'right'
         }),
-        message: typerUI.label({
-            markdown: true
-        }),
+        message: typerUI.label(),
         input: typerUI.textbox(),
         prompt: typerUI.dialog({
             pinnable: true,
@@ -1455,19 +1477,23 @@
                 setImmediate(typerUI.focus, currentDialog.element);
             }
         });
-        $(window).bind('resize scroll orientationchange', function (e) {
-            updatePinnedPositions();
+        $(window).bind('resize scroll orientationchange', function () {
+            setImmediateOnce(updateSnaps);
+        });
+        $(document.body).bind('mousemove mousewheel keyup touchend', function () {
+            setImmediateOnce(updateSnaps);
         });
         $(document.body).on('click', 'label', function (e) {
             // IE does not focus on focusable element when clicking containing LABEL element
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
         $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
-            if (currentDialog && currentDialog.clickReject && !Typer.containsOrEquals(currentDialog.element, e.target)) {
+            typerUI.activeElement = e.target;
+            if (currentDialog && currentDialog.clickReject && !containsOrEquals(currentDialog.element, e.target)) {
                 currentDialog.clickReject();
             }
             $.each(currentCallouts.slice(0), function (i, v) {
-                if (!Typer.containsOrEquals(v.element, e.target) && (!v.focusedElement || !Typer.containsOrEquals(v.focusedElement, e.target))) {
+                if (!containsOrEquals(v.element, e.target) && (!v.focusedElement || !containsOrEquals(v.focusedElement, e.target))) {
                     hideCallout(v.control);
                 }
             });
@@ -1481,7 +1507,7 @@
                 lastActiveElement = e.type === 'focusin' ? e.target : null;
             });
             $(document.body).bind('touchend', function (e) {
-                if (lastActiveElement && !Typer.containsOrEquals(lastActiveElement, e.target)) {
+                if (lastActiveElement && !containsOrEquals(lastActiveElement, e.target)) {
                     lastActiveElement.blur();
                     $(lastActiveElement).trigger($.Event('focusout', {
                         relatedTarget: e.target
@@ -1489,6 +1515,9 @@
                 }
             });
         }
+
+        // helper element for detecting fixed position offset to the client screen
+        originDiv = $('<div style="position:fixed;top:0;left:0;">').appendTo(document.body)[0];
     });
 
-}(jQuery, window.Typer, Object, RegExp, window, document));
+}(jQuery, window.Typer, Object, RegExp, Node, window, document));

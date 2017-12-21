@@ -6,8 +6,7 @@
 
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
-        var nested = !!$(thisMenu).parents('.typer-ui-float')[0];
-        var rect = callout.getBoundingClientRect();
+        var rect = Typer.ui.getRect(callout);
         if (rect.bottom > $(window).height()) {
             $(callout).removeClass('float-top float-bottom').addClass('float-top');
         } else if (rect.top < 0) {
@@ -33,20 +32,24 @@
         });
     }
 
-    function runCSSTransition(element, className) {
+    function runCSSTransition(element, className, callback) {
         if (!$(element).hasClass(className)) {
             var deferred = $.Deferred();
-            $(element).addClass(className).one(TRANSITION_END, function () {
+            var handler = function (e) {
                 if ($(element).hasClass(className)) {
-                    deferred.resolve();
+                    $(element).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
+                    $(element).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+                    deferred.resolveWith(e.target);
                 }
-            });
-            return deferred.promise();
+            };
+            $(element).addClass(className).one(TRANSITION_END + ' ' + ANIMATION_END, handler);
+            return deferred.promise().done(callback);
         }
+        return $.when();
     }
 
     function detachCallout(control) {
-        control.callout = $('<div class="typer-ui typer-ui-material">').append($(control.element).children('.typer-ui-float').addClass('is-' + control.type))[0];
+        control.callout = $(control.element).children('.typer-ui-float').detach().addClass('typer-ui typer-ui-material is-' + control.type)[0];
         if (control.ui.typer) {
             control.ui.typer.retainFocus(control.callout);
         }
@@ -62,8 +65,6 @@
         controlActiveClass: 'active',
         controlDisabledClass: 'disabled',
         controlHiddenClass: 'hidden',
-        controlPinnedClass: 'pinned',
-        controlPinActiveClass: 'pin-active',
         controlErrorClass: 'error',
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
@@ -84,12 +85,12 @@
         form: '<div class="typer-ui-form"><br x:t="children"/></div>',
         menupane: '<div class="typer-ui-float"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         toolbar: '<div class="typer-ui-buttonset is-toolbar"><br x:t="children"/></div>',
-        contextmenu: '<div class="typer-ui-float is-contextmenu"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
+        contextmenu: '<div class="typer-ui-float is-contextmenu anim-target"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
             setImmediate(function () {
-                $(control.element).toggleClass('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
-                $(control.element).toggleClass('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
+                control.setState('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
+                control.setState('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
             });
         },
         link: '<label class="has-clickeffect"><a x:bind="(href:value,title:label)"><br x:t="label"/><span class="typer-ui-label-annotation" role="shortcut" x:bind="(_:shortcut)"></span><span class="typer-ui-label-annotation" x:bind="(_:annotation)"></span></a></label>',
@@ -120,7 +121,7 @@
         },
         checkbox: '<button class="typer-ui-checkbox" x:bind="(title:label)"><br x:t="label"/></button>',
         checkboxStateChange: function (ui, control) {
-            $(control.element).toggleClass('checked', !!control.value);
+            control.setState('checked', !!control.value);
         },
         textboxInner: '<div class="typer-ui-textbox-inner"><div contenteditable spellcheck="false"></div><div class="typer-ui-textbox-placeholder" x:bind="(_:label)"></div><div class="typer-ui-textbox-error"></div></div>',
         textbox: '<label class="typer-ui-textbox" x:bind="(title:label)"><br x:t="label"/><div class="typer-ui-textbox-wrapper"><br x:t="textboxInner"/></div></label>',
@@ -130,19 +131,27 @@
                 target: '.typer-ui-textbox'
             }
         },
-        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-content typer-ui-form"><br x:t="children"></div></div></div>',
+        dialog: '<div class="typer-ui-dialog-wrapper"><div class="typer-ui-dialog-pin"></div><div class="typer-ui-dialog"><div class="typer-ui-dialog-inner anim-target"><div class="typer-ui-form"><br x:t="children"></div></div></div></div>',
         dialogInit: function (ui, control) {
-            $(control.element).toggleClass('is-modal', control.modal);
-            var resolveButton = ui.resolveOne(control.resolveBy);
-            if (resolveButton) {
-                $(resolveButton.element).addClass('pin-active');
+            var parent = ui.parentControl;
+            var dir = control.pinnable && parent && Typer.ui.matchWSDelim(parent.pinDirection, 'left right top bottom');
+            control.setState('is-modal', !!control.modal);
+            ui.setState(control.resolveBy, 'pin-active', true);
+            if (dir) {
+                control.setState('pinned', dir);
+                parent.setState('pin-active', true);
             }
         },
         dialogWaiting: function (ui, control) {
-            $(control.element).addClass('loading');
+            control.setState('loading', true);
         },
         dialogError: function (ui, control) {
-            $(control.element).removeClass('loading');
+            control.setState('loading', false);
+        },
+        dialogDestroy: function (ui, control) {
+            if (ui.parentControl) {
+                ui.parentControl.setState('pin-active', false);
+            }
         },
         showCallout: function (ui, control) {
             if (control.callout) {
@@ -150,16 +159,23 @@
             }
         },
         afterShow: function (ui, control, data) {
-            return control.is('dialog contextmenu') && runCSSTransition(data.element, 'open');
+            if (control.is('dialog')) {
+                var parent = ui.parentControl;
+                var dir = control.pinnable && parent && Typer.ui.matchWSDelim(parent.pinDirection, 'left right top bottom');
+                var e1 = $(control.element).find('.typer-ui-dialog')[0];
+                var e2 = $(control.element).find('.typer-ui-dialog-pin')[0];
+                if (dir) {
+                    Typer.ui.snap(e1, parent.element, dir + ' center');
+                    Typer.ui.snap(e2, parent.element, dir + ' center inset');
+                } else {
+                    Typer.ui.snap(e1, window, 'center inset');
+                }
+            }
+            return control.is('dialog contextmenu') && runCSSTransition($('.anim-target', data.element)[0] || data.element, 'open');
         },
         beforeHide: function (ui, control, data) {
-            return control.is('dialog contextmenu') && runCSSTransition(data.element, 'closing').done(function () {
-                $(data.element).removeClass('open closing');
-            });
-        },
-        positionUpdate: function (ui, control, data) {
-            $.each(['left', 'right', 'top', 'bottom'], function (i, v) {
-                $(data.element).toggleClass('stick-' + v, !!data.stick[v]);
+            return control.is('dialog contextmenu') && runCSSTransition($('.anim-target', data.element)[0] || data.element, 'closing').done(function () {
+                $(this).removeClass('open closing');
             });
         },
         executed: function (ui, control) {
@@ -175,8 +191,9 @@
     $(function () {
         var SELECT_EFFECT = '.typer-ui-material button:not(.typer-ui-checkbox), .typer-ui-material .has-clickeffect';
         $(document.body).on('mousedown', SELECT_EFFECT, function (e) {
-            var pos = e.currentTarget.getBoundingClientRect();
-            var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget).children().css({
+            var pos = Typer.ui.getRect(e.currentTarget);
+            var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget);
+            var $anim = $overlay.children().css({
                 top: e.clientY - pos.top,
                 left: e.clientX - pos.left,
             });
@@ -186,13 +203,13 @@
             var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
             var scalePercent = 0.5 + 2 * Math.sqrt(Math.max(p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
             setImmediate(function () {
-                $overlay.css('transform', $overlay.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
+                $anim.css('transform', $anim.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
-            $overlay.parent().css('border-radius', $(e.currentTarget).css('border-radius'));
+            $overlay.css('border-radius', $(e.currentTarget).css('border-radius'));
         });
         $(document.body).on('mouseup mouseleave', SELECT_EFFECT, function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
-            $overlay.children().addClass('animate-out').bind(TRANSITION_END, function () {
+            runCSSTransition($overlay.children(':not(.animate-out)'), 'animate-out', function () {
                 $overlay.remove();
             });
         });
@@ -200,10 +217,7 @@
             setMenuPosition(e.currentTarget);
         });
         $(document.body).on('click', '.typer-ui-dialog-wrapper', function (e) {
-            $('.typer-ui-dialog-content', e.target).addClass('pop');
-        });
-        $(document.body).on(ANIMATION_END, '.typer-ui-dialog-content', function (e) {
-            $(e.target).removeClass('pop');
+            runCSSTransition($(e.target).find('.typer-ui-dialog-inner'), 'pop');
         });
     });
 
