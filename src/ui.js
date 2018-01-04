@@ -764,6 +764,23 @@
         definedShortcuts[keystroke][type].push(value);
     }
 
+    function getElementContainers(control) {
+        var arr = [control.element];
+        foreachControl(control, function (v) {
+            if (!containsOrEquals(v.element, v.parent.element) && containsOrEquals(document.body, v.element)) {
+                for (var elm = v.element; elm.parentNode && !$.contains(elm.parentNode, arr[0]); elm = elm.parentNode);
+                arr[arr.length] = elm;
+            }
+        });
+        return $.unique(arr);
+    }
+
+    function elementOfControl(control, element) {
+        return getElementContainers(control).some(function (v) {
+            return containsOrEquals(v, element);
+        });
+    }
+
     var typerUI = Typer.ui = define('TyperUI', null, function (options, values) {
         if (isString(options)) {
             options = {
@@ -790,11 +807,11 @@
         $(self.element).mousedown(function () {
             typerUI.focus(self.element);
         });
-        if (self.typer) {
-            self.typer.retainFocus(self.element);
-        }
         foreachControl(self, triggerEvent, 'init');
         triggerEvent(self, 'init');
+        if (self.typer) {
+            self.retainFocus(self.typer);
+        }
         if (isPlainObject(values)) {
             $.each(values, function (i, v) {
                 self.setValue(i, v);
@@ -943,6 +960,10 @@
         },
         focus: function () {
             typerUI.focus((resolveControlParam(this) || this).element);
+        },
+        retainFocus: function (typer) {
+            var arr = getElementContainers(this);
+            arr.forEach(typer.retainFocus.bind(typer));
         }
     });
 
@@ -1392,7 +1413,7 @@
                 });
                 typerUI.setZIndex(ui.element, document.body);
                 currentDialog = {
-                    element: self.element,
+                    control: self,
                     clickReject: !self.modal && form.reject,
                     keyboardResolve: self.keyboardResolve && form.resolve,
                     keyboardReject: self.keyboardReject && form.reject
@@ -1473,8 +1494,8 @@
             }
         });
         $(window).focusin(function (e) {
-            if (currentDialog && e.relatedTarget && !$.contains(currentDialog.element, e.target)) {
-                setImmediate(typerUI.focus, currentDialog.element);
+            if (currentDialog && e.relatedTarget && !elementOfControl(currentDialog.control, e.target)) {
+                setImmediate(typerUI.focus, currentDialog.control.element);
             }
         });
         $(window).bind('resize scroll orientationchange', function () {
@@ -1489,11 +1510,11 @@
         });
         $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
             typerUI.activeElement = e.target;
-            if (currentDialog && currentDialog.clickReject && !containsOrEquals(currentDialog.element, e.target)) {
+            if (currentDialog && currentDialog.clickReject && !elementOfControl(currentDialog.control, e.target)) {
                 currentDialog.clickReject();
             }
             $.each(currentCallouts.slice(0), function (i, v) {
-                if (!containsOrEquals(v.element, e.target) && (!v.focusedElement || !containsOrEquals(v.focusedElement, e.target))) {
+                if (!elementOfControl(v.control, e.target) && (!v.focusedElement || !containsOrEquals(v.focusedElement, e.target))) {
                     hideCallout(v.control);
                 }
             });

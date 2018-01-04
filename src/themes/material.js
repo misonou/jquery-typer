@@ -50,9 +50,6 @@
 
     function detachCallout(control) {
         control.callout = $(control.element).children('.typer-ui-float').detach().addClass('typer-ui typer-ui-material is-' + control.type)[0];
-        if (control.ui.typer) {
-            control.ui.typer.retainFocus(control.callout);
-        }
         bindEvent(control.ui, control.callout);
     }
 

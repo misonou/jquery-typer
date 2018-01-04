@@ -526,7 +526,7 @@
             if (!callout) {
                 initDatepicker();
             }
-            e.typer.retainFocus(callout.element);
+            callout.retainFocus(e.typer);
             activeTyper = e.typer;
 
             var options = e.widget.options;
