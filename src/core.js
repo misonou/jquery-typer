@@ -48,6 +48,7 @@
     var permitFocusEvent;
     var supportTextInputEvent;
     var currentSource = [];
+    var lastTouchedElement;
 
     function TyperSelection(typer, range) {
         var self = this;
@@ -1697,11 +1698,12 @@
         }
 
         function retainFocusHandler(e) {
-            if (!containsOrEquals(e.currentTarget, e.relatedTarget || Typer.ui.activeElement)) {
+            var relatedTarget = e.relatedTarget || lastTouchedElement;
+            if (!containsOrEquals(e.currentTarget, relatedTarget)) {
                 if (userFocus.get(typer) === e.currentTarget) {
                     userFocus.delete(typer);
                 }
-                if (topElement === e.relatedTarget || !e.relatedTarget) {
+                if (topElement === relatedTarget) {
                     currentSelection.focus();
                 } else {
                     $self.trigger($.Event('focusout', {
@@ -2589,6 +2591,10 @@
             $(document.body).bind(v, function () {
                 eventSource(null, i);
             });
+        });
+        $(document.body).bind('touchstart mousedown', function (e) {
+            // document.activeElement or FocusEvent.relatedTarget does not report non-focusable element
+            lastTouchedElement = e.target;
         });
     });
 

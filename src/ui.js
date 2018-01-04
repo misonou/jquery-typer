@@ -968,7 +968,7 @@
     });
 
     $.extend(typerUI, {
-        activeElement: null,
+        isTouchDevice: IS_TOUCH,
         controls: definedControls,
         themes: definedThemes,
         controlExtensions: controlExtensions,
@@ -1509,7 +1509,6 @@
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
         $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
-            typerUI.activeElement = e.target;
             if (currentDialog && currentDialog.clickReject && !elementOfControl(currentDialog.control, e.target)) {
                 currentDialog.clickReject();
             }

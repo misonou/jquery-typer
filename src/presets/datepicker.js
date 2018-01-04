@@ -538,9 +538,11 @@
             });
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
-            if (e.source === 'touch') {
+            if (Typer.ui.isTouchDevice) {
                 setImmediate(function () {
-                    callout.focus();
+                    if (e.typer === activeTyper) {
+                        callout.focus();
+                    }
                 });
             }
         },
