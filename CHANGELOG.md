@@ -1,3 +1,26 @@
+## 0.10.7 / 2018-01-04
+
+- Add event source
+- Add `getState` and `setState` to UI and controls
+- Add `getRect`, `cssFromPoint`, `cssFromRect`
+- (Breaking) Rewrite snapping to element (`snap` and `unsnap`)
+- (Breaking) Update to hooks
+- Handle single touch as click
+- Add support to auto-hyperlink email address
+- Remove necessity of `inline` options for static widgets
+- Fix: forbid block widget to be insert to paragraph-mode editables
+- Fix: incorrect caret position after deleting contents over multiple editables
+- Fix: hidden content extracted or deleted
+- Fix: missing related target in manually triggered `focusout` event
+- Fix: focus issue on touch device
+- Fix: `getParagraphElements` returns non-paragraphs
+- Fix: `moveByCharacter` issue from skipping ZWSP (on Safari)
+- Fix: `moveByWord` cannot select whole word on line end
+- Fix: `TyperNode.widget` inconsistent to parent's node
+- Fix: visualizer mis-positioned overlay on Chrome
+- Fix: prevent datepicker textbox beind focused in touch device
+- Fix: keyword preset duplicate values not propertly checked
+
 ## 0.10.6 / 2017-11-06
 
 - Datepicker allow customizing date format
