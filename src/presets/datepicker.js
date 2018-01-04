@@ -348,12 +348,12 @@
                 return arr;
             },
             execute: function (ui, self) {
-                ui.trigger(self.contextualParent, 'showMonth', new Date(self.value, ui.getValue('calendar:month')));
+                ui.trigger(self.contextualParent, 'showMonth', new Date(self.value, getMonth(self.contextualParent.currentMonth)));
             }
         }),
         month: Typer.ui.dropdown({
             execute: function (ui, self) {
-                ui.trigger(self.contextualParent, 'showMonth', new Date(ui.getValue('calendar:year'), self.value));
+                ui.trigger(self.contextualParent, 'showMonth', new Date(getFullYear(self.contextualParent.currentMonth), self.value));
             }
         }),
         prev: Typer.ui.button({
