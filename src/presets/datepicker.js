@@ -499,7 +499,7 @@
             }
         },
         contentChange: function (e) {
-            if (e.typer === activeTyper && e.data !== 'script') {
+            if (e.typer === activeTyper && e.source !== 'script') {
                 var date = new Date(e.typer.extractText());
                 if (!isNaN(+date)) {
                     callout.setValue(normalizeDate(e.widget.options, date));

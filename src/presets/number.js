@@ -62,7 +62,7 @@
             e.typer.setValue(value - e.widget.options.step);
         },
         contentChange: function (e) {
-            if (e.data !== 'keystroke') {
+            if (e.source !== 'keyboard') {
                 var value = parseInt(e.typer.extractText()) || 0;
                 e.typer.setValue(value);
             }
