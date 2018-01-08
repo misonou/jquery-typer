@@ -242,6 +242,11 @@
 
     function getRect(elm) {
         var rect = $.extend({}, (elm || document.documentElement).getBoundingClientRect());
+        if (!elm || elm === document.documentElement) {
+            rect.bottom -= rect.top;
+            rect.right -= rect.left;
+            rect.left = rect.top = 0;
+        }
         return delete rect.x, delete rect.y, delete rect.toJSON, rect;
     }
 
