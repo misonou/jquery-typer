@@ -78,14 +78,7 @@
     function computeTextRects(range) {
         var container = range.commonAncestorContainer;
         var bRect = Typer.ui.getRect(container.nodeType === 1 ? container : container.parentNode);
-        var rects = $.map(range.getClientRects(), function (v) {
-            return {
-                top: v.top,
-                left: v.left,
-                right: v.right,
-                bottom: v.bottom
-            };
-        });
+        var rects = $.map(range.getClientRects(), Typer.toRect);
         var result = [];
         rects.sort(function (a, b) {
             return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
@@ -114,7 +107,7 @@
                     prev.top = result.splice(1, 1)[0].top;
                 }
             }
-            result.unshift(v);
+            result.unshift((delete v.width, delete v.height, v));
         });
         return result;
     }

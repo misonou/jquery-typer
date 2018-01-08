@@ -241,13 +241,8 @@
     }
 
     function getRect(elm) {
-        var rect = $.extend({}, (elm || document.documentElement).getBoundingClientRect());
-        if (!elm || elm === document.documentElement) {
-            rect.bottom -= rect.top;
-            rect.right -= rect.left;
-            rect.left = rect.top = 0;
-        }
-        return delete rect.x, delete rect.y, delete rect.toJSON, rect;
+        var rect = (elm || document.documentElement).getBoundingClientRect();
+        return !elm || elm === document.documentElement ? Typer.toRect(0, 0, rect.width, rect.height) : Typer.toRect(rect);
     }
 
     function cssFromPoint(x, y, origin, parent) {

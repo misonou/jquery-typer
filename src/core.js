@@ -101,11 +101,6 @@
         nodeIteratorInit(self, is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT));
     }
 
-    function TyperChangeTracker(typer) {
-        this.typer = typer;
-        this.changes = [];
-    }
-
     function TyperCaret(typer, selection) {
         this.typer = typer;
         this.selection = selection || null;
@@ -359,6 +354,20 @@
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
+    function toRect(l, t, r, b) {
+        if (l.top !== undefined) {
+            return toRect(l.left, l.top, l.right, l.bottom);
+        }
+        return {
+            top: t,
+            left: l,
+            right: r,
+            bottom: b,
+            width: r - l,
+            height: b - t
+        };
+    }
+
     function rectEquals(a, b) {
         function check(prop) {
             return Math.abs(a[prop] - b[prop]) < 1;
@@ -390,14 +399,7 @@
                     target.setStart(target.startContainer, target.startOffset - 1);
                     var rect = target.getClientRects()[0];
                     if (rect) {
-                        return [{
-                            top: rect.top,
-                            left: rect.right,
-                            right: rect.right,
-                            bottom: rect.bottom,
-                            width: 0,
-                            height: rect.height
-                        }];
+                        return [toRect(rect.right, rect.top, rect.right, rect.bottom)];
                     }
                 }
             }
@@ -550,7 +552,7 @@
         var widgets = [];
         var widgetOptions = {};
         var relatedElements = new WeakMap();
-        var tracker = new TyperChangeTracker(typer);
+        var changes = [];
         var undoable = {};
         var currentSelection;
         var executing;
@@ -562,14 +564,14 @@
         var codeUpdate = (function () {
             var run = transaction(function () {
                 executing = false;
-                if (needSnapshot || tracker.changes[0]) {
+                if (needSnapshot || changes[0]) {
                     undoable.snapshot();
                 }
                 setImmediate(function () {
                     suppressTextEvent = false;
-                    tracker.collect(function (changedWidgets) {
+                    if (changes[0]) {
                         codeUpdate(null, function () {
-                            $.each(changedWidgets, function (i, v) {
+                            $.each(changes.splice(0), function (i, v) {
                                 normalize(v.element);
                                 if (v.id !== WIDGET_ROOT) {
                                     triggerEvent(null, v, 'contentChange');
@@ -577,7 +579,7 @@
                             });
                             triggerEvent(null, EVENT_STATIC, 'contentChange');
                         });
-                    });
+                    }
                 });
             });
             return function (source, callback, args, thisArg) {
@@ -612,38 +614,26 @@
             });
         }
 
-        function eventListened(widgets, name) {
-            if (!Array.isArray(widgets)) {
-                widgets = $.makeArray(is(widgets, TyperWidget) || getTargetedWidgets(widgets));
-            }
-            return !!any(widgets, function (v) {
-                return !v.destroyed && isFunction(widgetOptions[v.id][name]);
-            });
-        }
-
         function triggerEvent(source, eventMode, eventName, data, props) {
-            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
-            var handlerCalled;
-            if (eventListened(widgets, eventName)) {
+            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode)).filter(function (v) {
+                return !v.destroyed && isFunction(widgetOptions[v.id][eventName]);
+            });
+            if (widgets[0]) {
                 codeUpdate(source, function () {
                     $.each(widgets, function (i, v) {
-                        var options = widgetOptions[v.id];
-                        if (!v.destroyed && isFunction(options[eventName])) {
-                            handlerCalled = true;
-                            options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
-                            return eventMode !== EVENT_HANDLER;
-                        }
+                        widgetOptions[v.id][eventName](new TyperEvent(eventName, typer, v, data, props));
+                        return eventMode !== EVENT_HANDLER;
                     });
                 });
             }
-            if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
+            if (is(eventMode, TyperWidget)) {
                 setImmediate(function () {
                     triggerEvent(source, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
                     });
                 });
             }
-            return handlerCalled;
+            return !!widgets[0];
         }
 
         function triggerDefaultPreventableEvent(source, eventMode, eventName, data, eventObj) {
@@ -655,6 +645,13 @@
                 }
             });
             return eventObj.isDefaultPrevented();
+        }
+
+        function trackChange(node) {
+            node = is(node, TyperNode) || typer.getNode(node);
+            if (node && changes.indexOf(node.widget) < 0) {
+                changes.push(node.widget);
+            }
         }
 
         function createTyperDocument(rootElement, fireEvent) {
@@ -963,10 +960,10 @@
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
                                     $(element).html(EMPTY_LINE);
-                                    tracker.track(node);
+                                    trackChange(node);
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
                                     $(element).html(ZWSP_ENTITIY);
-                                    tracker.track(node);
+                                    trackChange(node);
                                 } else {
                                     removeNode(element);
                                 }
@@ -989,7 +986,7 @@
                             }
                         }
                         if (clearNode) {
-                            tracker.track(node);
+                            trackChange(node);
                         }
                         return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
                     }));
@@ -1068,7 +1065,7 @@
                         }
                         var splitFirstNode = splitContent.firstChild;
                         splitEnd.insertNode(splitContent);
-                        tracker.track(splitEnd.startContainer);
+                        trackChange(splitEnd.startContainer);
 
                         for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
                             if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
@@ -1135,7 +1132,7 @@
                         paragraphAsInline = forcedInline || !insertAsInline;
                         hasInsertedBlock = true;
                     }
-                    tracker.track(caretPoint.startContainer);
+                    trackChange(caretPoint.startContainer);
                 });
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                     if (caretPoint) {
@@ -1147,8 +1144,8 @@
                     caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
                     caretPoint.collapse(true);
                     removeNode(state.endNode.element);
-                    tracker.track(state.endNode);
-                    tracker.track(state.startNode);
+                    trackChange(state.endNode);
+                    trackChange(state.startNode);
                 }
                 currentSelection.select(caretPoint);
             });
@@ -1307,7 +1304,8 @@
             var activeWidget;
 
             function getEventName(e, suffix) {
-                return lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(suffix));
+                var mod = ((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '');
+                return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
             }
 
             function triggerWidgetFocusout(source) {
@@ -1816,15 +1814,15 @@
                 $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
                 caretNotification.update(oldElement, newElement);
                 removeNode(oldElement, false);
-                tracker.track(newElement.parentNode);
+                trackChange(newElement.parentNode);
                 return newElement;
             },
             removeElement: function (element) {
-                tracker.track(element.parentNode);
+                trackChange(element.parentNode);
                 removeNode(element);
             },
             trackChange: function (node) {
-                tracker.track(node);
+                trackChange(node);
             },
             execCommand: function (commandName, value) {
                 var r1, r2;
@@ -1877,6 +1875,7 @@
         rectEquals: rectEquals,
         rectCovers: rectCovers,
         pointInRect: pointInRect,
+        toRect: toRect,
         caretRangeFromPoint: caretRangeFromPoint,
         historyLevel: 100,
         defaultOptions: {
@@ -2553,21 +2552,6 @@
         }
     });
 
-    definePrototype(TyperChangeTracker, {
-        track: function (node) {
-            node = is(node, TyperNode) || this.typer.getNode(node);
-            if (node && this.changes.indexOf(node.widget) < 0) {
-                this.changes.push(node.widget);
-            }
-        },
-        collect: function (callback) {
-            var arr = this.changes.splice(0);
-            if (arr[0] && isFunction(callback)) {
-                callback(arr);
-            }
-        }
-    });
-
     // disable Mozilla object resizing and inline table editing controls
     if (!IS_IE) {
         try {
@@ -2638,12 +2622,7 @@
                         // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
                         // https://jsfiddle.net/b6q4p664/
                         rect = computeTextRects(createRange(node, index - 1))[0];
-                        rect = rect && {
-                            top: rect.top,
-                            left: rect.right,
-                            right: rect.right,
-                            bottom: rect.bottom
-                        };
+                        rect = rect && toRect(rect.right, rect.top, rect.right, rect.bottom);
                     } else {
                         rect = computeTextRects(createRange(node, index))[0];
                     }
