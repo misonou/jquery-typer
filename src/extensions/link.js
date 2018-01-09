@@ -27,6 +27,9 @@
             }
         },
         remove: 'keepText',
+        init: function (e) {
+            $(e.widget.element).css('cursor', 'text');
+        },
         ctrlClick: function (e) {
             window.open(e.widget.element.href);
         },

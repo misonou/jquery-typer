@@ -35,7 +35,7 @@
 
     function setEditorStyle(element) {
         $('td,th', element).css({
-            outline: '1px dotted black',
+            outline: '1px dotted rgba(0,0,0,0.3)',
             minWidth: '3em'
         });
     }
