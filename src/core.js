@@ -1487,7 +1487,7 @@
                     clipboard.content = extractContents(currentSelection, e.type);
                     clipboard.textContent = extractText(currentSelection);
                 });
-                if (window.clipboardData) {
+                if (IS_IE) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
                     clipboardData.setData('text/plain', clipboard.textContent);
