@@ -2364,8 +2364,8 @@
                     return comparePosition(textNode, v.element) < 0;
                 }) || node.lastChild || node;
                 element = node.element;
+                end = comparePosition(element, textNode) < 0;
                 textNode = null;
-                end = true;
             }
         }
         if (!textNode && is(node, NODE_ANY_ALLOWTEXT)) {
