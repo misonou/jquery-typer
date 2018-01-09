@@ -274,6 +274,13 @@
             },
             insertLine: function (tx) {
                 tx.insertText('\n\n');
+            },
+            insertLineBefore: function (tx) {
+                var widget = tx.selection.focusNode.widget;
+                if (widget.id !== '__root__') {
+                    tx.selection.select(widget.element, true);
+                    tx.insertText('');
+                }
             }
         }
     };
@@ -554,7 +561,8 @@
         underline: 'ctrlU',
         justifyLeft: 'ctrlShiftL',
         justifyCenter: 'ctrlShiftE',
-        justifyRight: 'ctrlShiftR'
+        justifyRight: 'ctrlShiftR',
+        insertLineBefore: 'ctrlEnter'
     });
 
     Typer.ui.addHook('tab', function (e) {

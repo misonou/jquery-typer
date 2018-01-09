@@ -63,12 +63,6 @@
         shiftTab: function (e) {
             tabNextCell(e.typer.getSelection(), 'prev', ':last-child');
         },
-        ctrlEnter: function (e) {
-            e.typer.invoke(function (tx) {
-                tx.selection.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
-                tx.insertText('');
-            });
-        },
         commands: {
             addColumnBefore: function (tx) {
                 var info = getSelectionInfo(tx.selection);

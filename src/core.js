@@ -1001,11 +1001,7 @@
                     if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode && checkEditable(newState.startNode)) {
                         newState = new TyperSelection(typer, createRange(newState.startNode.element, 'contents'));
                     }
-                    // ensure start point lies within valid selection
-                    if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
-                        startPoint = createRange(newState.startNode.element, 0);
-                    }
-                    callback(newState, startPoint, endPoint);
+                    callback(newState);
                 }
             });
             return fragment;
@@ -1015,9 +1011,10 @@
             content = is(content, Node) || $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>'));
             content = slice(createDocumentFragment(content).childNodes);
 
-            extractContents(range, 'paste', function (state, startPoint) {
+            extractContents(range, 'paste', function (state) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
-                var caretPoint = startPoint.cloneRange();
+                var caretPoint = state.getCaret('start').getRange();
+                var startPoint = caretPoint.cloneRange();
                 var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
