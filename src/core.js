@@ -78,8 +78,9 @@
         self.data = data !== undefined ? data : null;
     }
 
-    function TyperNode(nodeType, element, widget) {
+    function TyperNode(typer, nodeType, element, widget) {
         var self = this;
+        self.typer = typer;
         self.childNodes = [];
         self.nodeType = nodeType;
         self.element = element;
@@ -750,7 +751,7 @@
                         stack.shift();
                     }
                     var unvisited = !nodeMap.has(v);
-                    var node = nodeMap.get(v) || new TyperNode(0, v);
+                    var node = nodeMap.get(v) || new TyperNode(typer, 0, v);
                     addChild(stack[0], node);
                     updateNodeFromElement(node);
                     updateNode(node);
@@ -814,7 +815,7 @@
                     childList: true
                 });
             }
-            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
+            nodeMap.set(rootElement, new TyperNode(typer, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
             dirtyElements.push(null);
 
             return extend(self, {
@@ -1037,7 +1038,7 @@
 
                 content.forEach(function (nodeToInsert) {
                     var cur = typer.getEditableNode(caretPoint.startContainer);
-                    var node = new TyperNode(NODE_INLINE, nodeToInsert);
+                    var node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
 
                     if (isElm(nodeToInsert) && !isLineBreak) {
@@ -1046,7 +1047,7 @@
                         removeNode(nodeToInsert);
                         if (node.widget.id === WIDGET_UNKNOWN || (is(cur, NODE_EDITABLE_PARAGRAPH) && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
                             nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
-                            node = new TyperNode(NODE_INLINE, nodeToInsert);
+                            node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
                     }
                     if ((isLineBreak && !is(cur, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
@@ -1859,6 +1860,7 @@
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
+        closest: closest,
         compareAttrs: compareAttrs,
         comparePosition: comparePosition,
         compareRangePosition: compareRangePosition,
@@ -1883,6 +1885,11 @@
     });
 
     definePrototype(Typer, {
+        createCaret: function (node, offset) {
+            var caret = new TyperCaret(this);
+            caret.moveTo(node, offset);
+            return caret;
+        },
         hasContent: function () {
             return !!this.getValue();
         },
@@ -2384,6 +2391,9 @@
     }
 
     definePrototype(TyperCaret, {
+        getRect: function () {
+            return computeTextRects(this)[0];
+        },
         getRange: function () {
             var self = this;
             var node = self.textNode || self.element;
