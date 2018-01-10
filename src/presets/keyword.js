@@ -266,7 +266,7 @@
             }
         },
         contentChange: function (e) {
-            if (e.source === 'input' || e.source === 'keyboard') {
+            if (e.source !== 'script') {
                 showSuggestions(e.widget);
             }
         }
