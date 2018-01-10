@@ -1037,7 +1037,7 @@
                 }
 
                 content.forEach(function (nodeToInsert) {
-                    var cur = typer.getEditableNode(caretPoint.startContainer);
+                    var caretNode = typer.getEditableNode(caretPoint.startContainer);
                     var node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
 
@@ -1045,55 +1045,59 @@
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (node.widget.id === WIDGET_UNKNOWN || (is(cur, NODE_EDITABLE_PARAGRAPH) && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
+                        if (node.widget.id === WIDGET_UNKNOWN || (forcedInline && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
                             nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
                             node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
                     }
-                    if ((isLineBreak && !is(cur, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
-                        var splitLastNode = cur;
-                        while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
-                            splitLastNode = splitLastNode.parentNode;
-                        }
-                        var splitEnd = createRange(splitLastNode.element, false);
-                        var splitContent = createRange(caretPoint, splitEnd).extractContents();
-                        if (!splitContent.firstChild) {
-                            // avoid unindented empty elements when splitting at end of line
-                            splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
-                        }
-                        var splitFirstNode = splitContent.firstChild;
-                        splitEnd.insertNode(splitContent);
-                        trackChange(splitEnd.startContainer);
-
-                        for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
-                            if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
-                                // avoid empty inline widget at the start of inserted line
-                                if (cur1.element.firstChild) {
-                                    $(cur1.element).contents().unwrap();
-                                } else {
-                                    $(cur1.element).remove();
-                                }
-                                break;
+                    if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                        var incompatParagraph = !forcedInline && is(node, NODE_PARAGRAPH) && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && extractText(nodeToInsert);
+                        if (incompatParagraph || (isLineBreak && !is(caretNode, NODE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!paragraphAsInline && !is(node, NODE_ANY_INLINE))) {
+                            while (!is(caretNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
+                                caretNode = caretNode.parentNode;
                             }
-                        }
-                        if (is(splitLastNode, NODE_ANY_ALLOWTEXT) && !splitLastNode.element.firstChild) {
-                            $(createTextNode()).appendTo(splitLastNode.element);
-                        }
-                        if (splitLastNode.element.textContent.slice(-1) === ' ') {
-                            var n1 = iterateToArray(createNodeIterator(splitLastNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
-                            n1.data = n1.data.slice(0, -1) + '\u00a0';
-                        }
-                        if (splitFirstNode.textContent.charAt(0) === ' ') {
-                            var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
-                            n2.data = n2.data.slice(1);
-                        }
-                        if (isLineBreak) {
-                            caretPoint = createRange(splitEnd, true);
-                        } else {
-                            for (var w = new TyperTreeWalker(typer.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
-                            caretPoint = createRange(w.currentNode.element, 0);
-                            paragraphAsInline = true;
-                            hasInsertedBlock = true;
+                            var splitEnd = createRange(caretNode.element, false);
+                            var splitContent = createRange(caretPoint, splitEnd).extractContents();
+                            if (!splitContent.firstChild) {
+                                // avoid unindented empty elements when splitting at end of line
+                                splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
+                            }
+                            var splitFirstNode = splitContent.firstChild;
+                            splitEnd.insertNode(splitContent);
+                            trackChange(splitEnd.startContainer);
+
+                            for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
+                                if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
+                                    // avoid empty inline widget at the start of inserted line
+                                    if (cur1.element.firstChild) {
+                                        $(cur1.element).contents().unwrap();
+                                    } else {
+                                        $(cur1.element).remove();
+                                    }
+                                    break;
+                                }
+                            }
+                            if (is(caretNode, NODE_ANY_ALLOWTEXT) && !caretNode.element.firstChild) {
+                                $(createTextNode()).appendTo(caretNode.element);
+                            }
+                            if (caretNode.element.textContent.slice(-1) === ' ') {
+                                var n1 = iterateToArray(createNodeIterator(caretNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
+                                n1.data = n1.data.slice(0, -1) + '\u00a0';
+                            }
+                            if (splitFirstNode.textContent.charAt(0) === ' ') {
+                                var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
+                                n2.data = n2.data.slice(1);
+                            }
+                            if (isLineBreak) {
+                                caretPoint = createRange(splitEnd, true);
+                            } else {
+                                for (var w = new TyperTreeWalker(typer.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
+                                caretNode = w.currentNode;
+                                caretPoint = createRange(caretNode.element, 0);
+                                paragraphAsInline = !incompatParagraph;
+                                insertAsInline = insertAsInline && paragraphAsInline;
+                                hasInsertedBlock = true;
+                            }
                         }
                     }
                     insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
@@ -1119,7 +1123,6 @@
                         }
                         paragraphAsInline = forcedInline;
                     } else {
-                        var caretNode = typer.getEditableNode(caretPoint.startContainer);
                         if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                             caretPoint.insertNode(nodeToInsert);
                         } else {
@@ -1133,15 +1136,20 @@
                     trackChange(caretPoint.startContainer);
                 });
                 if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    if (caretPoint) {
-                        var caretNode = closest(typer.getNode(caretPoint.startContainer), -1 & ~NODE_ANY_INLINE);
-                        caretPoint = createRange(caretNode.element, -0);
+                    if (!extractText(state.startNode.element)) {
+                        caretPoint = createRange(state.endNode.element, 0);
+                        removeNode(state.startNode.element);
                     } else {
-                        caretPoint = createRange(state.startNode.element, -0);
+                        if (caretPoint) {
+                            var caretNode = closest(typer.getNode(caretPoint.startContainer), -1 & ~NODE_ANY_INLINE);
+                            caretPoint = createRange(caretNode.element, -0);
+                        } else {
+                            caretPoint = createRange(state.startNode.element, -0);
+                        }
+                        caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
+                        caretPoint.collapse(true);
+                        removeNode(state.endNode.element);
                     }
-                    caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
-                    caretPoint.collapse(true);
-                    removeNode(state.endNode.element);
                     trackChange(state.endNode);
                     trackChange(state.startNode);
                 }
