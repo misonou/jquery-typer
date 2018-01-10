@@ -838,7 +838,7 @@
                 $(node.element).html('<p>' + (trim(node.element.textContent) || ZWSP_ENTITIY) + '</p>');
                 return true;
             }
-            if (is(node, NODE_EDITABLE_PARAGRAPH) && !node.element.firstChild) {
+            if (is(node, NODE_EDITABLE_PARAGRAPH | NODE_PARAGRAPH) && !node.element.firstChild) {
                 $(createTextNode()).appendTo(node.element);
                 return true;
             }
