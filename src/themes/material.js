@@ -33,19 +33,19 @@
     }
 
     function runCSSTransition(element, className, callback) {
-        if (!$(element).hasClass(className)) {
+        var arr = $(element).not('.' + className).map(function (i, v) {
             var deferred = $.Deferred();
             var handler = function (e) {
-                if ($(element).hasClass(className)) {
-                    $(element).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
-                    $(element).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
-                    deferred.resolveWith(e.target);
+                if ($(v).hasClass(className) && e.target === v) {
+                    $(v).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
+                    $(v).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+                    deferred.resolveWith(v);
                 }
             };
             $(element).addClass(className).one(TRANSITION_END + ' ' + ANIMATION_END, handler);
             return deferred.promise().done(callback);
-        }
-        return $.when();
+        });
+        return $.when.apply(null, arr.get());
     }
 
     function detachCallout(control) {
@@ -206,8 +206,8 @@
         });
         $(document.body).on('mouseup mouseleave', SELECT_EFFECT, function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
-            runCSSTransition($overlay.children(':not(.animate-out)'), 'animate-out', function () {
-                $overlay.remove();
+            runCSSTransition($overlay.children(), 'animate-out', function () {
+                $(this).parent().remove();
             });
         });
         $(document.body).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
