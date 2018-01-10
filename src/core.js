@@ -1466,7 +1466,7 @@
             });
 
             $self.bind('keypress input textInput', function (e) {
-                if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent)) {
+                if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
