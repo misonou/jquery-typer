@@ -27,7 +27,7 @@
                 if (typeof toolbar.options.selectMedia === 'function') {
                     return toolbar.options.selectMedia(type);
                 }
-                return toolbar.prompt('typer:media:selectImage');
+                return Typer.ui.prompt('typer:media:selectImage');
             },
             execute: function (toolbar, self, tx, value) {
                 tx.insertWidget('media', value);
