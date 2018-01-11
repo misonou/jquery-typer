@@ -72,7 +72,7 @@
         var self = extend(this, props);
         self.eventName = eventName;
         self.source = currentSource[1] === typer ? currentSource[0] : 'script';
-        self.timestamp = +new Date();
+        self.timestamp = performance.now();
         self.typer = typer;
         self.widget = widget || null;
         self.data = data !== undefined ? data : null;
@@ -2104,6 +2104,7 @@
     }
 
     function selectionUpdate(inst) {
+        inst.timestamp = performance.now();
         inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
         inst.isCaret = !inst.direction;
         for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
