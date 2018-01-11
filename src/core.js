@@ -2396,9 +2396,13 @@
             var self = this;
             var node = self.textNode || self.element;
             if (!containsOrEquals(self.typer.element, node) || (isText(node) && self.offset > node.length)) {
-                // use calculated text offset from paragraph node in case anchored text node is detached from DOM
-                // assuming that there is no unmanaged edit after the previous selection
-                self.moveToText(self.node.element, self.wholeTextOffset);
+                if (!self.node.parentNode && self.node.element !== self.typer.element) {
+                    self.moveTo(self.typer.element, 0);
+                } else {
+                    // use calculated text offset from paragraph node in case anchored text node is detached from DOM
+                    // assuming that there is no unmanaged edit after the previous selection
+                    self.moveToText(self.node.element, self.wholeTextOffset);
+                }
                 node = self.textNode || self.element;
             }
             if (IS_IE && self.offset === node.length && isElm(node.nextSibling) && !/inline/.test($(node.nextSibling).css('display'))) {
