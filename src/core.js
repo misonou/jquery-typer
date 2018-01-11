@@ -1343,28 +1343,24 @@
             }
 
             function deleteNextContent(e) {
+                setEventSource('keyboard', typer);
                 if (!currentSelection.isCaret) {
-                    codeUpdate('keyboard', function () {
-                        insertContents(currentSelection, '');
-                    });
+                    insertContents(currentSelection, '');
                 } else {
                     var selection = currentSelection.clone();
                     if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
-                        codeUpdate('keyboard', function () {
-                            insertContents(selection, '');
-                        });
+                        insertContents(selection, '');
                     }
                 }
             }
 
             function handleTextInput(inputText, compositionend) {
+                setEventSource('input', typer);
                 if (inputText && triggerDefaultPreventableEvent('input', EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
-                    codeUpdate('input', function () {
-                        insertContents(currentSelection, inputText);
-                    });
+                    insertContents(currentSelection, inputText);
                     return true;
                 }
                 setImmediate(function () {
@@ -1491,10 +1487,9 @@
 
             $self.bind('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                codeUpdate('cut', function () {
-                    clipboard.content = extractContents(currentSelection, e.type);
-                    clipboard.textContent = extractText(currentSelection);
-                });
+                setEventSource('cut', typer);
+                clipboard.content = extractContents(currentSelection, e.type);
+                clipboard.textContent = extractText(currentSelection);
                 if (IS_IE) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
@@ -1508,22 +1503,17 @@
             $self.bind('paste', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
                 var acceptHtml = widgetOptions[currentSelection.focusNode.widget.id].accept !== 'text';
+                setEventSource('paste', typer);
                 if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    codeUpdate('paste', function () {
-                        insertContents(currentSelection, content);
-                    });
+                    insertContents(currentSelection, content);
                 } else {
-                    var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
+                    var textContent = clipboardData.getData(IS_IE ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
-                        codeUpdate('paste', function () {
-                            insertContents(currentSelection, clipboard.content.cloneNode(true));
-                        });
+                        insertContents(currentSelection, clipboard.content.cloneNode(true));
                     } else if (!triggerDefaultPreventableEvent('paste', EVENT_ALL, 'textInput', textContent)) {
-                        codeUpdate('paste', function () {
-                            insertContents(currentSelection, textContent);
-                        });
+                        insertContents(currentSelection, textContent);
                     }
                 }
                 e.preventDefault();
