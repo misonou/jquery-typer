@@ -1009,6 +1009,7 @@
         }
 
         function insertContents(range, content) {
+            var textOnly = !is(content, Node);
             content = is(content, Node) || $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>'));
             content = slice(createDocumentFragment(content).childNodes);
 
@@ -1051,7 +1052,7 @@
                         }
                     }
                     if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                        var incompatParagraph = !forcedInline && is(node, NODE_PARAGRAPH) && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && extractText(nodeToInsert);
+                        var incompatParagraph = !textOnly && !forcedInline && is(node, NODE_PARAGRAPH) && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && extractText(nodeToInsert);
                         if (incompatParagraph || (isLineBreak && !is(caretNode, NODE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!paragraphAsInline && !is(node, NODE_ANY_INLINE))) {
                             while (!is(caretNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
                                 caretNode = caretNode.parentNode;
