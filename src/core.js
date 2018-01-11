@@ -1888,6 +1888,9 @@
             caret.moveTo(node, offset);
             return caret;
         },
+        createSelection: function (startNode, startOffset, endNode, endOffset) {
+            return new TyperSelection(this, createRange(startNode, startOffset, endNode, endOffset));
+        },
         hasContent: function () {
             return !!this.getValue();
         },
