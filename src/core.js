@@ -2398,7 +2398,7 @@
 
     definePrototype(TyperCaret, {
         getRect: function () {
-            return computeTextRects(this)[0];
+            return computeTextRects(this)[0] || toRect(0, 0, 0, 0);
         },
         getRange: function () {
             var self = this;
