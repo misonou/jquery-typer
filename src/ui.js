@@ -619,7 +619,7 @@
             (control.requireWidget && !control.widget)) {
             return false;
         }
-        if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
+        if (control.requireChildControls === true && (!control.controls.some(isEnabled) || control.controls.every(isHidden))) {
             return false;
         }
         return control.enabled !== false && callFunction(control, 'enabled') !== false;
@@ -629,6 +629,10 @@
         return control.active === true || !!callFunction(control, 'active');
     }
 
+    function isHidden(control) {
+        return (!isEnabled(control) && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false;
+    }
+
     function updateControl(control) {
         var ui = control.ui;
         var theme = definedThemes[ui.theme];
@@ -636,7 +640,7 @@
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
             control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
-            suppressStateChange = !control.widget;
+            suppressStateChange = control.requireWidget && !control.widget;
         }
         if (!suppressStateChange && callstack.indexOf(control, 1) < 0) {
             if (control.getState(theme.controlErrorClass || 'error')) {
@@ -651,7 +655,7 @@
         }
         control.setState(theme.controlDisabledClass || 'disabled', disabled);
         control.setState(theme.controlActiveClass || 'active', isActive(control));
-        control.setState(theme.controlHiddenClass || 'hidden', (disabled && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false);
+        control.setState(theme.controlHiddenClass || 'hidden', isHidden(control));
     }
 
     function executeControlWithFinal(control, callback, optArg) {
