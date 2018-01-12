@@ -49,6 +49,7 @@
     var supportTextInputEvent;
     var currentSource = [];
     var lastTouchedElement;
+    var checkNativeUpdate;
 
     function TyperSelection(typer, range) {
         var self = this;
@@ -1591,6 +1592,7 @@
                 }
                 permitFocusEvent = false;
                 windowFocusedOut = false;
+                checkNativeUpdate = updateFromNativeInput;
                 if (!userFocus.has(typer)) {
                     typerFocused = true;
                     triggerEvent(null, EVENT_ALL, 'focusin');
@@ -1615,6 +1617,7 @@
                         }
                     }
                     typerFocused = false;
+                    checkNativeUpdate = null;
                     triggerWidgetFocusout();
                     triggerEvent(null, EVENT_ALL, 'focusout');
                     normalize();
@@ -2575,6 +2578,12 @@
         } catch (e) { }
         document.designMode = 'off';
     }
+
+    setInterval(function () {
+        if (!windowFocusedOut && checkNativeUpdate) {
+            checkNativeUpdate();
+        }
+    }, 100);
 
     $(window).bind('focusin focusout', function (e) {
         // IE raise event on the current active element instead of window object when browser loses focus
