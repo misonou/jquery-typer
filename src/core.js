@@ -944,20 +944,36 @@
             codeUpdate(null, function () {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
+                    var shift = function () {
+                        var item = stack.shift();
+                        if (item[2]) {
+                            triggerEvent(null, item[2], 'extract', null, {
+                                sourceElement: item[0],
+                                clonedElement: item[1]
+                            });
+                        }
+                    };
                     iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
                         var element = node.element;
-                        var content;
-                        // skip focused editable element because all selected content is within the editable element
-                        if (node === state.focusNode && is(node, NODE_EDITABLE)) {
+                        var handler = widgetOptions[node.widget.id].extract;
+                        if ((node === state.focusNode && is(node, NODE_EDITABLE)) || (!handler && is(node, NODE_WIDGET | NODE_EDITABLE))) {
                             return 3;
                         }
-                        while (is(element, Node) && !containsOrEquals(stack[0][0], element)) {
-                            stack.shift();
+                        if (cloneNode) {
+                            while (!containsOrEquals(stack[0][0], element)) {
+                                shift();
+                            }
+                            if (handler && element !== stack[0][0]) {
+                                $.unique($(element).parentsUntil(stack[0][0])).each(function (i, v) {
+                                    stack.unshift([v, v.cloneNode(false), node.widget]);
+                                    stack[1][1].appendChild(stack[0][1]);
+                                });
+                            }
                         }
                         if (rangeCovers(range, element)) {
                             if (cloneNode) {
-                                content = element.cloneNode(true);
-                                $(stack[0][1]).append(element === topElement ? content.childNodes : content);
+                                var clone = element.cloneNode(true);
+                                $(stack[0][1]).append(element === topElement ? clone.childNodes : clone);
                             }
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
@@ -973,25 +989,25 @@
                             return 2;
                         }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
-                            content = createRange(element, range)[method]();
-                        }
-                        if (cloneNode) {
-                            if (element !== topElement && (!is(node, NODE_PARAGRAPH | NODE_INLINE) || (content && tagName(content.firstChild) !== tagName(element)))) {
-                                var clonedNode = element.cloneNode(false);
-                                stack[0][1].appendChild(clonedNode);
-                                if (!is(clonedNode, DocumentFragment)) {
-                                    stack.unshift([element, clonedNode]);
+                            var content = createRange(element, range)[method]();
+                            if (cloneNode && content) {
+                                var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
+                                var fixParagraph = !handler && is(node, NODE_EDITABLE_PARAGRAPH);
+                                if (!hasThisElement) {
+                                    content = wrapNode(content, [fixParagraph ? createElement('p') : element]);
+                                } else if (fixParagraph) {
+                                    content = wrapNode(content.firstChild.childNodes, [createElement('p')]);
                                 }
-                            }
-                            if (content) {
                                 stack[0][1].appendChild(content);
                             }
+                            if (clearNode) {
+                                trackChange(node);
+                            }
+                            return 2;
                         }
-                        if (clearNode) {
-                            trackChange(node);
-                        }
-                        return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
+                        return 1;
                     }));
+                    for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
                     var startPoint = createRange(range, allowTextFlow ? true : dir > 0);
@@ -1006,6 +1022,7 @@
                     callback(newState);
                 }
             });
+            $(fragment).find('[style]').removeAttr('style');
             return fragment;
         }
 
@@ -1113,6 +1130,10 @@
                     var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
+                            if (!isTextNodeEnd(caretPoint.startContainer, caretPoint.startOffset, -1)) {
+                                caretPoint.insertNode(createTextNode(' '));
+                                caretPoint.collapse(false);
+                            }
                             caretPoint.insertNode(nodeToInsert);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
