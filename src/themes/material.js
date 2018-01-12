@@ -42,7 +42,7 @@
                     deferred.resolveWith(v);
                 }
             };
-            $(element).addClass(className).one(TRANSITION_END + ' ' + ANIMATION_END, handler);
+            $(element).addClass(className).bind(TRANSITION_END + ' ' + ANIMATION_END, handler);
             return deferred.promise().done(callback);
         });
         return $.when.apply(null, arr.get());
