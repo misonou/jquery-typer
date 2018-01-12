@@ -1146,23 +1146,27 @@
                         }
                         paragraphAsInline = forcedInline;
                     } else {
-                        if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                            caretPoint.insertNode(nodeToInsert);
-                        } else {
-                            createRange(caretNode.element, true).insertNode(nodeToInsert);
+                        // check for the first block either if there is content or the insert point is a paragraph
+                        // to avoid two empty lines inserted before block widget
+                        if (hasInsertedBlock || !is(state.startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
+                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                                caretPoint.insertNode(nodeToInsert);
+                            } else {
+                                createRange(caretNode.element, true).insertNode(nodeToInsert);
+                            }
+                            insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
+                            caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
+                            paragraphAsInline = forcedInline || !insertAsInline;
                         }
-                        insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
-                        caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
-                        paragraphAsInline = forcedInline || !insertAsInline;
                         hasInsertedBlock = true;
                     }
                     trackChange(caretPoint.startContainer);
                 });
-                if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
+                if (!hasInsertedBlock && state.startNode !== state.endNode) {
                     if (!extractText(state.startNode.element)) {
-                        caretPoint = createRange(state.endNode.element, 0);
+                        caretPoint = createRange(state.endNode.element, is(state.endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
                         removeNode(state.startNode.element);
-                    } else {
+                    } else if (is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                         if (caretPoint) {
                             var caretNode = closest(typer.getNode(caretPoint.startContainer), -1 & ~NODE_ANY_INLINE);
                             caretPoint = createRange(caretNode.element, -0);
