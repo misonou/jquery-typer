@@ -877,6 +877,10 @@
             control = resolveControlParam(this, control);
             return control && isActive(control);
         },
+        visible: function (control) {
+            control = resolveControlParam(this, control);
+            return control && !isHidden(control);
+        },
         getIcon: function (control) {
             return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[this.iconset || definedThemes[this.theme].iconset] || '';
         },
