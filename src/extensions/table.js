@@ -57,6 +57,14 @@
         init: function (e) {
             setEditorStyle(e.widget.element);
         },
+        extract: function (e) {
+            var src = e.sourceElement;
+            var dst = e.clonedElement;
+            if (Typer.is(src, 'tr') && dst.childElementCount < src.childElementCount) {
+                var method = dst.previousSibling ? 'appendTo' : 'prependTo';
+                $(repeat(Typer.is(dst.firstChild, 'th') ? TH_HTML : TD_HTML, src.childElementCount - dst.childElementCount))[method](dst);
+            }
+        },
         tab: function (e) {
             tabNextCell(e.typer.getSelection(), 'next', ':first-child');
         },
