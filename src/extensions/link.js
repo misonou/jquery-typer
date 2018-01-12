@@ -95,10 +95,16 @@
                 }
             },
             active: function (toolbar, self) {
-                return self.widget;
+                return toolbar.is('toolbar') ? self.widget : false;
+            },
+            visible: function (toolbar, self) {
+                return toolbar.is('toolbar') || !!self.widget;
+            },
+            stateChange: function (toolbar, self) {
+                self.label = self.widget ? 'typer:toolbar:link:edit' : 'typer:toolbar:link';
             }
         }),
-        'contextmenu:link': Typer.ui.group('typer:link:*(type:button)'),
+        'contextmenu:link': Typer.ui.group('typer:toolbar:link typer:link:*(type:button)'),
         'link:open': Typer.ui.button({
             requireWidget: 'link',
             hiddenWhenDisabled: true,
@@ -150,6 +156,7 @@
 
     Typer.ui.addLabels('en', 'typer', {
         'toolbar:link': 'Insert hyperlink',
+        'toolbar:link:edit': 'Edit hyperlink',
         'link:url': 'Link URL',
         'link:blank': 'Open in new window',
         'link:open': 'Open hyperlink',
@@ -173,7 +180,7 @@
             if (e.data === 'enter') {
                 selection.moveByCharacter(-1);
             }
-            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/^s+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/\S+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
                 var link = (RegExp.$2 || 'mailto:') + RegExp.$1;
                 e.typer.snapshot(true);
                 e.typer.select(selection);
