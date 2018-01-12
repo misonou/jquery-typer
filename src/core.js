@@ -1,4 +1,4 @@
-(function ($, window, document, String, Node, Range, DocumentFragment, WeakMap, array, RegExp) {
+(function ($, window, document, root, String, Node, Range, DocumentFragment, WeakMap, array, RegExp) {
     'use strict';
 
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
@@ -30,7 +30,7 @@
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
     var EVENT_CURRENT = 4;
-    var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined || document.documentElement.style.msUserSelect !== undefined;
+    var IS_IE = !!window.ActiveXObject || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
 
     // document.caretRangeFromPoint is still broken even in Edge browser
     // it does not return correct range for the points x or y larger than window's width or height
@@ -356,9 +356,13 @@
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
-    function toRect(l, t, r, b) {
+    function getRect(elm) {
+        return !elm || elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
+    }
+
+    function toPlainRect(l, t, r, b) {
         if (l.top !== undefined) {
-            return toRect(l.left, l.top, l.right, l.bottom);
+            return toPlainRect(l.left, l.top, l.right, l.bottom);
         }
         return {
             top: t,
@@ -401,7 +405,7 @@
                     target.setStart(target.startContainer, target.startOffset - 1);
                     var rect = target.getClientRects()[0];
                     if (rect) {
-                        return [toRect(rect.right, rect.top, rect.right, rect.bottom)];
+                        return [toPlainRect(rect.right, rect.top, rect.right, rect.bottom)];
                     }
                 }
             }
@@ -422,7 +426,7 @@
 
     function caretRangeFromPoint(x, y, element) {
         var range = caretRangeFromPoint_.call(document, x, y);
-        if (range && element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
+        if (range && element && element !== document.body && pointInRect(x, y, getRect(element))) {
             var elm = [];
             try {
                 var container;
@@ -1901,7 +1905,8 @@
         rectEquals: rectEquals,
         rectCovers: rectCovers,
         pointInRect: pointInRect,
-        toRect: toRect,
+        toPlainRect: toPlainRect,
+        getRect: getRect,
         caretRangeFromPoint: caretRangeFromPoint,
         historyLevel: 100,
         defaultOptions: {
@@ -2423,7 +2428,7 @@
 
     definePrototype(TyperCaret, {
         getRect: function () {
-            return computeTextRects(this)[0] || toRect(0, 0, 0, 0);
+            return computeTextRects(this)[0] || toPlainRect(0, 0, 0, 0);
         },
         getRange: function () {
             var self = this;
@@ -2473,7 +2478,7 @@
             if (is(node, NODE_WIDGET)) {
                 // range returned is anchored at the closest text node which may or may not be at the point (x, y)
                 // avoid moving caret to widget element that does not actually cover that point
-                if (!pointInRect(x, y, node.widget.element.getBoundingClientRect())) {
+                if (!pointInRect(x, y, getRect(node.widget.element))) {
                     range = createRange(node.widget.element, false);
                 }
             }
@@ -2494,7 +2499,7 @@
         moveToLineEnd: function (direction) {
             var self = this;
             var iterator = caretTextNodeIterator(self, self.node);
-            var rect = computeTextRects(self)[0];
+            var rect = self.getRect();
             var minx = rect.left;
             do {
                 $.each(computeTextRects(iterator.currentNode), function (i, v) {
@@ -2508,7 +2513,7 @@
         moveByLine: function (direction) {
             var self = this;
             var iterator = caretTextNodeIterator(self);
-            var rect = computeTextRects(self)[0];
+            var rect = self.getRect();
             do {
                 var rects = computeTextRects(iterator.currentNode);
                 var newRect = any(direction < 0 ? slice(rects).reverse() : rects, function (v) {
@@ -2551,7 +2556,7 @@
         },
         moveByCharacter: function (direction) {
             var self = this;
-            var rect = computeTextRects(self)[0];
+            var rect = self.getRect();
             var iterator = caretTextNodeIterator(self, null, 5);
             var node = isText(iterator.currentNode);
             var offset = self.offset;
@@ -2670,7 +2675,7 @@
                         // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
                         // https://jsfiddle.net/b6q4p664/
                         rect = computeTextRects(createRange(node, index - 1))[0];
-                        rect = rect && toRect(rect.right, rect.top, rect.right, rect.bottom);
+                        rect = rect && toPlainRect(rect.right, rect.top, rect.right, rect.bottom);
                     } else {
                         rect = computeTextRects(createRange(node, index))[0];
                     }
@@ -2698,7 +2703,7 @@
                     var target;
                     $(node).children().each(function (i, v) {
                         var style = window.getComputedStyle(v, null);
-                        if (style.pointerEvents !== 'none' && style.display !== 'inline' && pointInRect(x, y, v.getBoundingClientRect())) {
+                        if (style.pointerEvents !== 'none' && style.display !== 'inline' && pointInRect(x, y, getRect(v))) {
                             var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
                             if (currentZIndex === undefined || zIndex > currentZIndex) {
                                 currentZIndex = zIndex;
@@ -2726,7 +2731,7 @@
                         if (isText(v)) {
                             rects = computeTextRects(v);
                         } else if (isElm(v) && $(v).css('pointer-events') !== 'none') {
-                            rects = [v.getBoundingClientRect()];
+                            rects = [getRect(v)];
                         }
                         for (var j = 0, length = (rects || '').length; j < length; j++) {
                             if (rects[j].top <= y && rects[j].bottom >= y) {
@@ -2770,4 +2775,4 @@
     document.addEventListener('keypress', detectTextInputEvent, true);
     document.addEventListener('textInput', detectTextInputEvent, true);
 
-}(jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype, RegExp));
+}(jQuery, window, document, document.documentElement, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype, RegExp));

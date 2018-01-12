@@ -78,7 +78,7 @@
     function computeTextRects(range) {
         var container = range.commonAncestorContainer;
         var bRect = Typer.ui.getRect(container.nodeType === 1 ? container : container.parentNode);
-        var rects = $.map(range.getClientRects(), Typer.toRect);
+        var rects = $.map(range.getClientRects(), Typer.toPlainRect);
         var result = [];
         rects.sort(function (a, b) {
             return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
