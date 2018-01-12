@@ -37,6 +37,7 @@
     var caretRangeFromPoint_ = IS_IE ? undefined : document.caretRangeFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
+    var scrollIntoViewIfNeeded_ = root.scrollIntoViewIfNeeded;
 
     var isFunction = $.isFunction;
     var extend = $.extend;
@@ -2275,6 +2276,9 @@
                 if (!IS_IE && document.activeElement !== topElement) {
                     topElement.focus();
                 }
+                if (this.isCaret) {
+                    scrollIntoViewIfNeeded_.apply(this.startElement);
+                }
             }
         },
         clone: function () {
@@ -2756,6 +2760,18 @@
                 return createRange(element, -0);
             };
         }();
+    }
+
+    if (typeof scrollIntoViewIfNeeded_ === 'undefined') {
+        scrollIntoViewIfNeeded_ = function () {
+            var winRect = getRect(root);
+            var elmRect = getRect(this);
+            if (elmRect.top < winRect.top) {
+                this.scrollIntoView(true);
+            } else if (elmRect.bottom > winRect.bottom) {
+                this.scrollIntoView(false);
+            }
+        };
     }
 
     // detect support for textInput event
