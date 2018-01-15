@@ -1638,6 +1638,7 @@
             });
 
             $self.bind('focusin', function (e) {
+                userFocus.delete(typer);
                 // prevent focus event triggered due to content updates through code
                 // when current editor is not focused
                 if (typerFocused || (executing && !permitFocusEvent)) {
@@ -1646,14 +1647,13 @@
                 permitFocusEvent = false;
                 windowFocusedOut = false;
                 checkNativeUpdate = updateFromNativeInput;
-                if (!userFocus.has(typer)) {
+                if (!typerFocused) {
                     typerFocused = true;
                     triggerEvent(null, EVENT_ALL, 'focusin');
                     if (!mousedown) {
                         currentSelection.focus();
                     }
                 }
-                userFocus.delete(typer);
             });
 
             $self.bind('focusout', function (e) {
@@ -1663,7 +1663,7 @@
                         // after contextmenu event by right mouse click
                         return;
                     }
-                    for (var element = e.relatedTarget; element; element = element.parentNode) {
+                    for (var element = e.relatedTarget || lastTouchedElement; element; element = element.parentNode) {
                         if (relatedElements.has(element)) {
                             userFocus.set(typer, element);
                             return;
