@@ -50,6 +50,7 @@
     var isPlainObject = $.isPlainObject;
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var containsOrEquals = Typer.containsOrEquals;
+    var getRect = Typer.getRect;
     var dummyDiv = document.createElement('div');
 
     var definedControls = {};
@@ -240,11 +241,6 @@
         return maxZIndex + 1;
     }
 
-    function getRect(elm) {
-        var rect = (elm || document.documentElement).getBoundingClientRect();
-        return !elm || elm === document.documentElement ? Typer.toRect(0, 0, rect.width, rect.height) : Typer.toRect(rect);
-    }
-
     function cssFromPoint(x, y, origin, parent) {
         parent = Typer.is(parent || origin, Node);
         var refRect = getRect(parent || originDiv);
@@ -261,8 +257,8 @@
         return style;
     }
 
-    function cssFromRect(rect) {
-        var style = cssFromPoint(rect);
+    function cssFromRect(rect, parent) {
+        var style = cssFromPoint(rect, null, parent);
         style.width = ((rect.width || rect.right - rect.left) | 0) + 'px';
         style.height = ((rect.height || rect.bottom - rect.top) | 0) + 'px';
         return style;

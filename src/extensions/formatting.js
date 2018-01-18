@@ -279,7 +279,7 @@
                 var widget = tx.selection.focusNode.widget;
                 if (widget.id !== '__root__') {
                     tx.selection.select(widget.element, true);
-                    tx.insertText('');
+                    tx.insertText('\n\n');
                 }
             }
         }
