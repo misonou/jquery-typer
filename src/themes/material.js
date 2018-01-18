@@ -6,7 +6,7 @@
 
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
-        var rect = Typer.ui.getRect(callout);
+        var rect = Typer.getRect(callout);
         if (rect.bottom > $(window).height()) {
             $(callout).removeClass('float-top float-bottom').addClass('float-top');
         } else if (rect.top < 0) {
@@ -188,7 +188,7 @@
     $(function () {
         var SELECT_EFFECT = '.typer-ui-material button:not(.typer-ui-checkbox), .typer-ui-material .has-clickeffect';
         $(document.body).on('mousedown', SELECT_EFFECT, function (e) {
-            var pos = Typer.ui.getRect(e.currentTarget);
+            var pos = Typer.getRect(e.currentTarget);
             var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget);
             var $anim = $overlay.children().css({
                 top: e.clientY - pos.top,

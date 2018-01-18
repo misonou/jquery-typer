@@ -2,7 +2,6 @@
     'use strict';
 
     var activeToolbar;
-    var timeout;
 
     function nativePrompt(message, value) {
         value = window.prompt(message, value);
@@ -30,41 +29,44 @@
         }
     }
 
+    function positionToolbar(toolbar, position) {
+        var height = $(toolbar.element).height();
+        if (position) {
+            toolbar.position = 'fixed';
+        } else if (toolbar.position !== 'fixed') {
+            var rect = Typer.getRect((toolbar.widget || toolbar.typer).element);
+            if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+                // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
+                return;
+            }
+            position = {
+                position: 'fixed',
+                left: rect.left,
+                top: Math.max(0, rect.top - height - 10)
+            };
+        }
+        if (position) {
+            var range = toolbar.typer.getSelection().getRange();
+            if (range) {
+                var r = range.getClientRects()[0] || Typer.getRect(range);
+                if (r.top >= position.top && r.top <= position.top + height) {
+                    position.top = r.bottom + 10;
+                }
+            }
+            $(toolbar.element).css(position);
+        }
+    }
+
     function showToolbar(toolbar, position) {
         toolbar.update();
         if (toolbar.widget || !toolbar.options.container) {
-            clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
                 hideToolbar();
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
-            var height = $(toolbar.element).height();
-            if (position) {
-                toolbar.position = 'fixed';
-            } else if (toolbar.position !== 'fixed') {
-                var rect = Typer.ui.getRect((toolbar.widget || toolbar.typer).element);
-                if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
-                    // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
-                    return;
-                }
-                position = {
-                    position: 'fixed',
-                    left: rect.left,
-                    top: Math.max(0, rect.top - height - 10)
-                };
-            }
-            if (position) {
-                var range = toolbar.typer.getSelection().getRange();
-                if (range) {
-                    var r = range.getClientRects()[0] || Typer.ui.getRect(range);
-                    if (r.top >= position.top && r.top <= position.top + height) {
-                        position.top = r.bottom + 10;
-                    }
-                }
-                $(toolbar.element).css(position);
-            }
+            positionToolbar(toolbar, position);
         }
     }
 
@@ -189,7 +191,7 @@
 
     $(window).scroll(function () {
         if (activeToolbar) {
-            showToolbar(activeToolbar);
+            positionToolbar(activeToolbar);
         }
     });
 

@@ -236,7 +236,7 @@
             });
             $('s', self.element).bind('mousedown touchstart', function (e) {
                 var elm = e.target;
-                var center = Typer.ui.getRect(elm.parentNode);
+                var center = Typer.getRect(elm.parentNode);
                 center = {
                     top: (center.top + center.bottom) / 2,
                     left: (center.left + center.right) / 2
