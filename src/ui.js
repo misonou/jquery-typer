@@ -862,7 +862,7 @@
             }
         },
         hide: function (control) {
-            control = control === undefined ? this : resolveControlParam(this, control);
+            control = !control ? this : resolveControlParam(this, control);
             return control && hideCallout(control);
         },
         enabled: function (control) {
