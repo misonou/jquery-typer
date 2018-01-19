@@ -4,6 +4,7 @@
     var TD_HTML = '<td></td>';
     var TH_HTML = '<th></th>';
     var TR_HTML = '<tr>%</tr>';
+    var TR_SELECTOR = '>tbody>tr';
 
     function repeat(str, count) {
         return new Array(count + 1).join(str);
@@ -24,6 +25,14 @@
         };
     }
 
+    function getRow(widget, index) {
+        return $(TR_SELECTOR, widget.element)[index];
+    }
+
+    function countColumns(widget) {
+        return getRow(widget, 0).childElementCount;
+    }
+
     function tabNextCell(selection, dir, selector) {
         if (selection.isSingleEditable) {
             var nextCell = $(selection.focusNode.element)[dir]()[0] || $(selection.focusNode.element).parent()[dir]().children(selector)[0];
@@ -33,11 +42,24 @@
         }
     }
 
-    function setEditorStyle(element) {
-        $('td,th', element).css({
+    function setEditorStyle(widget) {
+        $('td,th', widget.element).css({
             outline: '1px dotted rgba(0,0,0,0.3)',
             minWidth: '3em'
         });
+    }
+
+    function insertColumn(widget, index, count, before) {
+        var s = typeof index === 'string' ? index + '-child' : 'nth-child(' + (index + 1) + ')';
+        var m = before ? 'before' : 'after';
+        $(widget.element).find(TR_SELECTOR + '>th:' + s)[m](repeat(TH_HTML, count));
+        $(widget.element).find(TR_SELECTOR + '>td:' + s)[m](repeat(TD_HTML, count));
+        setEditorStyle(widget);
+    }
+
+    function insertRow(widget, index, kind, before) {
+        $(getRow(widget, index))[before ? 'before' : 'after'](TR_HTML.replace('%', repeat(kind, countColumns(widget))));
+        setEditorStyle(widget);
     }
 
     Typer.ui.define('tableGrid', {
@@ -48,14 +70,11 @@
         element: 'table',
         editable: 'th,td',
         insert: function (tx, options) {
-            options = $.extend({
-                rows: 2,
-                columns: 2
-            }, options);
-            tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns)), options.rows) + '</table>');
+            options = options || {};
+            tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns || 2)), options.rows || 2) + '</table>');
         },
         init: function (e) {
-            setEditorStyle(e.widget.element);
+            setEditorStyle(e.widget);
         },
         extract: function (e) {
             var src = e.sourceElement;
@@ -63,6 +82,21 @@
             if (Typer.is(src, 'tr') && dst.childElementCount < src.childElementCount) {
                 var method = dst.previousSibling ? 'appendTo' : 'prependTo';
                 $(repeat(Typer.is(dst.firstChild, 'th') ? TH_HTML : TD_HTML, src.childElementCount - dst.childElementCount))[method](dst);
+            }
+        },
+        receive: function (e) {
+            if (!Typer.is(e.targetElement, 'th')) {
+                var $insertRow = $(TR_SELECTOR, e.sourceElement);
+                var tableRow = e.targetElement.parentNode;
+                var missCount = $insertRow[0].childElementCount - tableRow.childElementCount;
+                if (missCount > 0) {
+                    insertColumn(e.widget, 'last', missCount, false);
+                }
+                $insertRow.insertBefore(tableRow).find('th').each(function (i, v) {
+                    $(v).before($(TD_HTML).append(v.childNodes)).remove();
+                });
+                setEditorStyle(e.widget);
+                e.preventDefault();
             }
         },
         tab: function (e) {
@@ -74,58 +108,52 @@
         commands: {
             addColumnBefore: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
-                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertColumn(tx.widget, info.minColumn, 1, true);
+                tx.trackChange(tx.widget);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
-                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertColumn(tx.widget, info.maxColumn, 1, false);
+                tx.trackChange(tx.widget);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
-                $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertRow(tx.widget, info.minRow, TD_HTML, true);
+                tx.trackChange(tx.widget);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
-                $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertRow(tx.widget, info.maxRow, TD_HTML, false);
+                tx.trackChange(tx.widget);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
-                    $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
+                $(TR_SELECTOR, tx.widget.element).each(function (i, v) {
+                    $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).forEach(tx.removeElement);
                 });
-                tx.trackChange(tx.widget.element);
+                tx.selection.moveTo(getRow(tx.widget, info.minRow).children[Math.max(0, info.minColumn - 1)], -0);
+                tx.trackChange(tx.widget);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
-                tx.trackChange(tx.widget.element);
+                $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).forEach(tx.removeElement);
+                tx.selection.moveTo(getRow(tx.widget, Math.max(0, info.minRow - 1)).children[info.minColumn], -0);
+                tx.trackChange(tx.widget);
             },
             toggleTableHeader: function (tx) {
-                if ($(tx.widget.element).find('th')[0]) {
-                    $(tx.widget.element).find('th').wrapInner('<p>').each(function (i, v) {
+                var $header = $(TR_SELECTOR + '>th', tx.widget.element);
+                if ($header[0]) {
+                    $header.wrapInner('<p>').each(function (i, v) {
                         tx.replaceElement(v, 'td');
                     });
                 } else {
-                    var columnCount = $(tx.widget.element).find('>tbody>tr')[0].childElementCount;
-                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, columnCount)));
-                    $(tx.widget.element).find('th').text(function (i, v) {
+                    insertRow(tx.widget, 0, TH_HTML, true);
+                    $('>*', getRow(tx.widget, 0)).text(function (i) {
                         return 'Column ' + (i + 1);
                     });
                 }
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                setEditorStyle(tx.widget);
+                tx.trackChange(tx.widget);
             }
         }
     };
@@ -133,18 +161,18 @@
     $.extend(Typer.ui.themeExtensions, {
         tableGrid: '<div class="typer-ui-grid"><div class="typer-ui-grid-wrapper"></div><br x:t="label"/></div>',
         tableGridInit: function (toolbar, self) {
-            var html = repeat('<div class="typer-ui-grid-row">' + repeat('<div class="typer-ui-grid-cell"></div>', 7) + '</div>', 7);
-            $(self.element).find('.typer-ui-grid-wrapper').append(html);
-            $(self.element).find('.typer-ui-grid-cell').mouseover(function () {
+            var $self = $(self.element);
+            $self.find('.typer-ui-grid-wrapper').append(repeat('<div class="typer-ui-grid-row">' + repeat('<div class="typer-ui-grid-cell"></div>', 7) + '</div>', 7));
+            $self.find('.typer-ui-grid-cell').mouseover(function () {
                 self.value.rows = $(this).parent().index() + 1;
                 self.value.columns = $(this).index() + 1;
                 self.label = self.value.rows + ' \u00d7 ' + self.value.columns;
-                $(self.element).find('.typer-ui-grid-cell').removeClass('active');
-                $(self.element).find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
+                $self.find('.typer-ui-grid-cell').removeClass('active');
+                $self.find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
             });
             self.label = '0 \u00d7 0';
             self.value = {};
-            $(self.element).click(function () {
+            $self.click(function () {
                 toolbar.execute(self);
             });
         }
@@ -196,7 +224,7 @@
                         label: toolbar.options.tableStyles[v],
                         execute: function (toolbar, self, tx) {
                             self.widget.element.className = v;
-                            tx.trackChange(self.widget.element);
+                            tx.trackChange(self.widget);
                         }
                     });
                 });
@@ -205,7 +233,7 @@
                     label: 'typer:table:styleDefault',
                     execute: function (toolbar, self, tx) {
                         self.widget.element.className = '';
-                        tx.trackChange(self.widget.element);
+                        tx.trackChange(self.widget);
                     }
                 });
                 return definedOptions.concat(fallbackOption);
@@ -216,14 +244,14 @@
             requireWidget: 'table',
             execute: function (toolbar, self, tx) {
                 $(self.widget.element).removeAttr('width');
-                tx.trackChange(self.widget.element);
+                tx.trackChange(self.widget);
             }
         }),
         'table:tableWidth:fullWidth': Typer.ui.button({
             requireWidget: 'table',
             execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('width', '100%');
-                tx.trackChange(self.widget.element);
+                tx.trackChange(self.widget);
             }
         }),
         'table:addRemoveCell': Typer.ui.group(),
@@ -237,7 +265,10 @@
         }),
         'table:addRemoveCell:addRowAbove': Typer.ui.button({
             requireWidget: 'table',
-            execute: 'addRowAbove'
+            execute: 'addRowAbove',
+            enabled: function (toolbar, self) {
+                return !$(TR_SELECTOR, self.widget.element).has('th')[0] || getSelectionInfo(toolbar.typer.getSelection()).minRow > 0;
+            }
         }),
         'table:addRemoveCell:addRowBelow': Typer.ui.button({
             requireWidget: 'table',

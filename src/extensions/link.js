@@ -36,7 +36,7 @@
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
-                tx.trackChange(tx.widget.element);
+                tx.trackChange(tx.widget);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -79,7 +79,7 @@
                     } else {
                         $(self.widget.element).removeAttr('target');
                     }
-                    tx.trackChange(self.widget.element);
+                    tx.trackChange(self.widget);
                 } else {
                     var textNode = Typer.createTextNode(text);
                     tx.insertHtml(textNode);

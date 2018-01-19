@@ -87,7 +87,7 @@
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
-        tx.trackChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode);
     }
 
     function inlineStyleCommand(tx) {
@@ -102,7 +102,7 @@
                 tx.execCommand('superscript');
             }
             tx.execCommand(tx.commandName);
-            tx.trackChange(tx.selection.focusNode.element);
+            tx.trackChange(tx.selection.focusNode);
         }
     }
 
@@ -126,7 +126,7 @@
                 outdentCommand(tx, [v]);
             }
         });
-        tx.trackChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode);
     }
 
     function indentCommand(tx, elements) {
@@ -173,7 +173,7 @@
                 tx.removeElement(list);
             }
         });
-        tx.trackChange(tx.selection.focusNode.element);
+        tx.trackChange(tx.selection.focusNode);
     }
 
     Typer.widgets.inlineStyle = {
@@ -221,7 +221,7 @@
                 if (isCaret) {
                     tx.selection.select(span, -0);
                 }
-                tx.trackChange(tx.selection.focusNode.element);
+                tx.trackChange(tx.selection.focusNode);
             }
         }
     };
