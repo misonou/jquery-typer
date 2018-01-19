@@ -176,8 +176,8 @@
             });
         },
         executed: function (ui, control) {
-            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu') && control.contextualParent.hideCalloutOnExecute !== false) {
-                ui.hide(control.contextualParent);
+            if (!control.is('textbox') && (ui.is('contextmenu') || (control.contextualParent.is('callout dropdown') && control.contextualParent.hideCalloutOnExecute !== false))) {
+                ui.hide(ui.is('contextmenu') ? null : control.contextualParent);
             }
         },
         init: function (ui, control) {
