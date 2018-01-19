@@ -1057,6 +1057,8 @@
                     var caretNode = typer.getNode(caretPoint.startContainer);
                     var node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
+                    var needSplit = false;
+                    var incompatParagraph = false;
 
                     if (isElm(nodeToInsert) && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
@@ -1078,54 +1080,62 @@
                         }
                     }
                     if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                        var incompatParagraph = !textOnly && !forcedInline && is(node, NODE_PARAGRAPH) && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && extractText(nodeToInsert);
-                        if (incompatParagraph || (isLineBreak && !is(caretNode, NODE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!paragraphAsInline && !is(node, NODE_ANY_INLINE))) {
-                            while (!is(caretNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
-                                caretNode = caretNode.parentNode;
+                        var splitEnd = createRange(caretNode.element, false);
+                        if (isLineBreak) {
+                            needSplit = !is(caretNode, NODE_PARAGRAPH);
+                            for (; is(caretNode.parentNode, NODE_ANY_INLINE); caretNode = caretNode.parentNode);
+                        } else if (is(node, NODE_PARAGRAPH)) {
+                            incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && trim(nodeToInsert.textContent);
+                            needSplit = incompatParagraph || !paragraphAsInline;
+                            caretNode = closest(caretNode, NODE_PARAGRAPH);
+                        } else if (!is(node, NODE_ANY_INLINE)) {
+                            if (trim(createRange(splitEnd, caretPoint))) {
+                                needSplit = trim(createRange(createRange(caretNode.element, true), caretPoint));
+                            } else {
+                                caretNode = caretNode.nextSibling || caretNode.parentNode;
+                                caretPoint = splitEnd;
                             }
-                            if (isLineBreak || is(node, NODE_PARAGRAPH) || trim(createRange(createRange(caretNode.element, true), caretPoint))) {
-                                var splitEnd = createRange(caretNode.element, false);
-                                var splitContent = createRange(caretPoint, splitEnd).extractContents();
-                                if (!trim(splitContent.textContent)) {
-                                    // avoid unindented empty elements when splitting at end of line
-                                    splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
-                                }
-                                var splitFirstNode = splitContent.firstChild;
-                                splitEnd.insertNode(splitContent);
-                                trackChange(splitEnd.startContainer);
+                        }
+                        if (needSplit) {
+                            var splitContent = createRange(caretPoint, splitEnd).extractContents();
+                            if (!trim(splitContent.textContent)) {
+                                // avoid unindented empty elements when splitting at end of line
+                                splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
+                            }
+                            var splitFirstNode = splitContent.firstChild;
+                            splitEnd.insertNode(splitContent);
+                            trackChange(splitEnd.startContainer);
 
-                                for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
-                                    if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
-                                        // avoid empty inline widget at the start of inserted line
-                                        if (cur1.element.firstChild) {
-                                            $(cur1.element).contents().unwrap();
-                                        } else {
-                                            $(cur1.element).remove();
-                                        }
-                                        break;
+                            for (var cur1 = typer.getNode(splitFirstNode); cur1 && !trim(cur1.element.textContent); cur1 = cur1.firstChild) {
+                                if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
+                                    // avoid empty inline widget at the start of inserted line
+                                    if (cur1.element.firstChild) {
+                                        $(cur1.element).contents().unwrap();
+                                    } else {
+                                        $(cur1.element).remove();
                                     }
+                                    break;
                                 }
-                                if (is(caretNode, NODE_ANY_ALLOWTEXT) && !(caretNode.element.firstChild || '').length) {
-                                    $(createTextNode()).appendTo(caretNode.element);
-                                }
-                                if (trim(caretNode.element.textContent) && caretNode.element.textContent.slice(-1) === ' ') {
-                                    var n1 = iterateToArray(createNodeIterator(caretNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
-                                    n1.data = n1.data.slice(0, -1) + '\u00a0';
-                                }
-                                if (splitFirstNode.textContent.charAt(0) === ' ') {
-                                    var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
-                                    n2.data = n2.data.slice(1);
-                                }
-                                if (isLineBreak) {
-                                    caretPoint = createRange(splitEnd, true);
-                                } else {
-                                    for (var w = new TyperTreeWalker(typer.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
-                                    caretNode = w.currentNode;
-                                    caretPoint = createRange(caretNode.element, 0);
-                                    paragraphAsInline = !incompatParagraph;
-                                    insertAsInline = insertAsInline && paragraphAsInline;
-                                    hasInsertedBlock = true;
-                                }
+                            }
+                            if (is(caretNode, NODE_ANY_ALLOWTEXT) && !(caretNode.element.firstChild || '').length) {
+                                $(createTextNode()).appendTo(caretNode.element);
+                            }
+                            if (trim(caretNode.element.textContent) && caretNode.element.textContent.slice(-1) === ' ') {
+                                var n1 = iterateToArray(createNodeIterator(caretNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
+                                n1.data = n1.data.slice(0, -1) + '\u00a0';
+                            }
+                            if (trim(splitFirstNode.textContent) && splitFirstNode.textContent.charAt(0) === ' ') {
+                                var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
+                                n2.data = '\u00a0' + n2.data.slice(1);
+                            }
+                            if (isLineBreak) {
+                                caretPoint = createRange(splitFirstNode, false);
+                            } else {
+                                caretNode = typer.getNode(splitFirstNode);
+                                caretPoint = createRange(splitFirstNode, 0);
+                                paragraphAsInline = !incompatParagraph;
+                                insertAsInline = insertAsInline && paragraphAsInline;
+                                hasInsertedBlock = true;
                             }
                         }
                     }
@@ -2422,7 +2432,7 @@
             if (!is(node, NODE_ANY_ALLOWTEXT)) {
                 textNode = null;
             } else {
-                end = !textNode || comparePosition(element, textNode) < 0;
+                end = textNode ? comparePosition(element, textNode) < 0 : end;
                 iterator = new TyperDOMNodeIterator(iterator, 4);
                 while (iterator.nextNode() && end);
                 textNode = isText(iterator.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](element)[0];
