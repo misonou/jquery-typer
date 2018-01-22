@@ -1311,6 +1311,7 @@
                 currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
                 setImmediateOnce(triggerStateChange);
                 checkActualChange();
+                needSnapshot = false;
             }
 
             extend(undoable, {
@@ -1363,11 +1364,17 @@
                 return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
             }
 
-            function triggerWidgetFocusout(source) {
-                var widget = activeWidget;
-                if (activeWidget && !activeWidget.destroyed) {
-                    activeWidget = null;
-                    triggerEvent(source, widget, 'focusout');
+            function updateWidgetFocus(source) {
+                var widget = currentSelection.focusNode.widget;
+                if (activeWidget !== widget) {
+                    if (activeWidget && !activeWidget.destroyed) {
+                        triggerEvent(source, activeWidget, 'focusout');
+                        activeWidget = null;
+                    }
+                    if (widget.id !== WIDGET_ROOT) {
+                        activeWidget = widget;
+                        triggerEvent(source, activeWidget, 'focusin');
+                    }
                 }
             }
 
@@ -1385,9 +1392,7 @@
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                     undoable.snapshot(200);
                     currentSelection.select(activeRange);
-                    if (currentSelection.focusNode.widget !== activeWidget) {
-                        triggerWidgetFocusout('input');
-                    }
+                    updateWidgetFocus('input');
                 }
             }
 
@@ -1452,9 +1457,16 @@
                         });
                         e.preventDefault();
                     },
-                    mouseup: function () {
+                    mouseup: function (e2) {
                         mousedown = false;
                         $(document.body).unbind(handlers);
+                        if (e2.clientX === e.clientX && e2.clientY === e.clientY) {
+                            var node = typer.getNode(e2.target);
+                            if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                                currentSelection.select(node.widget.element);
+                            }
+                        }
+                        updateWidgetFocus('mouse');
                     }
                 };
                 if (e.which === 1) {
@@ -1572,25 +1584,6 @@
                 e.preventDefault();
             });
 
-            $self.bind('mousedown mouseup mscontrolselect', function (e) {
-                var node = typer.getNode(e.target);
-                if (activeWidget !== node.widget) {
-                    triggerWidgetFocusout('mouse');
-                }
-                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                    // disable resize handle on image element on IE and Firefox
-                    // also select the whole widget when clicking on uneditable elements
-                    setImmediate(function () {
-                        currentSelection.focus();
-                    });
-                    currentSelection.select(node.widget.element);
-                    if (activeWidget !== node.widget) {
-                        activeWidget = node.widget;
-                        triggerEvent('mouse', node.widget, 'focusin');
-                    }
-                }
-            });
-
             $self.bind('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
@@ -1661,7 +1654,7 @@
                     }
                     typerFocused = false;
                     checkNativeUpdate = null;
-                    triggerWidgetFocusout();
+                    updateWidgetFocus();
                     triggerEvent(null, EVENT_ALL, 'focusout');
                     normalize();
 
@@ -2399,10 +2392,6 @@
         return true;
     }
 
-    function caretGetNode(node) {
-        return closest(node, NODE_ANY_BLOCK);
-    }
-
     function caretSetPosition(inst, element, offset, end) {
         var node, textNode, textOffset;
         if (tagName(element) === 'br') {
@@ -2451,7 +2440,7 @@
             };
             while (moveToMostInner(-1, 'previousSibling', 'lastChild', 'appendTo') || moveToMostInner(1, 'nextSibling', 'firstChild', 'prependTo'));
         }
-        return caretSetPositionRaw(inst, caretGetNode(node), element, textNode, textNode ? offset : !end);
+        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), element, textNode, textNode ? offset : !end);
     }
 
     definePrototype(TyperCaret, {
@@ -2661,7 +2650,7 @@
                         }
                         overBr |= tagName(node) === 'br';
                     }
-                    offset = (direction < 0 ? node.length : 0) + ((overBr || caretGetNode(self.typer.getNode(node)) !== self.node) && -direction);
+                    offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
                 offset += direction;
                 var newRect = node.data.charAt(offset) !== ZWSP && rectFromPosition(node, offset);
