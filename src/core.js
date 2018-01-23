@@ -1059,6 +1059,7 @@
                     var isLineBreak = tagName(nodeToInsert) === 'br';
                     var needSplit = false;
                     var incompatParagraph = false;
+                    var splitEnd;
 
                     if (isElm(nodeToInsert) && !isLineBreak) {
                         startPoint.insertNode(nodeToInsert);
@@ -1080,16 +1081,17 @@
                         }
                     }
                     if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                        var splitEnd = createRange(caretNode.element, false);
                         if (isLineBreak) {
                             needSplit = !is(caretNode, NODE_PARAGRAPH);
                             for (; is(caretNode.parentNode, NODE_ANY_INLINE); caretNode = caretNode.parentNode);
-                        } else if (is(node, NODE_PARAGRAPH)) {
-                            incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && trim(nodeToInsert.textContent);
-                            needSplit = incompatParagraph || !paragraphAsInline;
-                            caretNode = closest(caretNode, NODE_PARAGRAPH);
+                            splitEnd = createRange(caretNode.element, false);
                         } else if (!is(node, NODE_ANY_INLINE)) {
-                            if (trim(createRange(splitEnd, caretPoint))) {
+                            caretNode = closest(caretNode, NODE_PARAGRAPH);
+                            splitEnd = createRange(caretNode.element, false);
+                            if (is(node, NODE_PARAGRAPH)) {
+                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && trim(nodeToInsert.textContent);
+                                needSplit = incompatParagraph || !paragraphAsInline;
+                            } else if (trim(createRange(splitEnd, caretPoint))) {
                                 needSplit = trim(createRange(createRange(caretNode.element, true), caretPoint));
                             } else {
                                 caretNode = caretNode.nextSibling || caretNode.parentNode;
