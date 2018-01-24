@@ -45,6 +45,7 @@
     var clipboard = {};
     var userFocus;
     var caretNotification;
+    var selectionCache;
     var windowFocusedOut;
     var permitFocusEvent;
     var supportTextInputEvent;
@@ -54,6 +55,7 @@
 
     function TyperSelection(typer, range) {
         var self = this;
+        selectionCache.set(self, {});
         self.typer = typer;
         self.baseCaret = new TyperCaret(typer, self);
         self.extendCaret = new TyperCaret(typer, self);
@@ -833,7 +835,7 @@
         function normalizeWhitespace(node) {
             var p1, p2;
             var wholeText = '';
-            iterate(document.createNodeIterator(node.element, 4, null, false), function (v) {
+            iterate(createNodeIterator(node.element, 4), function (v) {
                 if (v.data) {
                     wholeText = (wholeText + v.data).replace(/[^\S\u00a0]{2}(?=\S)/g, ' \u00a0').replace(/\u00a0{2}(?!\u0020|$)/g, '\u00a0 ').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
                     if (wholeText.slice(-v.length) !== v.data) {
@@ -1462,7 +1464,7 @@
                     mouseup: function (e2) {
                         mousedown = false;
                         $(document.body).unbind(handlers);
-                        if (e2.clientX === e.clientX && e2.clientY === e.clientY) {
+                        if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
                             var node = typer.getNode(e2.target);
                             if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                                 currentSelection.select(node.widget.element);
@@ -2135,6 +2137,12 @@
         });
     }
 
+    function selectionIterateTextNodes(inst) {
+        return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4), null, inst.startTextNode || inst.startElement, function (v) {
+            return comparePosition(v, inst.endTextNode || inst.endElement) <= 0;
+        });
+    }
+
     function selectionSplitText(inst) {
         var p1 = inst.getCaret('start');
         var p2 = inst.getCaret('end');
@@ -2170,6 +2178,9 @@
             inst[selectionUpdate.NAMES[i + 4]] = p1[selectionUpdate.NAMES[i]];
             inst[selectionUpdate.NAMES[i + 8]] = p2[selectionUpdate.NAMES[i]];
         }
+        var node = inst.typer.getNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        inst.focusNode = closest(node, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE);
+        selectionCache.get(inst).m = 0;
     }
     selectionUpdate.NAMES = 'node element textNode offset startNode startElement startTextNode startOffset endNode endElement endTextNode endOffset'.split(' ');
 
@@ -2190,10 +2201,6 @@
     definePrototype(TyperSelection, {
         get isSingleEditable() {
             return this.isCaret || !selectionCreateTreeWalker(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
-        },
-        get focusNode() {
-            var node = this.typer.getNode(getCommonAncestor(this.baseCaret.element, this.extendCaret.element));
-            return closest(node, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE);
         },
         getCaret: function (point) {
             var b = this.baseCaret;
@@ -2252,10 +2259,7 @@
             if (self.isCaret) {
                 return [self.startElement];
             }
-            var commonContainer = getCommonAncestor(self.startElement, self.endElement);
-            return iterateToArray(selectionCreateTreeWalker(self, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET), mapFn('element')).filter(function (v) {
-                return containsOrEquals(commonContainer, v);
-            });
+            return $(selectionIterateTextNodes(self)).parent().get();
         },
         getSelectedText: function () {
             return this.typer.extractText(this.getRange());
@@ -2266,9 +2270,7 @@
                 return [];
             }
             selectionSplitText(self);
-            return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(self, NODE_ANY_ALLOWTEXT), 4), null, self.startTextNode || self.startElement, function (v) {
-                return comparePosition(v, self.endTextNode || self.endElement) <= 0;
-            });
+            return selectionIterateTextNodes(self);
         },
         createTreeWalker: function (whatToShow, filter) {
             return selectionCreateTreeWalker(this, whatToShow, filter);
@@ -2329,6 +2331,17 @@
             return selectionAtomic(this, function () {
                 return TyperCaret.prototype[v].apply(this.extendCaret, arguments) + this.collapse('extend') > 0;
             }, slice(arguments));
+        };
+    });
+    $.each('getWidgets getParagraphElements getSelectedElements getSelectedText getSelectedTextNodes'.split(' '), function (i, v) {
+        var fn = TyperSelection.prototype[v];
+        TyperSelection.prototype[v] = function () {
+            var cache = selectionCache.get(this);
+            if (!(cache.m & (1 << i))) {
+                cache[v] = fn.apply(this, arguments);
+                cache.m |= (1 << i);
+            }
+            return cache[v];
         };
     });
 
@@ -2732,6 +2745,7 @@
         });
     }
     userFocus = new WeakMap();
+    selectionCache = new WeakMap();
     caretNotification = new TyperCaretNotification();
 
     // polyfill for document.caretRangeFromPoint
