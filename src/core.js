@@ -838,16 +838,16 @@
         }
 
         function normalizeWhitespace(node) {
-            var i = 0;
-            var index = [];
+            var textNodes = iterateToArray(createNodeIterator(node.element, 4));
             var wholeText = '';
-            iterate(createNodeIterator(node.element, 4), function (v) {
+            var index = [];
+            $.each(textNodes, function (i, v) {
                 wholeText = (wholeText + v.data).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
-                index[index.length] = wholeText.length;
+                index[i] = wholeText.length;
             });
             wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
-            iterate(createNodeIterator(node.element, 4), function (v) {
-                var text = wholeText.slice(index[i - 1] || 0, index[i++]);
+            $.each(textNodes, function (i, v) {
+                var text = wholeText.slice(index[i - 1] || 0, index[i]);
                 if (v.data !== text) {
                     v.data = text;
                 }
@@ -895,7 +895,7 @@
                             removeNode(firstBr);
                         }
                         if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
-                            iterate(createNodeIterator(element, 4), function (v) {
+                            $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
                                 v.data = v.data.replace(/[^\S\u00a0]+/g, ' ');
                                 if (isText(v.nextSibling)) {
                                     v.nextSibling.data = (v.data + v.nextSibling.data).replace(/[^\S\u00a0]+/g, ' ');
