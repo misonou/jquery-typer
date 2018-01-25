@@ -25,7 +25,7 @@
     var NODE_ANY_BLOCK = NODE_WIDGET | NODE_PARAGRAPH | NODE_ANY_BLOCK_EDITABLE;
     var NODE_ANY_INLINE = NODE_INLINE | NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE;
     var NODE_ANY_ALLOWTEXT = NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_INLINE | NODE_INLINE_EDITABLE;
-    var NODE_ALL_VISIBLE = -1 & ~NODE_SHOW_HIDDEN;
+    var NODE_ALL_VISIBLE = ~NODE_SHOW_HIDDEN;
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
@@ -251,13 +251,18 @@
     function compareAttrs(a, b) {
         var thisAttr = attrs(a);
         var prevAttr = attrs(b);
-        $.each(prevAttr, function (i, v) {
-            if (v === thisAttr[i]) {
-                delete thisAttr[i];
-                delete prevAttr[i];
+        var count = 0;
+        for (var i in thisAttr) {
+            if (thisAttr[i] !== prevAttr[i]) {
+                return false;
             }
-        });
-        return !Object.keys(thisAttr)[0] && !Object.keys(prevAttr)[0];
+            count++;
+        }
+        return count === Object.keys(prevAttr).length;
+    }
+
+    function sameElementSpec(a, b) {
+        return tagName(a) === tagName(b) && compareAttrs(a, b);
     }
 
     function comparePosition(a, b, strict) {
@@ -790,7 +795,7 @@
                 if (dirtyElements[0] === null) {
                     visitElement(dirtyElements.splice(0) && rootElement);
                 } else if (dirtyElements[0]) {
-                    dirtyElements.sort(function(a, b) {
+                    dirtyElements.sort(function (a, b) {
                         return !connected(root, a) ? -1 : comparePosition(a, b);
                     });
                     $(rootElement.parentNode || rootElement).find(dirtyElements.splice(0)).each(function (i, v) {
@@ -833,23 +838,18 @@
         }
 
         function normalizeWhitespace(node) {
-            var p1, p2;
+            var i = 0;
+            var index = [];
             var wholeText = '';
             iterate(createNodeIterator(node.element, 4), function (v) {
-                if (v.data) {
-                    wholeText = (wholeText + v.data).replace(/[^\S\u00a0]{2}(?=\S)/g, ' \u00a0').replace(/\u00a0{2}(?!\u0020|$)/g, '\u00a0 ').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
-                    if (wholeText.slice(-v.length) !== v.data) {
-                        v.data = wholeText.slice(-v.length);
-                    }
-                    var len = wholeText.length - v.length - 1;
-                    if (p1 && wholeText.charAt(len) !== p1.data.slice(-1)) {
-                        p1.data = p1.data.slice(0, -1) + wholeText.charAt(len);
-                        if (p2 && wholeText.charAt(len - p1.length) !== p2.data.slice(-1)) {
-                            p2.data = p2.data.slice(0, -1) + wholeText.charAt(len - p1.length);
-                        }
-                    }
-                    p2 = p1;
-                    p1 = v;
+                wholeText = (wholeText + v.data).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+                index[index.length] = wholeText.length;
+            });
+            wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
+            iterate(createNodeIterator(node.element, 4), function (v) {
+                var text = wholeText.slice(index[i - 1] || 0, index[i++]);
+                if (v.data !== text) {
+                    v.data = text;
                 }
             });
         }
@@ -858,15 +858,11 @@
             codeUpdate('script', function () {
                 iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
                     var element = node.element;
-                    if (is(node, NODE_EDITABLE) && !node.firstChild) {
-                        $(element).html('<p>' + (trim(element.textContent) || ZWSP_ENTITIY) + '</p>');
-                        return;
-                    }
-                    if (is(node, NODE_EDITABLE_PARAGRAPH | NODE_PARAGRAPH) && !element.firstChild) {
-                        $(createTextNode()).appendTo(element);
-                        return;
-                    }
                     if (is(node, NODE_EDITABLE)) {
+                        if (!node.firstChild) {
+                            $(element).html('<p>' + (trim(element.textContent) || ZWSP_ENTITIY) + '</p>');
+                            return;
+                        }
                         $(element).contents().each(function (i, v) {
                             if (v.parentNode === element) {
                                 var contents = [];
@@ -883,6 +879,10 @@
                         return;
                     }
                     if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
+                        if (!element.firstChild) {
+                            $(createTextNode()).appendTo(element);
+                            return;
+                        }
                         // WebKit adds dangling <BR> element when a line is empty
                         // normalize it into a ZWSP and continue process
                         var lastBr = $('>br:last-child', element)[0];
@@ -894,26 +894,21 @@
                         if (firstBr && !firstBr.previousSibling) {
                             removeNode(firstBr);
                         }
-                    }
-                    if (is(node, NODE_ANY_ALLOWTEXT)) {
-                        $('>br', element).each(function (i, v) {
-                            if (!isText(v.nextSibling)) {
-                                $(createTextNode()).insertAfter(v);
-                            }
-                        });
-                        if (currentSelection.startElement !== element && currentSelection.endElement !== element) {
-                            $(element).contents().each(function (i, v) {
-                                if (isText(v) && isText(v.nextSibling)) {
-                                    v.nextSibling.data = v.data + v.nextSibling.data;
+                        if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
+                            iterate(createNodeIterator(element, 4), function (v) {
+                                v.data = v.data.replace(/[^\S\u00a0]+/g, ' ');
+                                if (isText(v.nextSibling)) {
+                                    v.nextSibling.data = (v.data + v.nextSibling.data).replace(/[^\S\u00a0]+/g, ' ');
                                     removeNode(v);
                                 }
                             });
-                            if (is(node, NODE_INLINE) && tagName(element.previousSibling) === tagName(element) && compareAttrs(element, element.previousSibling)) {
-                                $(element).contents().appendTo(element.previousSibling);
-                                removeNode(element);
-                            }
                         }
                     }
+                    $('>br', element).each(function (i, v) {
+                        if (!isText(v.nextSibling)) {
+                            $(createTextNode()).insertAfter(v);
+                        }
+                    });
                 });
                 // Mozilla adds <br type="_moz"> when a container is empty
                 $('br[type="_moz"]', topElement).remove();
@@ -1057,13 +1052,13 @@
 
                 content.forEach(function (nodeToInsert) {
                     var caretNode = typer.getNode(caretPoint.startContainer);
-                    var node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
+                    var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
                     var needSplit = false;
                     var incompatParagraph = false;
                     var splitEnd;
 
-                    if (isElm(nodeToInsert) && !isLineBreak) {
+                    if (!textOnly && !isLineBreak && isElm(nodeToInsert)) {
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
@@ -1071,15 +1066,15 @@
                             nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
                             node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
-                    }
-                    if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
-                        if (triggerDefaultPreventableEvent(null, caretNode.widget, 'receive', null, {
-                            sourceElement: nodeToInsert,
-                            targetElement: closest(caretNode, NODE_ANY_BLOCK_EDITABLE).element,
-                            targetPosition: caretPoint.cloneRange()
-                        })) {
-                            trackChange(caretNode);
-                            return;
+                        if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
+                            if (triggerDefaultPreventableEvent(null, caretNode.widget, 'receive', null, {
+                                sourceElement: nodeToInsert,
+                                targetElement: closest(caretNode, NODE_ANY_BLOCK_EDITABLE).element,
+                                targetPosition: caretPoint.cloneRange()
+                            })) {
+                                trackChange(caretNode);
+                                return;
+                            }
                         }
                     }
                     if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
@@ -1091,7 +1086,7 @@
                             caretNode = closest(caretNode, NODE_PARAGRAPH);
                             splitEnd = createRange(caretNode.element, false);
                             if (is(node, NODE_PARAGRAPH)) {
-                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && (tagName(node.element) !== tagName(caretNode.element) || node.element.className !== caretNode.element.className) && trim(nodeToInsert.textContent);
+                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
                                 needSplit = incompatParagraph || !paragraphAsInline;
                             } else if (trim(createRange(splitEnd, caretPoint))) {
                                 needSplit = trim(createRange(createRange(caretNode.element, true), caretPoint));
@@ -1189,14 +1184,21 @@
                         removeNode(state.startNode.element, true);
                     } else if (is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
                         if (caretPoint) {
-                            var caretNode = closest(typer.getNode(caretPoint.startContainer), -1 & ~NODE_ANY_INLINE);
+                            var caretNode = closest(typer.getNode(caretPoint.startContainer), ~NODE_ANY_INLINE);
                             caretPoint = createRange(caretNode.element, -0);
                         } else {
                             caretPoint = createRange(state.startNode.element, -0);
                         }
-                        caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
-                        caretPoint.collapse(true);
+                        var glueContent = createDocumentFragment(createRange(state.endNode.element, 'contents').extractContents());
+                        var glueFirstNode = glueContent.firstChild;
+                        caretPoint.cloneRange().insertNode(glueContent);
                         removeNode(state.endNode.element, true);
+                        while (isElm(glueFirstNode) && sameElementSpec(glueFirstNode, glueFirstNode.previousSibling)) {
+                            var nodeToRemove = glueFirstNode;
+                            glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
+                            caretPoint = createRange(glueFirstNode, 0);
+                            removeNode(nodeToRemove, true);
+                        }
                     }
                     trackChange(state.endNode);
                     trackChange(state.startNode);
@@ -1863,16 +1865,6 @@
             },
             trackChange: function (node) {
                 trackChange(node.element || node);
-            },
-            execCommand: function (commandName, value) {
-                var r1, r2;
-                $.each(currentSelection.getEditableRanges(), function (i, v) {
-                    applyRange(v);
-                    document.execCommand(commandName, false, value || '');
-                    r1 = r1 || selection.getRangeAt(0);
-                    r2 = selection.getRangeAt(0);
-                });
-                currentSelection.select(createRange(r1, true), createRange(r2, false));
             }
         });
 
@@ -1904,7 +1896,7 @@
         iterateToArray: iterateToArray,
         closest: closest,
         getCommonAncestor: getCommonAncestor,
-        compareAttrs: compareAttrs,
+        sameElementSpec: sameElementSpec,
         comparePosition: comparePosition,
         compareRangePosition: compareRangePosition,
         containsOrEquals: containsOrEquals,

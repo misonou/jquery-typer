@@ -8,12 +8,16 @@
         justifyFull: 'justify'
     };
     var STYLE_TAGNAME = {
-        bold: 'b',
-        italic: 'i',
+        bold: 'b,strong',
+        italic: 'i,em',
         underline: 'u',
-        strikeThrough: 'strike',
-        superscript: 'sup',
-        subscript: 'sub'
+        strikeThrough: 'strike'
+    };
+    var STYLE_CHECK = {
+        bold: ['fontWeight', 'bold 700'],
+        italic: ['fontStyle', 'italic'],
+        underline: ['textDecoration', 'underline'],
+        strikeThrough: ['textDecoration', 'line-through']
     };
     var LIST_STYLE_TYPE = {
         '1': 'decimal',
@@ -81,6 +85,48 @@
         return element;
     }
 
+    function applyInlineStyle(tx, wrapElm, unwrapSpec, currentState, styleCheck) {
+        var selection = tx.selection;
+        if (selection.isCaret && !currentState) {
+            tx.insertHtml(wrapElm);
+            wrapElm.appendChild(Typer.createTextNode());
+            selection.moveToText(wrapElm, -0);
+        } else {
+            var paragraphs = selection.getParagraphElements();
+            var textNodes = selection.getSelectedTextNodes();
+            paragraphs.forEach(function (v) {
+                if (!styleCheck || !Typer.ui.matchWSDelim(getComputedStyle(v, null)[styleCheck[0]], styleCheck[1])) {
+                    if (!currentState) {
+                        $(textNodes, v).wrap(wrapElm);
+                    } else {
+                        var $unwrapNodes = $(textNodes, v).parentsUntil(v).filter(unwrapSpec);
+                        var $rewrapNodes = $unwrapNodes.contents().filter(function (i, v) {
+                            return textNodes.every(function (w) {
+                                return !Typer.containsOrEquals(v, w);
+                            });
+                        });
+                        $unwrapNodes.contents().unwrap();
+                        $rewrapNodes.wrap(wrapElm);
+                    }
+                }
+            });
+            $(paragraphs).find(unwrapSpec).filter(':has(' + unwrapSpec + ')').each(function (i, v) {
+                $(v).contents().unwrap().filter(function (i, v) {
+                    return v.nodeType === 3;
+                }).wrap(v);
+            });
+            $(paragraphs).find('span[class=""],span:not([class])').contents().unwrap();
+            $(paragraphs).find(unwrapSpec).each(function (i, v) {
+                if (Typer.sameElementSpec(v.previousSibling, v)) {
+                    $(v.childNodes).appendTo(v.previousSibling);
+                    tx.removeElement(v);
+                }
+            });
+            selection.select(textNodes[0], 0, textNodes[textNodes.length - 1], -0);
+        }
+        tx.trackChange(selection.focusNode);
+    }
+
     /* ********************************
      * Commands
      * ********************************/
@@ -91,19 +137,8 @@
     }
 
     function inlineStyleCommand(tx) {
-        if (tx.selection.isCaret) {
-            tx.insertHtml(createElementWithClassName(STYLE_TAGNAME[tx.commandName]));
-        } else {
-            // IE will nest <sub> and <sup> elements on the subscript and superscript command
-            // clear the subscript or superscript format before applying the opposite command
-            if (tx.widget.subscript && tx.commandName === 'superscript') {
-                tx.execCommand('subscript');
-            } else if (tx.widget.superscript && tx.commandName === 'subscript') {
-                tx.execCommand('superscript');
-            }
-            tx.execCommand(tx.commandName);
-            tx.trackChange(tx.selection.focusNode);
-        }
+        var kind = tx.commandName;
+        applyInlineStyle(tx, createElementWithClassName(STYLE_TAGNAME[kind].split(',')[0]), STYLE_TAGNAME[kind], tx.widget[kind], STYLE_CHECK[kind]);
     }
 
     function listCommand(tx, type) {
@@ -179,14 +214,9 @@
     Typer.widgets.inlineStyle = {
         beforeStateChange: function (e) {
             var elements = e.typer.getSelection().getSelectedElements();
-            $.extend(e.widget, {
-                bold: !!Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
-                italic: computePropertyValue(elements, 'fontStyle') === 'italic',
-                underline: computePropertyValue(elements, 'textDecoration') === 'underline',
-                strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
-                superscript: !!$(elements).filter('sup')[0],
-                subscript: !!$(elements).filter('sub')[0],
-                inlineClass: computePropertyValue($(elements).filter('span'), 'inlineClass')
+            e.widget.inlineClass = computePropertyValue($(elements).filter('span'), 'inlineClass');
+            $.each(STYLE_CHECK, function (i, v) {
+                e.widget[i] = !!Typer.ui.matchWSDelim(computePropertyValue(elements, v[0]), v[1]);
             });
         },
         commands: {
@@ -197,31 +227,7 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var isCaret = tx.selection.isCaret;
-                var span = createElementWithClassName('span', className);
-                if (tx.selection.isCaret) {
-                    tx.insertHtml(span);
-                    span.appendChild(Typer.createTextNode());
-                } else {
-                    $(tx.selection.getSelectedTextNodes()).wrap(span);
-                }
-                var $elm = $(tx.selection.getSelectedElements());
-                $elm.filter('span:has(span)').each(function (i, v) {
-                    $(v).contents().unwrap().filter(function (i, v) {
-                        return v.nodeType === 3;
-                    }).wrap(createElementWithClassName('span', v.className));
-                });
-                $elm.filter('span[class=""],span:not([class])').contents().unwrap();
-                $elm.filter('span+span').each(function (i, v) {
-                    if (Typer.is(v.previousSibling, 'span.' + v.className)) {
-                        $(v).contents().appendTo(v.previousSibling);
-                        $(v).remove();
-                    }
-                });
-                if (isCaret) {
-                    tx.selection.select(span, -0);
-                }
-                tx.trackChange(tx.selection.focusNode);
+                applyInlineStyle(tx, createElementWithClassName('span', className), 'span');
             }
         }
     };

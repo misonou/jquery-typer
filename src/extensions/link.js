@@ -17,13 +17,10 @@
         inline: true,
         insert: function (tx, value) {
             value = normalizeUrl(value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input));
-            if (tx.selection.isCaret) {
-                var element = $('<a>').text(value).attr('href', value)[0];
-                tx.insertHtml(element);
+            if (tx.selection.focusNode.widget.id === 'link') {
+                tx.invoke('setURL', value);
             } else {
-                tx.execCommand('createLink', value);
-                tx.selection.collapse('end');
-                tx.trackChange(tx.selection.startElement);
+                tx.insertHtml($('<a>').text(value).attr('href', value)[0]);
             }
         },
         remove: 'keepText',
@@ -71,28 +68,22 @@
                 }
                 var href = value.href || value;
                 var text = value.text || href;
+                var element;
                 if (self.widget) {
-                    $(self.widget.element).text(text);
-                    tx.typer.invoke('setURL', href);
-                    if (value.blank) {
-                        $(self.widget.element).attr('target', '_blank');
-                    } else {
-                        $(self.widget.element).removeAttr('target');
-                    }
-                    tx.trackChange(self.widget);
+                    element = self.widget.element;
                 } else {
-                    var textNode = Typer.createTextNode(text);
-                    tx.insertHtml(textNode);
-                    tx.selection.select(textNode);
-                    tx.insertWidget('link', href);
-                    if (tx.selection.focusNode.widget.id === 'link') {
-                        if (value.blank) {
-                            $(tx.selection.focusNode.widget.element).attr('target', '_blank');
-                        } else {
-                            $(tx.selection.focusNode.widget.element).removeAttr('target');
-                        }
-                    }
+                    element = $('<a href="">').text(text)[0];
+                    tx.insertHtml(element);
+                    tx.selection.select(element, 'contents');
                 }
+                $(element).text(text);
+                tx.typer.invoke('setURL', href);
+                if (value.blank) {
+                    $(element).attr('target', '_blank');
+                } else {
+                    $(element).removeAttr('target');
+                }
+                tx.trackChange(element);
             },
             active: function (toolbar, self) {
                 return toolbar.is('toolbar') ? self.widget : false;
