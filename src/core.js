@@ -924,6 +924,7 @@
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
             var state = new TyperSelection(typer, range);
+            var isSingleEditable = state.isSingleEditable;
 
             codeUpdate(null, function () {
                 if (!range.collapsed) {
@@ -940,7 +941,7 @@
                     iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
                         var element = node.element;
                         var handler = widgetOptions[node.widget.id].extract;
-                        if ((node === state.focusNode && is(node, NODE_EDITABLE)) || (!handler && is(node, NODE_WIDGET | NODE_EDITABLE))) {
+                        if (node === state.focusNode && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
                         if (cloneNode) {
@@ -972,6 +973,9 @@
                             }
                             return 2;
                         }
+                        if (!handler && is(node, NODE_WIDGET | NODE_EDITABLE)) {
+                            return 3;
+                        }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
                             var content = createRange(element, range)[method]();
                             if (cloneNode && content) {
@@ -995,7 +999,7 @@
                 }
                 if (isFunction(callback)) {
                     var startPoint, endPoint;
-                    if (!state.isSingleEditable) {
+                    if (!isSingleEditable) {
                         var iterator = new TyperTreeWalker(typer.getNode(range.commonAncestorContainer), NODE_WIDGET);
                         var fn = function (node, collapse) {
                             iterator.currentNode = node;
