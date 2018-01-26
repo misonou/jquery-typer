@@ -1272,14 +1272,6 @@
                 triggerEvent(null, EVENT_ALL, 'stateChange');
             }
 
-            function checkActualChange() {
-                var value = trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
-                if (value !== lastValue) {
-                    lastValue = value;
-                    return true;
-                }
-            }
-
             function setMarker(node, offset, start) {
                 if (isText(node)) {
                     $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typer.getNode(node), node) + offset);
@@ -1311,10 +1303,12 @@
                 }
                 var newValue = topElement.outerHTML;
                 if (newValue !== snapshots[0]) {
-                    if (checkActualChange()) {
+                    var value = undoable.getValue();
+                    if (value !== lastValue) {
                         snapshots.splice(0, currentIndex, newValue);
                         snapshots.splice(Typer.historyLevel);
                         currentIndex = 0;
+                        lastValue = value;
                     } else {
                         snapshots[currentIndex] = newValue;
                     }
@@ -1328,16 +1322,13 @@
                 $self.empty().append(content.childNodes).attr(attrs(content));
                 currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
                 setImmediateOnce(triggerStateChange);
-                checkActualChange();
+                lastValue = undoable.getValue();
                 needSnapshot = false;
             }
 
             extend(undoable, {
                 getValue: function () {
-                    if (needSnapshot) {
-                        takeSnapshot();
-                    }
-                    return lastValue;
+                    return trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
