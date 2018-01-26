@@ -43,9 +43,9 @@
         var direction = $(element).css('direction');
         switch (textAlign) {
             case '-webkit-left':
-                return 'left';
             case '-webkit-right':
-                return 'right';
+            case '-webkit-center':
+                return textAlign.slice(8);
             case 'start':
                 return direction === 'ltr' ? 'left' : 'right';
             case 'end':
