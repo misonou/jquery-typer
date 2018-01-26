@@ -8,14 +8,14 @@
         var callout = $('.typer-ui-float', thisMenu)[0];
         var rect = Typer.getRect(callout);
         if (rect.bottom > $(window).height()) {
-            $(callout).removeClass('float-top float-bottom').addClass('float-top');
+            $(callout).addClass('float-top');
         } else if (rect.top < 0) {
-            $(callout).removeClass('float-top float-bottom').addClass('float-bottom');
+            $(callout).removeClass('float-top');
         }
         if (rect.right > $(window).width()) {
-            $(callout).removeClass('float-left float-right').addClass('float-left');
+            $(callout).addClass('float-left');
         } else if (rect.left < 0) {
-            $(callout).removeClass('float-left float-right').addClass('float-right');
+            $(callout).removeClass('float-left');
         }
     }
 
@@ -110,7 +110,7 @@
                 detachCallout(control);
             }
         },
-        dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
+        dropdown: '<label class="typer-ui-dropdown" x:bind="(title:label)"><button><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span></button><br x:t="menupane"/></button>',
         dropdownInit: function (ui, control) {
             if (!control.contextualParent.is('callout contextmenu')) {
                 detachCallout(control);
@@ -210,7 +210,7 @@
                 $(this).parent().remove();
             });
         });
-        $(document.body).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
+        $(document.body).on('mouseover', 'label:has(>.typer-ui-float)', function (e) {
             setMenuPosition(e.currentTarget);
         });
         $(document.body).on('click', '.typer-ui-dialog-wrapper', function (e) {

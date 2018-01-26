@@ -46,25 +46,21 @@
             }
         },
         focusout: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value);
+            e.typer.setValue(e.typer.getValue() || 0);
         },
         mousewheel: function (e) {
-            e.typer.setValue(e.typer.getValue() - e.data * e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) - e.data * e.widget.options.step);
             e.preventDefault();
         },
         upArrow: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value + e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) + e.widget.options.step);
         },
         downArrow: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value - e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) - e.widget.options.step);
         },
         contentChange: function (e) {
             if (e.source !== 'keyboard') {
-                var value = parseInt(e.typer.extractText()) || 0;
-                e.typer.setValue(value);
+                e.typer.setValue(e.typer.getValue() || 0);
             }
         }
     };

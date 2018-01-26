@@ -242,11 +242,17 @@ button.typer-ui-checkbox .typer-ui-label {
     margin-left: 0.5em;
 }
 
-button.typer-ui-dropdown {
+label.typer-ui-callout,
+label.typer-ui-dropdown {
+    padding: 0;
+}
+
+label.typer-ui-dropdown > button,
+.typer-ui-buttonlist label.typer-ui-callout > button {
     padding-right: 2em !important;
 }
 
-button.typer-ui-dropdown:after {
+label.typer-ui-dropdown > button:after {
     content: '';
     display: block;
     position: absolute;
@@ -259,45 +265,8 @@ button.typer-ui-dropdown:after {
     pointer-events: none;
 }
 
-button.typer-ui-dropdown.disabled:after {
-    border-top-color: #999;
-}
-
-button.typer-ui-dropdown.error {
-    color: #a00009;
-}
-
-button.typer-ui-dropdown.error .typer-ui-label:after {
-    content: '\00e001';
-    display: inline-block;
-    margin-left: 0.25em;
-    font-family: 'Material Icons';
-    font-weight: normal;
-    text-transform: none;
-    vertical-align: top;
-}
-
-.is-dropdown button.active:before {
-    position: absolute;
-    content: '\00e876';
-    font-family: 'Material Icons';
-    top: 50%;
-    left: 0.7em;
-    line-height: 1;
-    margin-top: -0.5em;
-    text-transform: none;
-    font-size: 16px;
-}
-
-label.typer-ui-callout {
-    padding: 0;
-}
-
-.typer-ui-buttonlist label.typer-ui-callout > button {
-    padding-right: 2em !important;
-}
-
-.typer-ui-buttonlist label.typer-ui-callout > button:after {
+.typer-ui-buttonlist label.typer-ui-callout > button:after,
+.typer-ui-buttonlist label.typer-ui-dropdown > button:after {
     content: '';
     display: block;
     position: absolute;
@@ -308,7 +277,39 @@ label.typer-ui-callout {
     border-left: 0.5em solid #555;
     border-top: 0.4em solid transparent;
     border-bottom: 0.4em solid transparent;
+    border-right: none;
     pointer-events: none;
+}
+
+label.typer-ui-dropdown.disabled:after {
+    border-top-color: #999;
+}
+
+label.typer-ui-dropdown.error {
+    color: #a00009;
+}
+
+label.typer-ui-dropdown.error .typer-ui-label:after {
+    content: '\00e001';
+    display: inline-block;
+    margin-left: 0.25em;
+    font-family: 'Material Icons';
+    font-weight: normal;
+    text-transform: none;
+    vertical-align: top;
+}
+
+.is-dropdown button.active:before,
+.typer-ui-dropdown .typer-ui-float button.active:before {
+    position: absolute;
+    content: '\00e876';
+    font-family: 'Material Icons';
+    top: 50%;
+    left: 0.7em;
+    line-height: 1;
+    margin-top: -0.5em;
+    text-transform: none;
+    font-size: 16px;
 }
 
 
@@ -336,7 +337,8 @@ label.typer-ui-callout {
     top: 0;
 }
 
-.typer-ui-callout:hover > .typer-ui-float {
+.typer-ui-callout:hover > .typer-ui-float,
+.typer-ui-dropdown:hover > .typer-ui-float {
     display: block;
 }
 

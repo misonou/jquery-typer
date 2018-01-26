@@ -1034,25 +1034,27 @@
             content = slice(createDocumentFragment(content).childNodes);
 
             extractContents(range, 'paste', function (state) {
+                var startNode = state.startNode;
+                var endNode = state.endNode;
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = state.getCaret('start').getRange();
-                var startPoint = createRange(closest(state.startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
-                var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
-                var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
+                var startPoint = createRange(closest(startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
+                var forcedInline = is(startNode, NODE_EDITABLE_PARAGRAPH);
+                var insertAsInline = is(startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
                 var formattingNodes = [];
 
                 var cur = typer.getNode(state.startElement);
                 if (is(cur, NODE_ANY_INLINE)) {
-                    for (; cur !== state.startNode; cur = cur.parentNode) {
+                    for (; cur !== startNode; cur = cur.parentNode) {
                         if (is(cur, NODE_INLINE)) {
                             formattingNodes.push(cur.element);
                         }
                     }
-                    formattingNodes.push(state.startNode.element);
+                    formattingNodes.push(startNode.element);
                 } else if (is(cur, NODE_PARAGRAPH)) {
-                    formattingNodes[0] = state.startNode.element;
+                    formattingNodes[0] = startNode.element;
                 } else if (!is(cur, NODE_EDITABLE_PARAGRAPH)) {
                     formattingNodes[0] = createElement('p');
                 }
@@ -1171,7 +1173,7 @@
                     } else {
                         // check for the first block either if there is content or the insert point is a paragraph
                         // to avoid two empty lines inserted before block widget
-                        if (hasInsertedBlock || !is(state.startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
+                        if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
                             if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                                 caretPoint.insertNode(nodeToInsert);
                             } else {
@@ -1185,21 +1187,21 @@
                     }
                     trackChange(caretPoint.startContainer);
                 });
-                if (!hasInsertedBlock && state.startNode !== state.endNode) {
-                    if (!extractText(state.startNode.element)) {
-                        caretPoint = createRange(state.endNode.element, is(state.endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
-                        removeNode(state.startNode.element, true);
-                    } else if (is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
+                if (!hasInsertedBlock && startNode !== endNode) {
+                    if (!extractText(startNode.element)) {
+                        caretPoint = createRange(endNode.element, is(endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
+                        removeNode(startNode.element, true);
+                    } else if (is(startNode, NODE_PARAGRAPH) && is(endNode, NODE_PARAGRAPH)) {
                         if (caretPoint) {
                             var caretNode = closest(typer.getNode(caretPoint.startContainer), ~NODE_ANY_INLINE);
                             caretPoint = createRange(caretNode.element, -0);
                         } else {
-                            caretPoint = createRange(state.startNode.element, -0);
+                            caretPoint = createRange(startNode.element, -0);
                         }
-                        var glueContent = createDocumentFragment(createRange(state.endNode.element, 'contents').extractContents());
+                        var glueContent = createDocumentFragment(createRange(endNode.element, 'contents').extractContents());
                         var glueFirstNode = glueContent.firstChild;
                         caretPoint.cloneRange().insertNode(glueContent);
-                        removeNode(state.endNode.element, true);
+                        removeNode(endNode.element, true);
                         while (isElm(glueFirstNode) && sameElementSpec(glueFirstNode, glueFirstNode.previousSibling)) {
                             var nodeToRemove = glueFirstNode;
                             glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
@@ -1207,8 +1209,8 @@
                             removeNode(nodeToRemove, true);
                         }
                     }
-                    trackChange(state.endNode);
-                    trackChange(state.startNode);
+                    trackChange(endNode);
+                    trackChange(startNode);
                 }
                 currentSelection.select(caretPoint);
             });
