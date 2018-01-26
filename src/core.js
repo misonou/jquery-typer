@@ -1311,10 +1311,13 @@
                 }
                 var newValue = topElement.outerHTML;
                 if (newValue !== snapshots[0]) {
-                    var hasChange = checkActualChange();
-                    snapshots.splice(0, currentIndex + !hasChange, newValue);
-                    snapshots.splice(Typer.historyLevel);
-                    currentIndex = 0;
+                    if (checkActualChange()) {
+                        snapshots.splice(0, currentIndex, newValue);
+                        snapshots.splice(Typer.historyLevel);
+                        currentIndex = 0;
+                    } else {
+                        snapshots[currentIndex] = newValue;
+                    }
                 }
                 $self.find('[x-typer-start], [x-typer-end]').andSelf().removeAttr('x-typer-start x-typer-end');
                 needSnapshot = false;
