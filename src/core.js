@@ -573,15 +573,18 @@
         var codeUpdate = (function () {
             var run = transaction(function () {
                 executing = false;
-                if (needSnapshot || changes[0]) {
+                var lastChanges = changes.splice(0);
+                if (needSnapshot || lastChanges[0]) {
+                    lastChanges.forEach(function (v) {
+                        normalize(v.element);
+                    });
                     undoable.snapshot();
                 }
                 setImmediate(function () {
                     suppressTextEvent = false;
-                    if (changes[0]) {
+                    if (lastChanges[0]) {
                         codeUpdate(null, function () {
-                            $.each(changes.splice(0), function (i, v) {
-                                normalize(v.element);
+                            $.each(lastChanges, function (i, v) {
                                 if (v.id !== WIDGET_ROOT) {
                                     triggerEvent(null, v, 'contentChange');
                                 }
