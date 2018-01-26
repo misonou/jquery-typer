@@ -89,7 +89,7 @@
             options: options,
             showButtonLabel: type === 'contextmenu',
             executed: function (ui, control) {
-                if (control.is('button dropdown')) {
+                if (!control.is('textbox')) {
                     ui.typer.getSelection().focus();
                 }
             }

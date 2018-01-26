@@ -1362,6 +1362,15 @@
             });
         }
 
+        function focusRetained(element) {
+            for (; element; element = element.parentNode) {
+                if (relatedElements.has(element)) {
+                    userFocus.set(typer, element);
+                    return true;
+                }
+            }
+        }
+
         function normalizeInputEvent() {
             var mousedown;
             var composition;
@@ -1659,25 +1668,21 @@
                         // after contextmenu event by right mouse click
                         return;
                     }
-                    for (var element = e.relatedTarget || lastTouchedElement; element; element = element.parentNode) {
-                        if (relatedElements.has(element)) {
-                            userFocus.set(typer, element);
-                            return;
-                        }
-                    }
-                    typerFocused = false;
-                    checkNativeUpdate = null;
-                    updateWidgetFocus();
-                    triggerEvent(null, EVENT_ALL, 'focusout');
-                    normalize();
+                    if (!focusRetained(e.relatedTarget || lastTouchedElement)) {
+                        typerFocused = false;
+                        checkNativeUpdate = null;
+                        updateWidgetFocus();
+                        triggerEvent(null, EVENT_ALL, 'focusout');
+                        normalize();
 
-                    // prevent focus returns to current editor
-                    // due to content updates through code
-                    if (containsOrEquals(topElement, document.activeElement)) {
-                        if (e.relatedTarget) {
-                            e.relatedTarget.focus();
-                        } else {
-                            topElement.blur();
+                        // prevent focus returns to current editor
+                        // due to content updates through code
+                        if (containsOrEquals(topElement, document.activeElement)) {
+                            if (e.relatedTarget) {
+                                e.relatedTarget.focus();
+                            } else {
+                                topElement.blur();
+                            }
                         }
                     }
                 }
@@ -1754,7 +1759,7 @@
 
         function retainFocusHandler(e) {
             var relatedTarget = e.relatedTarget || lastTouchedElement;
-            if (!containsOrEquals(e.currentTarget, relatedTarget)) {
+            if (!containsOrEquals(e.currentTarget, relatedTarget) && !focusRetained(relatedTarget)) {
                 if (userFocus.get(typer) === e.currentTarget) {
                     userFocus.delete(typer);
                 }
