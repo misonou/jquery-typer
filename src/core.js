@@ -1036,7 +1036,7 @@
             extractContents(range, 'paste', function (state) {
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = state.getCaret('start').getRange();
-                var startPoint = caretPoint.cloneRange();
+                var startPoint = createRange(closest(state.startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
                 var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
                 var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
