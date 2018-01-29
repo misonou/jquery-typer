@@ -859,7 +859,7 @@
 
         function normalize(element) {
             codeUpdate('script', function () {
-                iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
+                iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                     var element = node.element;
                     if (is(node, NODE_EDITABLE)) {
                         if (!node.firstChild) {
