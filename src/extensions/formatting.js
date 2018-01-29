@@ -87,12 +87,12 @@
 
     function applyInlineStyle(tx, wrapElm, unwrapSpec, currentState, styleCheck) {
         var selection = tx.selection;
+        var paragraphs = selection.getParagraphElements();
         if (selection.isCaret && !currentState) {
             tx.insertHtml(wrapElm);
             wrapElm.appendChild(Typer.createTextNode());
             selection.moveToText(wrapElm, -0);
         } else {
-            var paragraphs = selection.getParagraphElements();
             var textNodes = selection.getSelectedTextNodes();
             paragraphs.forEach(function (v) {
                 if (!styleCheck || !Typer.ui.matchWSDelim(getComputedStyle(v, null)[styleCheck[0]], styleCheck[1])) {
@@ -110,20 +110,20 @@
                     }
                 }
             });
-            $(paragraphs).find(unwrapSpec).filter(':has(' + unwrapSpec + ')').each(function (i, v) {
-                $(v).contents().unwrap().filter(function (i, v) {
-                    return v.nodeType === 3;
-                }).wrap(v);
-            });
-            $(paragraphs).find('span[class=""],span:not([class])').contents().unwrap();
-            $(paragraphs).find(unwrapSpec).each(function (i, v) {
-                if (Typer.sameElementSpec(v.previousSibling, v)) {
-                    $(v.childNodes).appendTo(v.previousSibling);
-                    tx.removeElement(v);
-                }
-            });
             selection.select(textNodes[0], 0, textNodes[textNodes.length - 1], -0);
         }
+        $(paragraphs).find(unwrapSpec).filter(':has(' + unwrapSpec + ')').each(function (i, v) {
+            $(v).contents().unwrap().filter(function (i, v) {
+                return v.nodeType === 3;
+            }).wrap(v);
+        });
+        $(paragraphs).find('span[class=""],span:not([class])').contents().unwrap();
+        $(paragraphs).find(unwrapSpec).each(function (i, v) {
+            if (Typer.sameElementSpec(v.previousSibling, v)) {
+                $(v.childNodes).appendTo(v.previousSibling);
+                tx.removeElement(v);
+            }
+        });
         tx.trackChange(selection.focusNode);
     }
 
