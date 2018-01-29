@@ -947,12 +947,17 @@
                         if (node === state.focusNode && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
+                        if (!handler && is(node, NODE_WIDGET | NODE_EDITABLE) && node.widget.element !== element) {
+                            // ignore widget structure if the widget is partially selected
+                            // and there is no extract event handler defined
+                            return 3;
+                        }
                         if (cloneNode) {
                             while (!containsOrEquals(stack[0][0], element)) {
                                 shift();
                             }
                             if (handler && element !== stack[0][0]) {
-                                $.unique($(element).parentsUntil(stack[0][0])).each(function (i, v) {
+                                $.unique(node.widget.element === element ? $(element) : $(element).parentsUntil(stack[0][0])).each(function (i, v) {
                                     stack.unshift([v, v.cloneNode(false), node.widget]);
                                     stack[1][1].appendChild(stack[0][1]);
                                 });
@@ -975,9 +980,6 @@
                                 }
                             }
                             return 2;
-                        }
-                        if (!handler && is(node, NODE_WIDGET | NODE_EDITABLE)) {
-                            return 3;
                         }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
                             var content = createRange(element, range)[method]();
@@ -1037,7 +1039,7 @@
                 var startNode = state.startNode;
                 var endNode = state.endNode;
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
-                var caretPoint = state.getCaret('start').getRange();
+                var caretPoint = state.getCaret('start').clone();
                 var startPoint = createRange(closest(startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
                 var forcedInline = is(startNode, NODE_EDITABLE_PARAGRAPH);
                 var insertAsInline = is(startNode, NODE_ANY_ALLOWTEXT);
@@ -1060,7 +1062,7 @@
                 }
 
                 content.forEach(function (nodeToInsert) {
-                    var caretNode = typer.getNode(caretPoint.startContainer);
+                    var caretNode = typer.getNode(caretPoint.element);
                     var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
                     var isLineBreak = tagName(nodeToInsert) === 'br';
                     var needSplit = false;
@@ -1092,20 +1094,20 @@
                             for (; is(caretNode.parentNode, NODE_ANY_INLINE); caretNode = caretNode.parentNode);
                             splitEnd = createRange(caretNode.element, false);
                         } else if (!is(node, NODE_ANY_INLINE)) {
-                            caretNode = closest(caretNode, NODE_PARAGRAPH);
+                            caretNode = closest(caretNode, NODE_PARAGRAPH) || caretNode;
                             splitEnd = createRange(caretNode.element, false);
                             if (is(node, NODE_PARAGRAPH)) {
                                 incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
                                 needSplit = incompatParagraph || !paragraphAsInline;
-                            } else if (trim(createRange(splitEnd, caretPoint))) {
-                                needSplit = trim(createRange(createRange(caretNode.element, true), caretPoint));
+                            } else if (trim(createRange(splitEnd, createRange(caretPoint)))) {
+                                needSplit = trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)));
                             } else {
                                 caretNode = caretNode.nextSibling || caretNode.parentNode;
-                                caretPoint = splitEnd;
+                                caretPoint.moveTo(splitEnd);
                             }
                         }
                         if (needSplit) {
-                            var splitContent = createRange(caretPoint, splitEnd).extractContents();
+                            var splitContent = createRange(createRange(caretPoint), splitEnd).extractContents();
                             if (!trim(splitContent.textContent)) {
                                 // avoid unindented empty elements when splitting at end of line
                                 splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
@@ -1137,10 +1139,10 @@
                                 n2.data = '\u00a0' + n2.data.slice(1);
                             }
                             if (isLineBreak) {
-                                caretPoint = createRange(splitFirstNode, false);
+                                caretPoint.moveTo(splitFirstNode, false);
                             } else {
                                 caretNode = typer.getNode(splitFirstNode);
-                                caretPoint = createRange(splitFirstNode, 0);
+                                caretPoint.moveTo(splitFirstNode, 0);
                                 paragraphAsInline = !incompatParagraph;
                                 insertAsInline = insertAsInline && paragraphAsInline;
                                 hasInsertedBlock = true;
@@ -1158,15 +1160,15 @@
                     var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
-                            caretPoint.insertNode(nodeToInsert);
+                            caretPoint.getRange().insertNode(nodeToInsert);
+                            normalizeWhitespace(caretNode);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
-                                caretPoint = createRange(lastNode, false);
-                                caretPoint.insertNode(createTextNode());
-                                caretPoint.collapse(false);
+                                var textNode = createTextNode();
+                                createRange(lastNode, false).insertNode(textNode);
+                                caretPoint.moveTo(textNode, -0);
                             } else {
-                                normalizeWhitespace(caretNode);
-                                caretPoint = createRange(lastNode, -0);
+                                caretPoint.moveTo(lastNode, -0);
                             }
                         }
                         paragraphAsInline = forcedInline;
@@ -1175,42 +1177,41 @@
                         // to avoid two empty lines inserted before block widget
                         if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
                             if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                                caretPoint.insertNode(nodeToInsert);
+                                createRange(caretNode.element, -0).insertNode(nodeToInsert);
                             } else {
                                 createRange(caretNode.element, true).insertNode(nodeToInsert);
                             }
                             insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
-                            caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
+                            caretPoint.moveTo(lastNode, insertAsInline ? -0 : false);
                             paragraphAsInline = forcedInline || !insertAsInline;
                         }
                         hasInsertedBlock = true;
                     }
-                    trackChange(caretPoint.startContainer);
+                    trackChange(caretPoint.element);
                 });
                 if (!hasInsertedBlock && startNode !== endNode) {
                     if (!extractText(startNode.element)) {
-                        caretPoint = createRange(endNode.element, is(endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
+                        caretPoint.moveTo(endNode.element, is(endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
                         removeNode(startNode.element, true);
                     } else if (is(startNode, NODE_PARAGRAPH) && is(endNode, NODE_PARAGRAPH)) {
-                        if (caretPoint) {
-                            var caretNode = closest(typer.getNode(caretPoint.startContainer), ~NODE_ANY_INLINE);
-                            caretPoint = createRange(caretNode.element, -0);
-                        } else {
-                            caretPoint = createRange(startNode.element, -0);
-                        }
                         var glueContent = createDocumentFragment(createRange(endNode.element, 'contents').extractContents());
                         var glueFirstNode = glueContent.firstChild;
-                        caretPoint.cloneRange().insertNode(glueContent);
+                        caretPoint.moveTo(startNode.element, -0);
+                        createRange(startNode.element, -0).insertNode(glueContent);
                         removeNode(endNode.element, true);
                         while (isElm(glueFirstNode) && sameElementSpec(glueFirstNode, glueFirstNode.previousSibling)) {
                             var nodeToRemove = glueFirstNode;
                             glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
-                            caretPoint = createRange(glueFirstNode, 0);
+                            caretPoint.moveTo(glueFirstNode, 0);
                             removeNode(nodeToRemove, true);
                         }
                     }
-                    trackChange(endNode);
                     trackChange(startNode);
+                    trackChange(endNode);
+                }
+                normalizeWhitespace(startNode);
+                if (startNode !== endNode) {
+                    normalizeWhitespace(endNode);
                 }
                 currentSelection.select(caretPoint);
             });
