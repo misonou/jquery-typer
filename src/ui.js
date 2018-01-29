@@ -513,6 +513,7 @@
                 inst.shortcut = typerUI.getShortcut(inst.execute);
             }
             contextualParent.all[name] = inst;
+            defineProperty(inst, '_m', 'c', 0);
             createControls(inst, contextualParent, (control === ui || control === contextualParent) && $.extend({}, exclusions));
             return inst;
         });
@@ -602,36 +603,51 @@
         });
     }
 
+    function ensureFlag(control, flag, callback) {
+        var mask = flag << 8;
+        if (!(control._m & mask)) {
+            control._m |= mask | (callback() * flag);
+        }
+        return (control._m & flag) > 0;
+    }
+
     function isEnabled(control) {
-        var ui = control.ui;
-        if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
-            return false;
-        }
-        if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
-            (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
-            return false;
-        }
-        if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
-            (control.requireWidget && !control.widget)) {
-            return false;
-        }
-        if (control.requireChildControls === true && (!control.controls.some(isEnabled) || control.controls.every(isHidden))) {
-            return false;
-        }
-        return control.enabled !== false && callFunction(control, 'enabled') !== false;
+        return ensureFlag(control, 0x01, function () {
+            var ui = control.ui;
+            if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
+                return false;
+            }
+            if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
+                (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
+                return false;
+            }
+            if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
+                (control.requireWidget && !control.widget)) {
+                return false;
+            }
+            if (control.requireChildControls === true && (!control.controls.some(isEnabled) || control.controls.every(isHidden))) {
+                return false;
+            }
+            return control.enabled !== false && callFunction(control, 'enabled') !== false;
+        });
     }
 
     function isActive(control) {
-        return control.active === true || !!callFunction(control, 'active');
+        return ensureFlag(control, 0x02, function () {
+            return control.active === true || !!callFunction(control, 'active');
+        });
     }
 
     function isHidden(control) {
-        return (!isEnabled(control) && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false;
+        return ensureFlag(control, 0x04, function () {
+            return (!isEnabled(control) && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false;
+        });
     }
 
     function updateControl(control) {
         var ui = control.ui;
         var theme = definedThemes[ui.theme];
+        control._m = 0;
 
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
