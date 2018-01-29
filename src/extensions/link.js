@@ -16,11 +16,11 @@
         element: 'a[href]',
         inline: true,
         insert: function (tx, value) {
-            value = normalizeUrl(value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input));
+            value = normalizeUrl(value);
             if (tx.selection.focusNode.widget.id === 'link') {
                 tx.invoke('setURL', value);
             } else {
-                tx.insertHtml($('<a>').text(value).attr('href', value)[0]);
+                tx.insertHtml($('<a>').text(tx.selection.getSelectedText() || value).attr('href', value)[0]);
             }
         },
         remove: 'keepText',
@@ -171,8 +171,8 @@
             if (e.data === 'enter') {
                 selection.moveByCharacter(-1);
             }
-            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/\S+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
-                var link = (RegExp.$2 || 'mailto:') + RegExp.$1;
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^([a-z]+:\/\/\S+)|(\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
+                var link = RegExp.$1 || ('mailto:' + RegExp.$2);
                 e.typer.snapshot(true);
                 e.typer.select(selection);
                 e.typer.invoke(function (tx) {
