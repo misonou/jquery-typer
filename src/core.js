@@ -2111,7 +2111,8 @@
     function nodeIteratorInit(inst, iterator) {
         var typer = iterator.currentNode.widget.typer;
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
-            return treeWalkerAcceptNode(iterator, typer.getNode(v), true) !== 1 ? 3 : acceptNode(inst, v) | 1;
+            var node = typer.getNode(v);
+            return node.element !== (isElm(v) || v.parentNode) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
         defineProperty(inst, 'iterator', iterator2);
     }
