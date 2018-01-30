@@ -674,10 +674,12 @@
             var observer;
 
             function triggerWidgetEvent(widget, event) {
-                widget[event + 'ed'] = true;
+                widget.fireInit = widget.fireInit !== true;
                 setImmediate(function () {
-                    if (fireEvent && !widget.destroyed && widget.id !== WIDGET_UNKNOWN && (event === 'init' || widget.inited)) {
+                    if (fireEvent && widget.fireInit !== false && widget.id !== WIDGET_UNKNOWN) {
                         triggerEvent(widget, event);
+                        widget.destroyed = event === 'destroy';
+                        delete widget.fireInit;
                     }
                 });
             }
@@ -2473,6 +2475,8 @@
             var self = this;
             var node = self.textNode || self.element;
             if (!containsOrEquals(self.typer.element, node) || (isText(node) && self.offset > node.length)) {
+                // trigger typer document to reflect changes
+                self.typer.getNode(node);
                 if (!self.node.parentNode && self.node.element !== self.typer.element) {
                     self.moveTo(self.typer.element, 0);
                 } else {
@@ -2518,8 +2522,8 @@
                 if (is(node, NODE_WIDGET)) {
                     // range returned is anchored at the closest text node which may or may not be at the point (x, y)
                     // avoid moving caret to widget element that does not actually cover that point
-                    if (!pointInRect(x, y, getRect(node.widget.element))) {
-                        range = createRange(node.widget.element, false);
+                    if (!pointInRect(x, y, getRect(node.element))) {
+                        range = createRange(node.element, false);
                     }
                 }
                 return this.moveTo(range);
