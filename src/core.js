@@ -583,23 +583,23 @@
                 setImmediate(function () {
                     suppressTextEvent = false;
                     if (lastChanges[0]) {
-                        codeUpdate(null, function () {
+                        codeUpdate(function () {
                             $.each(lastChanges, function (i, v) {
                                 if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(null, v, 'contentChange');
+                                    triggerEvent(v, 'contentChange');
                                 }
                             });
-                            triggerEvent(null, EVENT_STATIC, 'contentChange');
+                            triggerEvent(EVENT_STATIC, 'contentChange');
                         });
                     }
                 });
             });
-            return function (source, callback, args, thisArg) {
+            return function (callback, args, thisArg) {
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
                 suppressTextEvent = true;
                 executing = true;
-                setEventSource(source, typer);
+                setEventSource('script', typer);
                 return run(callback, args, thisArg);
             };
         }());
@@ -626,12 +626,12 @@
             });
         }
 
-        function triggerEvent(source, eventMode, eventName, data, props) {
+        function triggerEvent(eventMode, eventName, data, props) {
             var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode)).filter(function (v) {
                 return !v.destroyed && isFunction(widgetOptions[v.id][eventName]);
             });
             if (widgets[0]) {
-                codeUpdate(source, function () {
+                codeUpdate(function () {
                     $.each(widgets, function (i, v) {
                         widgetOptions[v.id][eventName](new TyperEvent(eventName, typer, v, data, props));
                         return eventMode !== EVENT_HANDLER;
@@ -640,7 +640,7 @@
             }
             if (is(eventMode, TyperWidget)) {
                 setImmediate(function () {
-                    triggerEvent(source, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
+                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
                         targetWidget: eventMode
                     });
                 });
@@ -648,9 +648,9 @@
             return !!widgets[0];
         }
 
-        function triggerDefaultPreventableEvent(source, eventMode, eventName, data, props) {
+        function triggerDefaultPreventableEvent(eventMode, eventName, data, props) {
             var eventObj = is(props, $.Event) || $.Event(eventName);
-            triggerEvent(source, eventMode, eventName, data, extend({
+            triggerEvent(eventMode, eventName, data, extend({
                 preventDefault: eventObj.preventDefault.bind(eventObj),
                 isDefaultPrevented: function () {
                     return eventObj.isDefaultPrevented();
@@ -677,7 +677,7 @@
                 widget[event + 'ed'] = true;
                 setImmediate(function () {
                     if (fireEvent && !widget.destroyed && widget.id !== WIDGET_UNKNOWN && (event === 'init' || widget.inited)) {
-                        triggerEvent(null, widget, event);
+                        triggerEvent(widget, event);
                     }
                 });
             }
@@ -858,7 +858,7 @@
         }
 
         function normalize(element) {
-            codeUpdate('script', function () {
+            codeUpdate(function () {
                 iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                     var element = node.element;
                     if (is(node, NODE_EDITABLE)) {
@@ -929,13 +929,13 @@
             var state = new TyperSelection(typer, range);
             var isSingleEditable = state.isSingleEditable;
 
-            codeUpdate(null, function () {
+            codeUpdate(function () {
                 if (!range.collapsed) {
                     var stack = [[topElement, fragment]];
                     var shift = function () {
                         var item = stack.shift();
                         if (item[2]) {
-                            triggerEvent(null, item[2], 'extract', null, {
+                            triggerEvent(item[2], 'extract', null, {
                                 sourceElement: item[0],
                                 clonedElement: item[1]
                             });
@@ -1078,7 +1078,7 @@
                             node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
                         if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
-                            if (triggerDefaultPreventableEvent(null, caretNode.widget, 'receive', null, {
+                            if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
                                 sourceElement: nodeToInsert,
                                 targetElement: closest(caretNode, NODE_ANY_BLOCK_EDITABLE).element,
                                 targetPosition: caretPoint.cloneRange()
@@ -1202,7 +1202,6 @@
                         while (isElm(glueFirstNode) && sameElementSpec(glueFirstNode, glueFirstNode.previousSibling)) {
                             var nodeToRemove = glueFirstNode;
                             glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
-                            caretPoint.moveTo(glueFirstNode, 0);
                             removeNode(nodeToRemove, true);
                         }
                     }
@@ -1262,74 +1261,64 @@
         }
 
         function initUndoable() {
-            var MARKER_ATTR = ['x-typer-end', 'x-typer-start'];
-            var lastValue = trim(topElement.innerHTML);
             var snapshots = [];
             var currentIndex = 0;
             var suppressUntil = 0;
 
             function triggerStateChange() {
-                triggerEvent(null, EVENT_ALL, 'beforeStateChange');
-                triggerEvent(null, EVENT_ALL, 'stateChange');
+                triggerEvent(EVENT_ALL, 'beforeStateChange');
+                triggerEvent(EVENT_ALL, 'stateChange');
             }
 
-            function setMarker(node, offset, start) {
-                if (isText(node)) {
-                    $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typer.getNode(node), node) + offset);
-                } else if (node) {
-                    $(node).attr(MARKER_ATTR[+start], '');
+            function saveCaret(caret) {
+                var arr = [];
+                for (var node = caret.node; node.parentNode; node = node.parentNode) {
+                    arr.unshift(node.parentNode.childNodes.indexOf(node));
                 }
+                arr[arr.length] = caret.textNode ? caret.wholeTextOffset : caret.offset;
+                return arr.join(' ');
             }
 
-            function getRangeFromMarker(start) {
-                var attr = MARKER_ATTR[+start];
-                var element = $self.find('[' + attr + ']')[0] || $self.filter('[' + attr + ']')[0];
-                var offset = parseInt($(element).attr(attr));
-                if (element) {
-                    $(element).removeAttr(attr);
-                    if (+offset === offset) {
-                        var caret = new TyperCaret(typer);
-                        caret.moveToText(element, offset);
-                        return caret.getRange();
-                    }
-                    return createRange(element, !!start);
+            function restoreCaret(caret, pos) {
+                var arr = pos.split(' ');
+                var element = topElement;
+                var offset = arr.splice(-1)[0];
+                arr.forEach(function(v) {
+                    element = element.children[+v];
+                });
+                if (isNaN(offset)) {
+                    caret.moveTo(element, offset === 'true');
+                } else {
+                    caret.moveToText(element, +offset);
                 }
             }
 
             function takeSnapshot() {
-                setImmediateOnce(triggerStateChange);
-                setMarker(currentSelection.startTextNode || currentSelection.startElement, currentSelection.startOffset, true);
-                if (!currentSelection.isCaret) {
-                    setMarker(currentSelection.endTextNode || currentSelection.endElement, currentSelection.endOffset, false);
+                var value = undoable.getValue();
+                if (!snapshots[0] || value !== snapshots[currentIndex].value) {
+                    snapshots.splice(0, currentIndex, {
+                        value: value
+                    });
+                    snapshots.splice(Typer.historyLevel);
+                    currentIndex = 0;
                 }
-                var newValue = topElement.outerHTML;
-                if (newValue !== snapshots[0]) {
-                    var value = undoable.getValue();
-                    if (value !== lastValue) {
-                        snapshots.splice(0, currentIndex, newValue);
-                        snapshots.splice(Typer.historyLevel);
-                        currentIndex = 0;
-                        lastValue = value;
-                    } else {
-                        snapshots[currentIndex] = newValue;
-                    }
-                }
-                $self.find('[x-typer-start], [x-typer-end]').andSelf().removeAttr('x-typer-start x-typer-end');
+                snapshots[currentIndex].basePos = saveCaret(currentSelection.baseCaret);
+                snapshots[currentIndex].extendPos = saveCaret(currentSelection.extendCaret);
                 needSnapshot = false;
+                setImmediateOnce(triggerStateChange);
             }
 
-            function applySnapshot(value) {
-                var content = $.parseHTML(value)[0];
-                $self.empty().append(content.childNodes).attr(attrs(content));
-                currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
+            function applySnapshot(state) {
+                $self.html(state.value);
+                restoreCaret(currentSelection, state.basePos);
+                restoreCaret(currentSelection.extendCaret, state.extendPos);
                 setImmediateOnce(triggerStateChange);
-                lastValue = undoable.getValue();
                 needSnapshot = false;
             }
 
             extend(undoable, {
                 getValue: function () {
-                    return trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
+                    return trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
@@ -1383,27 +1372,27 @@
                 return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
             }
 
-            function updateWidgetFocus(source) {
+            function updateWidgetFocus() {
                 var widget = currentSelection.focusNode.widget;
                 if (activeWidget !== widget) {
                     if (activeWidget && !activeWidget.destroyed) {
-                        triggerEvent(source, activeWidget, 'focusout');
+                        triggerEvent(activeWidget, 'focusout');
                         activeWidget = null;
                     }
                     if (widget.id !== WIDGET_ROOT) {
                         activeWidget = widget;
-                        triggerEvent(source, activeWidget, 'focusin');
+                        triggerEvent(activeWidget, 'focusin');
                     }
                 }
             }
 
-            function triggerClick(source, e, point) {
+            function triggerClick(e, point) {
                 var props = {
                     clientX: (point || e).clientX,
                     clientY: (point || e).clientY,
                     target: e.target
                 };
-                triggerEvent(source, EVENT_HANDLER, getEventName(e, 'click'), null, props);
+                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
             }
 
             function updateFromNativeInput() {
@@ -1411,12 +1400,11 @@
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                     undoable.snapshot(200);
                     currentSelection.select(activeRange);
-                    updateWidgetFocus('input');
+                    updateWidgetFocus();
                 }
             }
 
             function deleteNextContent(e) {
-                setEventSource('keyboard', typer);
                 if (!currentSelection.isCaret) {
                     insertContents(currentSelection, '');
                 } else {
@@ -1429,7 +1417,7 @@
 
             function handleTextInput(inputText, compositionend) {
                 setEventSource('input', typer);
-                if (inputText && triggerDefaultPreventableEvent('input', EVENT_ALL, 'textInput', inputText)) {
+                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
@@ -1439,9 +1427,9 @@
                 setImmediate(function () {
                     updateFromNativeInput();
                     if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
-                        triggerEvent('input', EVENT_CURRENT, 'contentChange');
+                        triggerEvent(EVENT_CURRENT, 'contentChange');
                     }
-                    triggerEvent('input', EVENT_STATIC, 'contentChange');
+                    triggerEvent(EVENT_STATIC, 'contentChange');
                 });
             }
 
@@ -1455,7 +1443,7 @@
                     var textContent = clipboardData.getData(IS_IE ? 'Text' : 'text/plain');
                     if (acceptHtml && textContent === clipboard.textContent) {
                         insertContents(currentSelection, clipboard.content.cloneNode(true));
-                    } else if (!triggerDefaultPreventableEvent(null, EVENT_ALL, 'textInput', textContent)) {
+                    } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
                         insertContents(currentSelection, textContent);
                     }
                 }
@@ -1471,7 +1459,6 @@
                         undoable.snapshot(200);
                         currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
-                            setEventSource('mouse', typer);
                             currentSelection.focus();
                         });
                         e.preventDefault();
@@ -1485,7 +1472,7 @@
                                 currentSelection.select(node.widget.element);
                             }
                         }
-                        updateWidgetFocus('mouse');
+                        updateWidgetFocus();
                     }
                 };
                 if (e.which === 1) {
@@ -1527,10 +1514,10 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent('keyboard', EVENT_HANDLER, keyEventName)) {
+                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
-                        if (triggerDefaultPreventableEvent('keyboard', EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
                             e.preventDefault();
                         }
                     }
@@ -1607,7 +1594,7 @@
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
                     currentSelection.focus();
-                    triggerClick('touch', e, touchObj);
+                    triggerClick(e, touchObj);
                     e.preventDefault();
                 }
                 var touches = e.originalEvent.touches;
@@ -1622,19 +1609,19 @@
             });
 
             $self.bind('click', function (e) {
-                triggerClick('mouse', e);
+                triggerClick(e);
                 e.preventDefault();
             });
 
             $self.bind('dblclick', function (e) {
-                if (!triggerEvent('mouse', EVENT_HANDLER, 'dblclick')) {
+                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
                     currentSelection.select('word');
                 }
                 e.preventDefault();
             });
 
             $self.bind('mousewheel', function (e) {
-                if (typerFocused && triggerDefaultPreventableEvent('mouse', EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
+                if (typerFocused && triggerDefaultPreventableEvent(EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
                     e.preventDefault();
                 }
             });
@@ -1651,7 +1638,7 @@
                 checkNativeUpdate = updateFromNativeInput;
                 if (!typerFocused) {
                     typerFocused = true;
-                    triggerEvent(null, EVENT_ALL, 'focusin');
+                    triggerEvent(EVENT_ALL, 'focusin');
                     if (!mousedown) {
                         currentSelection.focus();
                     }
@@ -1669,7 +1656,7 @@
                         typerFocused = false;
                         checkNativeUpdate = null;
                         updateWidgetFocus();
-                        triggerEvent(null, EVENT_ALL, 'focusout');
+                        triggerEvent(EVENT_ALL, 'focusout');
                         normalize();
 
                         // prevent focus returns to current editor
@@ -1822,7 +1809,7 @@
                     command = tx.widget && widgetOptions[tx.widget.id].commands[command];
                 }
                 if (isFunction(command)) {
-                    codeUpdate('script', function () {
+                    codeUpdate(function () {
                         command.call(typer, tx, value);
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
@@ -1879,7 +1866,7 @@
 
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         normalize();
-        triggerEvent(null, EVENT_STATIC, 'init');
+        triggerEvent(EVENT_STATIC, 'init');
     }
 
     window.Typer = Typer;
