@@ -230,6 +230,10 @@
         return v && v.nodeType === 3 && v;
     }
 
+    function isBR(v) {
+        return tagName(v) === 'br' && v;
+    }
+
     function isTextNodeEnd(v, offset, dir) {
         var str = v.data;
         return (dir >= 0 && (offset === v.length || str.slice(offset) === ZWSP)) ? 1 : (dir <= 0 && (!offset || str.slice(0, offset) === ZWSP)) ? -1 : 0;
@@ -782,7 +786,7 @@
 
             function handleMutations(mutations) {
                 $.each(mutations, function (i, v) {
-                    if ((v.addedNodes[0] || v.removedNodes[0]) && tagName(v.target) !== 'br' && dirtyElements.indexOf(v.target) < 0) {
+                    if ((v.addedNodes[0] || v.removedNodes[0]) && !isBR(v.target) && dirtyElements.indexOf(v.target) < 0) {
                         dirtyElements[dirtyElements.length] = v.target;
                     }
                 });
@@ -811,7 +815,7 @@
 
             function getNode(element) {
                 ensureState();
-                if (isText(element) || tagName(element) === 'br') {
+                if (isText(element) || isBR(element)) {
                     element = element.parentNode || element;
                 }
                 if (containsOrEquals(rootElement, element)) {
@@ -871,7 +875,7 @@
                         $(element).contents().each(function (i, v) {
                             if (v.parentNode === element) {
                                 var contents = [];
-                                for (; v && (isText(v) || tagName(v) === 'br' || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                for (; v && (isText(v) || isBR(v) || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
                                     if (contents.length || isElm(v) || trim(v.data)) {
                                         contents.push(v);
                                     }
@@ -1066,7 +1070,7 @@
                 content.forEach(function (nodeToInsert) {
                     var caretNode = typer.getNode(caretPoint.element);
                     var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
-                    var isLineBreak = tagName(nodeToInsert) === 'br';
+                    var isLineBreak = isBR(nodeToInsert);
                     var needSplit = false;
                     var incompatParagraph = false;
                     var splitEnd;
@@ -1254,7 +1258,7 @@
                             value = value.slice(range.startOffset);
                         }
                         text += value;
-                    } else if (tagName(v) === 'br') {
+                    } else if (isBR(v)) {
                         text += '\n';
                     }
                 }
@@ -2098,10 +2102,10 @@
     });
 
     function nodeIteratorInit(inst, iterator) {
-        var typer = iterator.currentNode.widget.typer;
+        var typer = iterator.currentNode.typer;
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
             var node = typer.getNode(v);
-            return node.element !== (isElm(v) || v.parentNode) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
+            return (node.element !== (isElm(v) || v.parentNode) && !isBR(v)) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
         defineProperty(inst, 'iterator', iterator2);
     }
@@ -2400,7 +2404,7 @@
 
     function caretSetPosition(inst, element, offset, end) {
         var node, textNode, textOffset;
-        if (tagName(element) === 'br') {
+        if (isBR(element)) {
             textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
             element = textNode.parentNode;
             offset = 0;
@@ -2437,7 +2441,7 @@
         if (textNode) {
             var moveToMostInner = function (dir, pSib, pChild, mInsert) {
                 var next = isTextNodeEnd(textNode, offset, dir) && isElm(textNode[pSib]);
-                if (next && tagName(next) !== 'br' && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
+                if (next && !isBR(next) && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
                     element = next;
                     textNode = isText(element[pChild]) || $(createTextNode())[mInsert](element)[0];
                     offset = getOffset(textNode, 0 * dir);
@@ -2656,7 +2660,7 @@
                         if (is(self.typer.getNode(node), NODE_WIDGET) && !containsOrEquals(node, self.element)) {
                             return self.moveTo(node, 0 * direction);
                         }
-                        overBr |= tagName(node) === 'br';
+                        overBr |= isBR(node);
                     }
                     offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
