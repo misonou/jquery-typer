@@ -1967,7 +1967,7 @@
     });
 
     function treeWalkerIsNodeVisible(inst, node) {
-        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && ((inst.whatToShow & NODE_SHOW_HIDDEN) || is(node.element, ':visible')) && node;
+        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && ((inst.whatToShow & NODE_SHOW_HIDDEN) || node.element.offsetWidth > 0 || node.element.offsetHeight > 0) && node;
     }
 
     function treeWalkerAcceptNode(inst, node, checkWidget) {
