@@ -1004,22 +1004,20 @@
                     for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
-                    var startPoint, endPoint;
+                    var startPoint = createRange(range, dir > 0);
+                    var endPoint = createRange(range, dir < 0);
                     if (!isSingleEditable) {
-                        var iterator = new TyperTreeWalker(typer.getNode(range.commonAncestorContainer), NODE_WIDGET);
-                        var fn = function (node, collapse) {
-                            iterator.currentNode = node;
-                            while (!widgetOptions[iterator.currentNode.widget.id].textFlow && iterator.parentNode());
-                            if (iterator.currentNode !== node) {
-                                return iterator.currentNode && containsOrEquals(range.commonAncestorContainer, iterator.currentNode.element) ? createRange(iterator.currentNode.element, collapse) : createRange(range, dir > 0);
-                            }
-                        };
-                        startPoint = fn(state.startNode, false);
-                        endPoint = fn(state.endNode, true);
+                        var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE | NODE_SHOW_EDITABLE, function (v) {
+                            return widgetOptions[v.widget.id].textFlow ? 1 : 3;
+                        });
+                        var start = closest(dir > 0 ? state.startNode : state.endNode, NODE_ANY_BLOCK_EDITABLE);
+                        var until = closest(dir < 0 ? state.startNode : state.endNode, NODE_ANY_BLOCK_EDITABLE);
+                        iterator.currentNode = start;
+                        while (iterator[dir > 0 ? 'nextNode' : 'previousNode']());
+                        if (iterator.currentNode !== until) {
+                            endPoint = iterator.currentNode !== start ? createRange(iterator.currentNode.element, 0 * -dir) : startPoint;
+                        }
                     }
-                    startPoint = startPoint || createRange(range, true);
-                    endPoint = endPoint || createRange(range, false);
-
                     var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
                     callback(newState);
                 }
