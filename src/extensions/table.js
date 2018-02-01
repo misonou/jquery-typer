@@ -109,22 +109,18 @@
             addColumnBefore: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 insertColumn(tx.widget, info.minColumn, 1, true);
-                tx.trackChange(tx.widget);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 insertColumn(tx.widget, info.maxColumn, 1, false);
-                tx.trackChange(tx.widget);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 insertRow(tx.widget, info.minRow, TD_HTML, true);
-                tx.trackChange(tx.widget);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 insertRow(tx.widget, info.maxRow, TD_HTML, false);
-                tx.trackChange(tx.widget);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
@@ -132,13 +128,11 @@
                     $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).forEach(tx.removeElement);
                 });
                 tx.selection.moveTo(getRow(tx.widget, info.minRow).children[Math.max(0, info.minColumn - 1)], -0);
-                tx.trackChange(tx.widget);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).forEach(tx.removeElement);
                 tx.selection.moveTo(getRow(tx.widget, Math.max(0, info.minRow - 1)).children[info.minColumn], -0);
-                tx.trackChange(tx.widget);
             },
             toggleTableHeader: function (tx) {
                 var $header = $(TR_SELECTOR + '>th', tx.widget.element);
@@ -153,7 +147,6 @@
                     });
                 }
                 setEditorStyle(tx.widget);
-                tx.trackChange(tx.widget);
             }
         }
     };
@@ -222,7 +215,6 @@
             },
             execute: function (toolbar, self, tx) {
                 self.widget.element.className = self.value || '';
-                tx.trackChange(self.widget);
             },
             stateChange: function (toolbar, self) {
                 self.value = self.widget.element.className || '';
@@ -237,7 +229,6 @@
                 } else {
                     $(self.widget.element).removeAttr('width');
                 }
-                tx.trackChange(self.widget);
             },
             stateChange: function (toolbar, self) {
                 self.value = $(self.widget.element).attr('width') || '';

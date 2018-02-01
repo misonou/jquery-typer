@@ -33,7 +33,6 @@
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
-                tx.trackChange(tx.widget);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -83,7 +82,6 @@
                 } else {
                     $(element).removeAttr('target');
                 }
-                tx.trackChange(element);
             },
             active: function (toolbar, self) {
                 return toolbar.is('toolbar') ? self.widget : false;

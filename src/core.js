@@ -1815,6 +1815,7 @@
                 if (isFunction(command)) {
                     codeUpdate(function () {
                         command.call(typer, tx, value);
+                        trackChange(topElement);
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
                         }
