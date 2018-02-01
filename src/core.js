@@ -864,64 +864,62 @@
         }
 
         function normalize(element) {
-            codeUpdate(function () {
-                iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
-                    var element = node.element;
-                    if (is(node, NODE_EDITABLE)) {
-                        if (!node.firstChild) {
-                            $(element).html('<p>' + (trim(element.textContent) || ZWSP_ENTITIY) + '</p>');
-                            return;
-                        }
-                        $(element).contents().each(function (i, v) {
-                            if (v.parentNode === element) {
-                                var contents = [];
-                                for (; v && (isText(v) || isBR(v) || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
-                                    if (contents.length || isElm(v) || trim(v.data)) {
-                                        contents.push(v);
-                                    }
-                                }
-                                if (contents.length) {
-                                    $(contents).wrap('<p>');
-                                }
-                            }
-                        });
+            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
+                var element = node.element;
+                if (is(node, NODE_EDITABLE)) {
+                    if (!node.firstChild) {
+                        $(element).html('<p>' + (trim(element.textContent) || ZWSP_ENTITIY) + '</p>');
                         return;
                     }
-                    if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
-                        if (!element.firstChild) {
-                            $(createTextNode()).appendTo(element);
-                            return;
-                        }
-                        // WebKit adds dangling <BR> element when a line is empty
-                        // normalize it into a ZWSP and continue process
-                        var lastBr = $('>br:last-child', element)[0];
-                        if (lastBr && !lastBr.nextSibling) {
-                            $(createTextNode()).insertBefore(lastBr);
-                            removeNode(lastBr);
-                        }
-                        var firstBr = $('>br:first-child', element)[0];
-                        if (firstBr && !firstBr.previousSibling) {
-                            removeNode(firstBr);
-                        }
-                        if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
-                            $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
-                                v.data = v.data.replace(/[^\S\u00a0]+/g, ' ');
-                                if (isText(v.nextSibling)) {
-                                    v.nextSibling.data = (v.data + v.nextSibling.data).replace(/[^\S\u00a0]+/g, ' ');
-                                    removeNode(v);
+                    $(element).contents().each(function (i, v) {
+                        if (v.parentNode === element) {
+                            var contents = [];
+                            for (; v && (isText(v) || isBR(v) || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                if (contents.length || isElm(v) || trim(v.data)) {
+                                    contents.push(v);
                                 }
-                            });
-                        }
-                    }
-                    $('>br', element).each(function (i, v) {
-                        if (!isText(v.nextSibling)) {
-                            $(createTextNode()).insertAfter(v);
+                            }
+                            if (contents.length) {
+                                $(contents).wrap('<p>');
+                            }
                         }
                     });
+                    return;
+                }
+                if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
+                    if (!element.firstChild) {
+                        $(createTextNode()).appendTo(element);
+                        return;
+                    }
+                    // WebKit adds dangling <BR> element when a line is empty
+                    // normalize it into a ZWSP and continue process
+                    var lastBr = $('>br:last-child', element)[0];
+                    if (lastBr && !lastBr.nextSibling) {
+                        $(createTextNode()).insertBefore(lastBr);
+                        removeNode(lastBr);
+                    }
+                    var firstBr = $('>br:first-child', element)[0];
+                    if (firstBr && !firstBr.previousSibling) {
+                        removeNode(firstBr);
+                    }
+                    if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
+                        $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
+                            v.data = v.data.replace(/[^\S\u00a0]+/g, ' ');
+                            if (isText(v.nextSibling)) {
+                                v.nextSibling.data = (v.data + v.nextSibling.data).replace(/[^\S\u00a0]+/g, ' ');
+                                removeNode(v);
+                            }
+                        });
+                    }
+                }
+                $('>br', element).each(function (i, v) {
+                    if (!isText(v.nextSibling)) {
+                        $(createTextNode()).insertAfter(v);
+                    }
                 });
-                // Mozilla adds <br type="_moz"> when a container is empty
-                $('br[type="_moz"]', topElement).remove();
             });
+            // Mozilla adds <br type="_moz"> when a container is empty
+            $('br[type="_moz"]', topElement).remove();
         }
 
         function extractContents(range, mode, callback) {
@@ -1289,7 +1287,7 @@
                 var arr = pos.split(' ');
                 var element = topElement;
                 var offset = arr.splice(-1)[0];
-                arr.forEach(function(v) {
+                arr.forEach(function (v) {
                     element = element.children[+v];
                 });
                 if (isNaN(offset)) {
@@ -1871,7 +1869,7 @@
         });
 
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
-        normalize();
+        codeUpdate(normalize);
         triggerEvent(EVENT_STATIC, 'init');
     }
 
