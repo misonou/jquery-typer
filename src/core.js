@@ -2652,7 +2652,7 @@
                             return false;
                         }
                         if (is(self.typer.getNode(node), NODE_WIDGET) && !containsOrEquals(node, self.element)) {
-                            return self.moveTo(node, 0 * direction);
+                            return self.moveToText(node, 0 * direction) || self.moveTo(node, direction < 0);
                         }
                         overBr |= isBR(node);
                     }
