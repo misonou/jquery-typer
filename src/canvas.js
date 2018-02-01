@@ -111,6 +111,9 @@
         });
         $.each(rects, function (i, v) {
             var prev = result[0];
+            if (v.width <= 1) {
+                v.right += 5;
+            }
             if (prev) {
                 if (v.left >= prev.right && v.top < prev.bottom) {
                     result.shift();
