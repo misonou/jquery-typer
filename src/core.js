@@ -2443,6 +2443,10 @@
                 }
             };
             while (moveToMostInner(-1, 'previousSibling', 'lastChild', 'appendTo') || moveToMostInner(1, 'nextSibling', 'firstChild', 'prependTo'));
+            if (!textNode.length) {
+                textNode.data = ZWSP;
+                offset = 1;
+            }
         }
         return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), element, textNode, textNode ? offset : !end);
     }
