@@ -2475,7 +2475,7 @@
             if (!containsOrEquals(self.typer.element, node) || (isText(node) && self.offset > node.length)) {
                 // trigger typer document to reflect changes
                 self.typer.getNode(node);
-                if (!self.node.parentNode && self.node.element !== self.typer.element) {
+                if (!self.node || (!self.node.parentNode && self.node.element !== self.typer.element)) {
                     self.moveTo(self.typer.element, 0);
                 } else {
                     // use calculated text offset from paragraph node in case anchored text node is detached from DOM
