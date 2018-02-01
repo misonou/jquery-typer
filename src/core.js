@@ -2531,9 +2531,9 @@
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
                 var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
-                if (offset) {
+                if (1 / offset > 0) {
                     for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
-                } else if (1 / offset < 0) {
+                } else {
                     while (iterator.nextNode());
                 }
                 node = iterator.currentNode;
