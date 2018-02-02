@@ -765,7 +765,7 @@
                     while (!containsOrEquals(stack[0].element, v)) {
                         stack.shift();
                     }
-                    var node = nodeMap.get(v) || new TyperNode(typer, 0, v);
+                    var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
                     var parentNode = node.parentNode;
                     addChild(stack[0], node);
                     updateNodeFromElement(node);
@@ -835,7 +835,7 @@
                     childList: true
                 });
             }
-            nodeMap.set(rootElement, new TyperNode(typer, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
+            nodeMap.set(rootElement, new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
             dirtyElements.push(null);
 
             return extend(self, {
