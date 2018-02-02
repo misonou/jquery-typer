@@ -85,7 +85,7 @@
             }
         },
         receive: function (e) {
-            if (!Typer.is(e.targetElement, 'th')) {
+            if (e.source === 'paste' && !Typer.is(e.targetElement, 'th')) {
                 var $insertRow = $(TR_SELECTOR, e.sourceElement);
                 var tableRow = e.targetElement.parentNode;
                 var missCount = $insertRow[0].childElementCount - tableRow.childElementCount;
