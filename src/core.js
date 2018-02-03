@@ -2396,14 +2396,14 @@
         return true;
     }
 
-    function caretSetPosition(inst, element, offset, end) {
-        var node, textNode, textOffset;
+    function caretSetPosition(inst, element, offset) {
+        var node, textNode, textOffset, end;
         if (isBR(element)) {
             textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
             element = textNode.parentNode;
             offset = 0;
         } else if (isElm(element) && element.firstChild) {
-            if (offset === element.childNodes.length || (end && isElm(element.childNodes[(offset || 1) - 1]))) {
+            if (offset === element.childNodes.length) {
                 element = element.childNodes[(offset || 1) - 1];
                 offset = element.length;
                 end = true;
@@ -2511,9 +2511,7 @@
         moveTo: function (node, offset) {
             var range = is(node, Range) || createRange(node, offset);
             if (range && containsOrEquals(this.typer.element, range.startContainer)) {
-                var selection = this.selection;
-                var end = selection && this === selection.extendCaret && compareRangePosition(selection.baseCaret, range) < 0;
-                return caretSetPosition(this, range.startContainer, range.startOffset, end);
+                return caretSetPosition(this, range.startContainer, range.startOffset);
             }
             return false;
         },
