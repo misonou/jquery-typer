@@ -26,7 +26,7 @@
     }
 
     function getRow(widget, index) {
-        return $(TR_SELECTOR, widget.element)[index];
+        return $(TR_SELECTOR, widget.element || widget)[index];
     }
 
     function countColumns(widget) {
@@ -43,7 +43,7 @@
     }
 
     function setEditorStyle(widget) {
-        $('td,th', widget.element).css({
+        $('td,th', widget.element || widget).css({
             outline: '1px dotted rgba(0,0,0,0.3)',
             minWidth: '3em'
         });
@@ -52,8 +52,8 @@
     function insertColumn(widget, index, count, before) {
         var s = typeof index === 'string' ? index + '-child' : 'nth-child(' + (index + 1) + ')';
         var m = before ? 'before' : 'after';
-        $(widget.element).find(TR_SELECTOR + '>th:' + s)[m](repeat(TH_HTML, count));
-        $(widget.element).find(TR_SELECTOR + '>td:' + s)[m](repeat(TD_HTML, count));
+        $(widget.element || widget).find(TR_SELECTOR + '>th:' + s)[m](repeat(TH_HTML, count));
+        $(widget.element || widget).find(TR_SELECTOR + '>td:' + s)[m](repeat(TD_HTML, count));
         setEditorStyle(widget);
     }
 
@@ -77,23 +77,26 @@
             setEditorStyle(e.widget);
         },
         extract: function (e) {
-            var src = e.sourceElement;
-            var dst = e.clonedElement;
-            if (Typer.is(src, 'tr') && dst.childElementCount < src.childElementCount) {
-                var method = dst.previousSibling ? 'appendTo' : 'prependTo';
-                $(repeat(Typer.is(dst.firstChild, 'th') ? TH_HTML : TD_HTML, src.childElementCount - dst.childElementCount))[method](dst);
+            var $row = $(TR_SELECTOR, e.extractedNode);
+            if ($row[1]) {
+                var count = countColumns(e.widget);
+                $row.each(function (i, v) {
+                    if (v.childElementCount < count) {
+                        $(repeat($('>th', v)[0] ? TH_HTML : TD_HTML, count - v.childElementCount))[i ? 'appendTo' : 'prependTo'](v);
+                    }
+                });
             }
         },
         receive: function (e) {
-            if (e.source === 'paste' && !Typer.is(e.targetElement, 'th')) {
-                var $insertRow = $(TR_SELECTOR, e.sourceElement);
-                var tableRow = e.targetElement.parentNode;
-                var missCount = $insertRow[0].childElementCount - tableRow.childElementCount;
+            if (e.source === 'paste') {
+                var missCount = countColumns(e.receivedNode) - countColumns(e.widget);
                 if (missCount > 0) {
                     insertColumn(e.widget, 'last', missCount, false);
+                } else if (missCount < 0) {
+                    insertColumn(e.receivedNode, 'last', -missCount, false);
                 }
-                $insertRow.insertBefore(tableRow).find('th').each(function (i, v) {
-                    $(v).before($(TD_HTML).append(v.childNodes)).remove();
+                $(TR_SELECTOR, e.receivedNode).insertBefore($(e.caret.element).closest('tr')).children('th').wrapInner('<p>').each(function (i, v) {
+                    $(v).replaceWith($(TD_HTML).append(v.childNodes));
                 });
                 setEditorStyle(e.widget);
                 e.preventDefault();

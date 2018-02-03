@@ -933,10 +933,9 @@
                     var stack = [[topElement, fragment]];
                     var shift = function () {
                         var item = stack.shift();
-                        if (item[2]) {
+                        if (item[2] && item[2].element === item[0]) {
                             triggerEvent(item[2], 'extract', null, {
-                                sourceElement: item[0],
-                                clonedElement: item[1]
+                                extractedNode: item[1]
                             });
                         }
                     };
@@ -1082,9 +1081,8 @@
                         }
                         if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
                             if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
-                                sourceElement: nodeToInsert,
-                                targetElement: closest(caretNode, NODE_ANY_BLOCK_EDITABLE).element,
-                                targetPosition: caretPoint.getRange()
+                                receivedNode: nodeToInsert,
+                                caret: caretPoint.clone()
                             })) {
                                 trackChange(caretNode);
                                 return;
