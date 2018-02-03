@@ -844,7 +844,7 @@
         }
 
         function normalizeWhitespace(node) {
-            var textNodes = iterateToArray(createNodeIterator(node.element, 4));
+            var textNodes = iterateToArray(createNodeIterator(node, 4));
             var wholeText = '';
             var index = [];
             $.each(textNodes, function (i, v) {
@@ -920,18 +920,16 @@
         }
 
         function extractContents(range, mode, callback) {
-            var dir = is(range, TyperSelection) ? range.direction : 1;
-            range = is(range, Range) || createRange(range);
-
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var state = new TyperSelection(typer, range);
+            var state = is(range, TyperSelection) ? range.clone() : new TyperSelection(typer, range);
             var isSingleEditable = state.isSingleEditable;
+            range = state.getRange();
 
             codeUpdate(function () {
-                if (!range.collapsed) {
+                if (!state.isCaret) {
                     var stack = [[topElement, fragment]];
                     var shift = function () {
                         var item = stack.shift();
@@ -944,11 +942,13 @@
                     };
                     iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
                         var element = node.element;
-                        var handler = widgetOptions[node.widget.id].extract;
+                        var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
+                        var isWidgetHead = node.widget.element === element;
+
                         if (node === state.focusNode && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
-                        if (!handler && is(node, NODE_WIDGET | NODE_EDITABLE) && node.widget.element !== element) {
+                        if (!handler && !isWidgetHead && is(node, NODE_WIDGET | NODE_EDITABLE)) {
                             // ignore widget structure if the widget is partially selected
                             // and there is no extract event handler defined
                             return 3;
@@ -957,8 +957,8 @@
                             while (!containsOrEquals(stack[0][0], element)) {
                                 shift();
                             }
-                            if (handler && element !== stack[0][0]) {
-                                $.unique(node.widget.element === element ? $(element) : $(element).parentsUntil(stack[0][0])).each(function (i, v) {
+                            if (handler && (!isWidgetHead || !rangeCovers(range, element))) {
+                                (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).andSelf()).each(function (i, v) {
                                     stack.unshift([v, v.cloneNode(false), node.widget]);
                                     stack[1][1].appendChild(stack[0][1]);
                                 });
@@ -967,7 +967,7 @@
                         if (rangeCovers(range, element)) {
                             if (cloneNode) {
                                 var clone = element.cloneNode(true);
-                                $(stack[0][1]).append(element === topElement ? clone.childNodes : clone);
+                                $(stack[0][1]).append(element === stack[0][0] ? clone.childNodes : clone);
                             }
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
@@ -986,13 +986,12 @@
                             var content = createRange(element, range)[method]();
                             if (cloneNode && content) {
                                 var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
-                                var fixParagraph = !handler && is(node, NODE_EDITABLE_PARAGRAPH);
                                 if (!hasThisElement) {
-                                    content = wrapNode(content, [fixParagraph ? createElement('p') : element]);
-                                } else if (fixParagraph) {
-                                    content = wrapNode(content.firstChild.childNodes, [createElement('p')]);
+                                    content = wrapNode(content, [is(node, NODE_EDITABLE_PARAGRAPH) ? createElement('p') : element]);
+                                } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
+                                    content = content.firstChild.childNodes;
                                 }
-                                stack[0][1].appendChild(content);
+                                $(stack[0][1]).append(content);
                             }
                             if (clearNode) {
                                 trackChange(node);
@@ -1004,22 +1003,23 @@
                     for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
-                    var startPoint = createRange(range, dir > 0);
-                    var endPoint = createRange(range, dir < 0);
                     if (!isSingleEditable) {
                         var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE | NODE_SHOW_EDITABLE, function (v) {
                             return widgetOptions[v.widget.id].textFlow ? 1 : 3;
                         });
-                        var start = closest(dir > 0 ? state.startNode : state.endNode, NODE_ANY_BLOCK_EDITABLE);
-                        var until = closest(dir < 0 ? state.startNode : state.endNode, NODE_ANY_BLOCK_EDITABLE);
+                        var start = closest(state.baseCaret.node, NODE_ANY_BLOCK_EDITABLE);
+                        var until = closest(state.extendCaret.node, NODE_ANY_BLOCK_EDITABLE);
                         iterator.currentNode = start;
-                        while (iterator[dir > 0 ? 'nextNode' : 'previousNode']());
+                        while (iterator[state.direction > 0 ? 'nextNode' : 'previousNode']());
                         if (iterator.currentNode !== until) {
-                            endPoint = iterator.currentNode !== start ? createRange(iterator.currentNode.element, 0 * -dir) : startPoint;
+                            if (iterator.currentNode !== start) {
+                                state.extendCaret.moveTo(iterator.currentNode.element, 0 * -state.direction);
+                            } else {
+                                state.collapse();
+                            }
                         }
                     }
-                    var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
-                    callback(newState);
+                    callback(state);
                 }
             });
             $(fragment).find('[style]').removeAttr('style');
@@ -1027,13 +1027,17 @@
         }
 
         function insertContents(range, content) {
-            var textOnly = !is(content, Node);
-            content = is(content, Node) || $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>').replace(/\s/g, '\u00a0'));
-            if (containsOrEquals(topElement, content)) {
-                removeNode(content);
+            var textOnly;
+            if (is(content, Node)) {
+                if (containsOrEquals(topElement, content)) {
+                    removeNode(content);
+                }
+                content = slice(createDocumentFragment(content).childNodes);
+                textOnly = content.length === 1 && is(content[0], 'p:not([class])');
+            } else {
+                content = $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>').replace(/\s/g, '\u00a0'));
+                textOnly = true;
             }
-            content = slice(createDocumentFragment(content).childNodes);
-
             extractContents(range, 'paste', function (state) {
                 var startNode = state.startNode;
                 var endNode = state.endNode;
@@ -1080,7 +1084,7 @@
                             if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
                                 sourceElement: nodeToInsert,
                                 targetElement: closest(caretNode, NODE_ANY_BLOCK_EDITABLE).element,
-                                targetPosition: caretPoint.cloneRange()
+                                targetPosition: caretPoint.getRange()
                             })) {
                                 trackChange(caretNode);
                                 return;
@@ -1098,11 +1102,12 @@
                             if (is(node, NODE_PARAGRAPH)) {
                                 incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
                                 needSplit = incompatParagraph || !paragraphAsInline;
-                            } else if (trim(createRange(splitEnd, createRange(caretPoint)))) {
-                                needSplit = trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)));
-                            } else {
-                                caretNode = caretNode.nextSibling || caretNode.parentNode;
-                                caretPoint.moveTo(splitEnd);
+                            } else if (trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)))) {
+                                needSplit = trim(createRange(splitEnd, createRange(caretPoint)));
+                                if (!needSplit) {
+                                    caretNode = caretNode.nextSibling || caretNode.parentNode;
+                                    caretPoint.moveTo(splitEnd);
+                                }
                             }
                         }
                         if (needSplit) {
@@ -1130,12 +1135,10 @@
                                 $(createTextNode()).appendTo(caretNode.element);
                             }
                             if (trim(caretNode.element.textContent) && caretNode.element.textContent.slice(-1) === ' ') {
-                                var n1 = iterateToArray(createNodeIterator(caretNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
-                                n1.data = n1.data.slice(0, -1) + '\u00a0';
+                                normalizeWhitespace(caretNode.element);
                             }
                             if (trim(splitFirstNode.textContent) && splitFirstNode.textContent.charAt(0) === ' ') {
-                                var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
-                                n2.data = '\u00a0' + n2.data.slice(1);
+                                normalizeWhitespace(splitFirstNode);
                             }
                             if (isLineBreak) {
                                 caretPoint.moveTo(splitFirstNode, false);
@@ -1160,7 +1163,7 @@
                     if (insertAsInline) {
                         if (lastNode) {
                             caretPoint.getRange().insertNode(nodeToInsert);
-                            normalizeWhitespace(caretNode);
+                            normalizeWhitespace(caretNode.element);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
                                 var textNode = createTextNode();
@@ -1203,13 +1206,10 @@
                             glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
                             removeNode(nodeToRemove, true);
                         }
+                        normalizeWhitespace(startNode.element);
                     }
                     trackChange(startNode);
                     trackChange(endNode);
-                }
-                normalizeWhitespace(startNode);
-                if (startNode !== endNode) {
-                    normalizeWhitespace(endNode);
                 }
                 currentSelection.select(caretPoint);
             });
