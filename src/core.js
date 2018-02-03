@@ -691,29 +691,31 @@
             function addChild(parent, node) {
                 if (node.parentNode !== parent && node !== parent) {
                     if (node.parentNode) {
-                        removeFromParent(node, true);
+                        removeFromParent(node);
                     }
                     for (var index = parent.childNodes.length; index && compareRangePosition(node.element, parent.childNodes[index - 1].element) < 0; index--);
                     node.parentNode = parent;
-                    node.previousSibling = parent.childNodes[index - 1];
-                    node.nextSibling = parent.childNodes[index];
+                    node.previousSibling = parent.childNodes[index - 1] || null;
+                    node.nextSibling = parent.childNodes[index] || null;
                     (node.previousSibling || {}).nextSibling = node;
                     (node.nextSibling || {}).previousSibling = node;
                     parent.childNodes.splice(index, 0, node);
                 }
             }
 
-            function removeFromParent(node, suppressEvent) {
+            function removeFromParent(node, destroyWidget) {
                 var index = node.parentNode.childNodes.indexOf(node);
-                if (index >= 0) {
-                    if (!suppressEvent && node.widget.element === node.element) {
-                        triggerWidgetEvent(node.widget, 'destroy');
-                    }
-                    node.parentNode.childNodes.splice(index, 1);
-                    node.parentNode = null;
-                    (node.previousSibling || {}).nextSibling = node.nextSibling;
-                    (node.nextSibling || {}).previousSibling = node.previousSibling;
+                if (destroyWidget) {
+                    iterate(new TyperTreeWalker(node, -1), function (v) {
+                        if (v.widget.element === v.element) {
+                            triggerWidgetEvent(v.widget, 'destroy');
+                        }
+                    });
                 }
+                node.parentNode.childNodes.splice(index, 1);
+                node.parentNode = null;
+                (node.previousSibling || {}).nextSibling = node.nextSibling;
+                (node.nextSibling || {}).previousSibling = node.previousSibling;
             }
 
             function updateNode(node) {
@@ -749,7 +751,7 @@
             function updateNodeFromElement(node) {
                 $.each(node.childNodes.slice(0), function (i, v) {
                     if (!containsOrEquals(rootElement, v.element)) {
-                        removeFromParent(v);
+                        removeFromParent(v, true);
                         nodeMap.delete(v.element);
                     }
                 });
