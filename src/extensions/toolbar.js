@@ -70,8 +70,8 @@
         }
     }
 
-    function hideToolbar(toolbar) {
-        if (activeToolbar && (!toolbar || activeToolbar === toolbar)) {
+    function hideToolbar(typer) {
+        if (activeToolbar && (!typer || activeToolbar.typer === typer)) {
             $(activeToolbar.element).detach();
             activeToolbar.position = '';
             activeToolbar = null;
@@ -155,36 +155,26 @@
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
-            e.widget.widgets = {};
+            e.widget.toolbars = {};
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            hideToolbar(e.widget.toolbar);
-        },
-        widgetFocusin: function (e) {
-            if (!e.widget.widgets[e.targetWidget.id]) {
-                if (Typer.ui.controls['typer:widget:' + e.targetWidget.id]) {
-                    e.widget.widgets[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
-                }
-            }
-            if (e.widget.widgets[e.targetWidget.id]) {
-                e.widget.widgets[e.targetWidget.id].widget = e.targetWidget;
-                showToolbar(e.widget.widgets[e.targetWidget.id]);
-            }
-        },
-        widgetFocusout: function (e) {
-            showToolbar(e.widget.toolbar);
-        },
-        widgetDestroy: function (e) {
-            if (activeToolbar && activeToolbar.typer === e.typer) {
-                showToolbar(e.widget.toolbar);
-            }
+            hideToolbar(e.typer);
         },
         stateChange: function (e) {
             if (activeToolbar && activeToolbar.typer === e.typer) {
-                showToolbar(activeToolbar);
+                var toolbar = e.widget.toolbar;
+                var selection = e.typer.getSelection();
+                var currentWidget = selection.focusNode.widget;
+                if (currentWidget.id !== '__root__' && selection.focusNode.element === currentWidget.element) {
+                    if (Typer.ui.controls['typer:widget:' + currentWidget.id]) {
+                        toolbar = e.widget.toolbars[currentWidget.id] || (e.widget.toolbars[currentWidget.id] = createToolbar(e.typer, e.widget.options, currentWidget));
+                        toolbar.widget = currentWidget;
+                    }
+                }
+                showToolbar(toolbar);
             }
         }
     };

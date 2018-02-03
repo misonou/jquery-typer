@@ -642,13 +642,6 @@
                     });
                 });
             }
-            if (is(eventMode, TyperWidget)) {
-                setImmediate(function () {
-                    triggerEvent(EVENT_STATIC, 'widget' + capfirst(eventName), null, {
-                        targetWidget: eventMode
-                    });
-                });
-            }
             return !!widgets[0];
         }
 
@@ -682,6 +675,9 @@
                 setImmediate(function () {
                     if (fireEvent && widget.fireInit !== false && widget.id !== WIDGET_UNKNOWN) {
                         triggerEvent(widget, event);
+                        triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
+                            targetWidget: widget
+                        });
                         widget.destroyed = event === 'destroy';
                         delete widget.fireInit;
                     }
