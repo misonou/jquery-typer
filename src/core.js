@@ -15,17 +15,14 @@
     var NODE_EDITABLE = 2;
     var NODE_EDITABLE_PARAGRAPH = 32;
     var NODE_PARAGRAPH = 4;
-    var NODE_OUTER_PARAGRAPH = 8;
     var NODE_INLINE = 16;
     var NODE_INLINE_WIDGET = 64;
     var NODE_INLINE_EDITABLE = 128;
-    var NODE_SHOW_EDITABLE = 4096;
     var NODE_SHOW_HIDDEN = 8192;
     var NODE_ANY_BLOCK_EDITABLE = NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH;
     var NODE_ANY_BLOCK = NODE_WIDGET | NODE_PARAGRAPH | NODE_ANY_BLOCK_EDITABLE;
     var NODE_ANY_INLINE = NODE_INLINE | NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE;
     var NODE_ANY_ALLOWTEXT = NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_INLINE | NODE_INLINE_EDITABLE;
-    var NODE_ALL_VISIBLE = ~NODE_SHOW_HIDDEN;
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
@@ -99,11 +96,11 @@
         self.root = root;
     }
 
-    function TyperDOMNodeIterator(root, whatToShow, filter) {
+    function TyperDOMNodeIterator(iterator, whatToShow, filter) {
         var self = this;
         self.whatToShow = whatToShow;
         self.filter = filter || null;
-        nodeIteratorInit(self, is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT));
+        nodeIteratorInit(self, iterator);
     }
 
     function TyperCaret(typer, selection) {
@@ -302,7 +299,7 @@
     }
 
     function getWholeTextOffset(node, textNode) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 5);
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT), 5);
         for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length || 0);
         return offset;
     }
@@ -859,7 +856,7 @@
         }
 
         function normalize(element) {
-            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
+            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
                 if (is(node, NODE_EDITABLE)) {
                     if (!node.firstChild) {
@@ -937,7 +934,7 @@
                             });
                         }
                     };
-                    iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
+                    iterate(state.createTreeWalker(-1, function (node) {
                         var element = node.element;
                         var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
                         var isWidgetHead = node.widget.element === element;
@@ -1001,7 +998,7 @@
                 }
                 if (isFunction(callback)) {
                     if (!isSingleEditable) {
-                        var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE | NODE_SHOW_EDITABLE, function (v) {
+                        var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE, function (v) {
                             return widgetOptions[v.widget.id].textFlow ? 1 : 3;
                         });
                         var start = closest(state.baseCaret.node, NODE_ANY_BLOCK_EDITABLE);
@@ -1218,7 +1215,7 @@
                 doc = createTyperDocument(content);
                 iterator = new TyperDOMNodeIterator(new TyperTreeWalker(doc.getNode(content), -1), 5);
             } else {
-                iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(NODE_ALL_VISIBLE), 5, function (v) {
+                iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(-1), 5, function (v) {
                     return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
                 });
             }
@@ -1875,8 +1872,6 @@
         NODE_INLINE: NODE_INLINE,
         NODE_INLINE_WIDGET: NODE_INLINE_WIDGET,
         NODE_INLINE_EDITABLE: NODE_INLINE_EDITABLE,
-        NODE_OUTER_PARAGRAPH: NODE_OUTER_PARAGRAPH,
-        NODE_SHOW_EDITABLE: NODE_SHOW_EDITABLE,
         NODE_ANY_ALLOWTEXT: NODE_ANY_ALLOWTEXT,
         NODE_ANY_BLOCK_EDITABLE: NODE_ANY_BLOCK_EDITABLE,
         NODE_ANY_INLINE: NODE_ANY_INLINE,
@@ -1963,7 +1958,7 @@
     });
 
     function treeWalkerIsNodeVisible(inst, node) {
-        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && ((inst.whatToShow & NODE_SHOW_HIDDEN) || node.element.offsetWidth > 0 || node.element.offsetHeight > 0) && node;
+        return node && ((inst.whatToShow & NODE_SHOW_HIDDEN) || node.element.offsetWidth > 0 || node.element.offsetHeight > 0) && node;
     }
 
     function treeWalkerAcceptNode(inst, node, checkWidget) {
@@ -2117,7 +2112,7 @@
 
     function selectionCreateTreeWalker(inst, whatToShow, filter) {
         var range = createRange(inst);
-        return new TyperTreeWalker(inst.focusNode, (whatToShow | NODE_SHOW_EDITABLE) & NODE_ALL_VISIBLE, function (v) {
+        return new TyperTreeWalker(inst.focusNode, whatToShow & ~NODE_SHOW_HIDDEN, function (v) {
             return !rangeIntersects(v.element, range) ? 2 : !filter ? 1 : filter(v);
         });
     }
@@ -2237,7 +2232,7 @@
             if (self.startNode === self.endNode) {
                 return is(self.startNode, NODE_PARAGRAPH) ? [self.startNode.element] : [];
             }
-            return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE), mapFn('element'), self.startNode, self.endNode);
+            return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH), mapFn('element'), self.startNode, self.endNode);
         },
         getSelectedElements: function () {
             var self = this;
@@ -2362,7 +2357,7 @@
     });
 
     function caretTextNodeIterator(inst, root, whatToShow) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(is(root, TyperNode) || inst.typer.getNode(root || inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_WIDGET | NODE_SHOW_EDITABLE), whatToShow | 4);
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(is(root, TyperNode) || inst.typer.getNode(root || inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_WIDGET), whatToShow | 4);
         iterator.currentNode = inst.textNode || inst.element;
         return iterator;
     }
@@ -2414,7 +2409,7 @@
         }
         node = inst.typer.getNode(textNode || element);
         if (!textNode || !is(node, NODE_ANY_ALLOWTEXT)) {
-            var iterator = new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE);
+            var iterator = new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT);
             while (comparePosition(textNode, iterator.currentNode.element) >= 0 && iterator.nextNode());
             node = iterator.currentNode || node;
             element = node.element;
@@ -2528,7 +2523,7 @@
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
-                var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
+                var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT), 4);
                 if (1 / offset > 0) {
                     for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
                 } else {
@@ -2554,7 +2549,7 @@
         },
         moveByLine: function (direction) {
             var self = this;
-            var iterator = new TyperTreeWalker(self.typer.getNode(self.typer.element), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET | NODE_SHOW_EDITABLE);
+            var iterator = new TyperTreeWalker(self.typer.getNode(self.typer.element), NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET);
             var rect = self.getRect();
             var node = self.node;
             var deltaX = Infinity;
