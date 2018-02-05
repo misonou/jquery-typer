@@ -732,7 +732,7 @@
                     node.widget = context.widget;
                 }
                 var widgetOption = widgetOptions[node.widget.id];
-                if (node.widget === context.widget && !is(context, NODE_WIDGET)) {
+                if (node.widget === context.widget && !is(context, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
                 } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
                     node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
