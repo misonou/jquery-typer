@@ -904,6 +904,9 @@
                         });
                     }
                 }
+                if (is(node, NODE_INLINE) && currentSelection.startElement !== element && currentSelection.endElement !== element && !trim(element.textContent)) {
+                    removeNode(element);
+                }
                 $('>br', element).each(function (i, v) {
                     if (!isText(v.nextSibling)) {
                         $(createTextNode()).insertAfter(v);
@@ -1418,6 +1421,7 @@
                 }
                 setImmediate(function () {
                     updateFromNativeInput();
+                    normalize(currentSelection.focusNode.element);
                     if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
                         triggerEvent(EVENT_CURRENT, 'contentChange');
                     }
