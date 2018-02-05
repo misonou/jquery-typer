@@ -2392,47 +2392,43 @@
     }
 
     function caretSetPosition(inst, element, offset) {
-        var node, textNode, textOffset, end;
+        var textNode, end;
         if (isBR(element)) {
             textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
-            element = textNode.parentNode;
             offset = 0;
-        } else if (isElm(element) && element.firstChild) {
-            if (offset === element.childNodes.length) {
-                element = element.childNodes[(offset || 1) - 1];
-                offset = element.length;
-                end = true;
-            } else {
-                element = element.childNodes[offset];
-                offset = 0;
+        } else {
+            if (element.firstChild) {
+                end = offset === element.childNodes.length;
+                element = element.childNodes[offset] || element.lastChild;
+                offset = end ? element.length : 0;
             }
+            textNode = isText(element);
         }
-        if (isText(element)) {
-            textNode = element;
-            element = textNode.parentNode;
+        var node = inst.typer.getNode(element);
+        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET)) {
+            var child = any(node.childNodes, function (v) {
+                return comparePosition(textNode, v.element) < 0;
+            });
+            node = child || node.lastChild || node;
+            textNode = null;
+            end = !child;
         }
-        node = inst.typer.getNode(textNode || element);
-        if (!textNode || !is(node, NODE_ANY_ALLOWTEXT)) {
-            var iterator = new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT);
-            while (comparePosition(textNode, iterator.currentNode.element) >= 0 && iterator.nextNode());
-            node = iterator.currentNode || node;
-            element = node.element;
-            if (!is(node, NODE_ANY_ALLOWTEXT)) {
-                textNode = null;
-            } else {
-                end = textNode ? comparePosition(element, textNode) < 0 : end;
-                iterator = new TyperDOMNodeIterator(iterator, 4);
-                while (iterator.nextNode() && end);
-                textNode = isText(iterator.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](element)[0];
-                offset = textNode && end ? textNode.length : 0;
-            }
+        if (inst.selection && inst === inst.selection.extendCaret && is(node.previousSibling, NODE_WIDGET) === inst.selection.baseCaret.node) {
+            node = node.previousSibling;
+            textNode = null;
+            end = true;
+        }
+        if (!textNode && is(node, NODE_ANY_ALLOWTEXT)) {
+            var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT), 4);
+            while (iterator.nextNode() && end);
+            textNode = isText(iterator.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](node.element)[0];
+            offset = textNode && end ? textNode.length : 0;
         }
         if (textNode) {
             var moveToMostInner = function (dir, pSib, pChild, mInsert) {
                 var next = isTextNodeEnd(textNode, offset, dir) && isElm(textNode[pSib]);
                 if (next && !isBR(next) && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
-                    element = next;
-                    textNode = isText(element[pChild]) || $(createTextNode())[mInsert](element)[0];
+                    textNode = isText(next[pChild]) || $(createTextNode())[mInsert](next)[0];
                     offset = getOffset(textNode, 0 * dir);
                     return true;
                 }
@@ -2443,7 +2439,7 @@
                 offset = 1;
             }
         }
-        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), element, textNode, textNode ? offset : !end);
+        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end);
     }
 
     definePrototype(TyperCaret, {
