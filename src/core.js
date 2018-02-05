@@ -1420,13 +1420,13 @@
                     return true;
                 }
                 setImmediate(function () {
+                    setEventSource('input', typer);
                     updateFromNativeInput();
-                    normalize(currentSelection.focusNode.element);
-                    if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
-                        triggerEvent(EVENT_CURRENT, 'contentChange');
-                    }
-                    triggerEvent(EVENT_STATIC, 'contentChange');
+                    normalizeWhitespace(currentSelection.startElement);
+                    currentSelection.focus();
                 });
+                trackChange(currentSelection.focusNode);
+                codeUpdate($.noop);
             }
 
             function handleDataTransfer(clipboardData) {
