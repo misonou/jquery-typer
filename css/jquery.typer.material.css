@@ -976,15 +976,15 @@ label.typer-ui-dropdown.error .typer-ui-label:after {
     border-bottom: 1px solid #d3d3d3;
 }
 
-.typer-ui-calendar-header .typer-ui-dropdown {
-    padding-right: 0.75em !important;
-}
-
-.typer-ui-calendar-header .typer-ui-dropdown + .typer-ui-dropdown {
+.typer-ui-calendar-header label.typer-ui-dropdown[role="calendar:month"] {
     margin-left: -0.75em;
 }
 
-.typer-ui-calendar-header .typer-ui-dropdown:after {
+.typer-ui-calendar-header label.typer-ui-dropdown > button {
+    padding-right: 0.75em !important;
+}
+
+.typer-ui-calendar-header label.typer-ui-dropdown > button:after {
     content: none;
 }
 
