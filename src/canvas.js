@@ -80,7 +80,9 @@
                     var promise = handlePointer(e);
                     v.handler(promise);
                     promise.always(function () {
-                        activeTyper.getSelection().focus();
+                        if (activeTyper) {
+                            activeTyper.getSelection().focus();
+                        }
                     });
                     e.preventDefault();
                     return false;
