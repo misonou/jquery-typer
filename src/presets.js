@@ -24,7 +24,6 @@
 
         options = {
             inline: true,
-            accept: 'text',
             defaultOptions: false,
             disallowedElement: '*',
             widgets: {},

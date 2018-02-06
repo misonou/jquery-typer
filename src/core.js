@@ -1430,17 +1430,16 @@
             }
 
             function handleDataTransfer(clipboardData) {
-                var acceptHtml = widgetOptions[currentSelection.focusNode.widget.id].accept !== 'text';
-                if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
+                if ($.inArray('application/x-typer', clipboardData.types) >= 0) {
                     var html = clipboardData.getData('text/html');
                     var content = createDocumentFragment($(html).filter('#Typer').contents());
                     insertContents(currentSelection, content);
                 } else {
                     var textContent = clipboardData.getData(IS_IE ? 'Text' : 'text/plain');
-                    if (acceptHtml && textContent === clipboard.textContent) {
+                    if (textContent === clipboard.textContent) {
                         insertContents(currentSelection, clipboard.content.cloneNode(true));
-                    } else if (!triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', textContent)) {
-                        insertContents(currentSelection, textContent);
+                    } else {
+                        handleTextInput(textContent, true);
                     }
                 }
             }
@@ -1905,7 +1904,6 @@
         caretRangeFromPoint: caretRangeFromPoint,
         historyLevel: 100,
         defaultOptions: {
-            disallowedWidgets: 'keepText',
             widgets: {}
         },
         widgets: {}
