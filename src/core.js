@@ -190,6 +190,10 @@
         return String(v || '').replace(/^[\s\u200b]+|[\s\u200b]+$/g, '');
     }
 
+    function collapse(v) {
+        return String(v || '').replace(/[^\S\u00a0]+/g, ' ');
+    }
+
     function capfirst(v) {
         v = String(v || '');
         return v.charAt(0).toUpperCase() + v.slice(1);
@@ -607,6 +611,16 @@
 
         function TyperTransaction() { }
 
+        function matchWidgetList(id, prop, needle) {
+            var options = widgetOptions[id];
+            return !(prop in options) || options[prop] === '*' || (' ' + options[prop] + ' ').indexOf(' ' + needle + ' ') >= 0;
+        }
+
+        function widgetAllowed(id, node) {
+            node = closest(node, NODE_ANY_BLOCK_EDITABLE);
+            return (widgetOptions[id].inline || !is(node, NODE_EDITABLE_PARAGRAPH)) && matchWidgetList(node.widget.id, 'allowedWidgets', id);
+        }
+
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
                 case EVENT_ALL:
@@ -908,9 +922,9 @@
                     }
                     if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
-                            v.data = v.data.replace(/[^\S\u00a0]+/g, ' ');
+                            v.data = collapse(v.data);
                             if (isText(v.nextSibling)) {
-                                v.nextSibling.data = (v.data + v.nextSibling.data).replace(/[^\S\u00a0]+/g, ' ');
+                                v.nextSibling.data = collapse(v.data + v.nextSibling.data);
                                 removeNode(v);
                             }
                         });
@@ -1085,8 +1099,8 @@
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (node.widget.id === WIDGET_UNKNOWN || (is(caretNode, NODE_EDITABLE_PARAGRAPH) && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
-                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
+                        if (!widgetAllowed(node.widget.id, caretNode)) {
+                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapse(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
                             node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
                         if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
@@ -1746,6 +1760,15 @@
                 element: options.disallowedElement || ':not(' + INNER_PTAG + ',br,b,em,i,u,strike,small,strong,sub,sup,ins,del,mark,span)'
             };
             options.textFlow = true;
+
+            var contentWidgets = Object.keys(widgetOptions).slice(0, -1).filter(function (v) {
+                return widgetOptions[v].element;
+            });
+            contentWidgets.forEach(function (v) {
+                widgetOptions[v].allowedWidgets = contentWidgets.filter(function (w) {
+                    return w !== WIDGET_ROOT && matchWidgetList(w, 'allowedIn', v) && matchWidgetList(v, 'allow', w);
+                }).join(' ');
+            });
         }
 
         function retainFocusHandler(e) {
@@ -1780,6 +1803,10 @@
             },
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
+            },
+            widgetAllowed: function (id, node) {
+                node = is(node, TyperNode) || typer.getNode(node || topElement);
+                return !!widgetAllowed(id, node);
             },
             getWidgetOption: function (id, name) {
                 return widgetOptions[id] && widgetOptions[id][name];
@@ -2311,12 +2338,7 @@
             return inst;
         },
         widgetAllowed: function (id) {
-            var self = this;
-            if (is(self.focusNode, NODE_EDITABLE_PARAGRAPH) && !self.typer.getWidgetOption(self.focusNode.widget.id, 'inline')) {
-                return false;
-            }
-            var allowedWidgets = self.typer.getWidgetOption(self.focusNode.widget.id, 'allowedWidgets');
-            return !allowedWidgets || allowedWidgets === '*' || (' __root__ ' + allowedWidgets + ' ').indexOf(' ' + id + ' ') >= 0;
+            return this.typer.widgetAllowed(id, this.focusNode);
         }
     });
 
