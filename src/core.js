@@ -668,47 +668,60 @@
             var observer;
 
             function triggerWidgetEvent(widget, event) {
-                widget.fireInit = widget.fireInit !== true;
-                setImmediate(function () {
-                    if (fireEvent && widget.fireInit !== false && widget.id !== WIDGET_UNKNOWN) {
-                        triggerEvent(widget, event);
-                        triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
-                            targetWidget: widget
+                if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
+                    if (widget.timeout) {
+                        clearImmediate(widget.timeout);
+                        delete widget.timeout;
+                    } else {
+                        widget.timeout = setImmediate(function () {
+                            triggerEvent(widget, event);
+                            triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
+                                targetWidget: widget
+                            });
+                            widget.destroyed = event === 'destroy';
+                            delete widget.timeout;
                         });
-                        widget.destroyed = event === 'destroy';
-                        delete widget.fireInit;
+                    }
+                }
+            }
+
+            function triggerWidgetEventRecursive(node, event) {
+                iterate(new TyperTreeWalker(node, -1), function (v) {
+                    if (v.widget.element === v.element) {
+                        triggerWidgetEvent(v.widget, event);
                     }
                 });
             }
 
             function addChild(parent, node) {
-                if (node.parentNode !== parent && node !== parent) {
+                var arr = parent.childNodes;
+                for (var index = arr.length; index && comparePosition(node.element, arr[index - 1].element) <= 0; index--);
+                if (arr[index] !== node) {
                     if (node.parentNode) {
                         removeFromParent(node);
+                    } else {
+                        triggerWidgetEventRecursive(node, 'init');
                     }
-                    for (var index = parent.childNodes.length; index && compareRangePosition(node.element, parent.childNodes[index - 1].element) < 0; index--);
+                    arr.splice(index, 0, node);
                     node.parentNode = parent;
-                    node.previousSibling = parent.childNodes[index - 1] || null;
-                    node.nextSibling = parent.childNodes[index] || null;
+                    node.previousSibling = arr[index - 1] || null;
+                    node.nextSibling = arr[index + 1] || null;
                     (node.previousSibling || {}).nextSibling = node;
                     (node.nextSibling || {}).previousSibling = node;
-                    parent.childNodes.splice(index, 0, node);
                 }
             }
 
             function removeFromParent(node, destroyWidget) {
-                var index = node.parentNode.childNodes.indexOf(node);
-                if (destroyWidget) {
-                    iterate(new TyperTreeWalker(node, -1), function (v) {
-                        if (v.widget.element === v.element) {
-                            triggerWidgetEvent(v.widget, 'destroy');
-                        }
-                    });
-                }
-                node.parentNode.childNodes.splice(index, 1);
-                node.parentNode = null;
+                var arr = node.parentNode.childNodes;
+                arr.splice(arr.indexOf(node), 1);
                 (node.previousSibling || {}).nextSibling = node.nextSibling;
                 (node.nextSibling || {}).previousSibling = node.previousSibling;
+                node.parentNode = null;
+                node.nextSibling = null;
+                node.previousSibling = null;
+                if (destroyWidget) {
+                    triggerWidgetEventRecursive(node, 'destroy');
+                }
             }
 
             function updateNode(node) {
@@ -745,7 +758,6 @@
                 $.each(node.childNodes.slice(0), function (i, v) {
                     if (!containsOrEquals(rootElement, v.element)) {
                         removeFromParent(v, true);
-                        nodeMap.delete(v.element);
                     }
                 });
             }
