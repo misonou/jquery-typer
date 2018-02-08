@@ -204,7 +204,7 @@
 
     function refresh(force) {
         clearTimeout(timeout);
-        if (activeTyper) {
+        if (activeTyper && document.activeElement === activeTyper.element) {
             var canvas = new TyperCanvas();
             if (canvas.editorReflow || canvas.selectionChanged || canvas.pointerMoved) {
                 pointerRegions.splice(0);
