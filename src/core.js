@@ -1315,7 +1315,7 @@
             }
 
             function takeSnapshot() {
-                var value = undoable.getValue();
+                var value = trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
                 if (!snapshots[0] || value !== snapshots[currentIndex].value) {
                     snapshots.splice(0, currentIndex, {
                         value: value
@@ -1325,12 +1325,13 @@
                 }
                 snapshots[currentIndex].basePos = saveCaret(currentSelection.baseCaret);
                 snapshots[currentIndex].extendPos = saveCaret(currentSelection.extendCaret);
+                snapshots[currentIndex].html = topElement.innerHTML;
                 needSnapshot = false;
                 setImmediateOnce(triggerStateChange);
             }
 
             function applySnapshot(state) {
-                $self.html(state.value);
+                $self.html(state.html);
                 restoreCaret(currentSelection, state.basePos);
                 restoreCaret(currentSelection.extendCaret, state.extendPos);
                 setImmediateOnce(triggerStateChange);
@@ -1339,7 +1340,7 @@
 
             extend(undoable, {
                 getValue: function () {
-                    return trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
+                    return snapshots[currentIndex].value;
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
