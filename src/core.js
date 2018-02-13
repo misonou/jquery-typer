@@ -370,7 +370,12 @@
     }
 
     function getRect(elm) {
-        return !elm || elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
+        elm = elm || root;
+        if (!containsOrEquals(root, elm)) {
+            // IE10 throws Unspecified Error for detached elements
+            return toPlainRect(0, 0, 0, 0);
+        }
+        return elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
     }
 
     function toPlainRect(l, t, r, b) {
