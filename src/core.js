@@ -408,7 +408,7 @@
     }
 
     function pointInRect(x, y, rect) {
-        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        return rect.width && rect.height && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
     function computeTextRects(node) {
