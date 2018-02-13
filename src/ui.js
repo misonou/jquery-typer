@@ -1556,6 +1556,21 @@
             });
         }
 
+        function handlePointerEventNone(e) {
+            if (getComputedStyle(e.target).pointerEvents === 'none') {
+                e.stopPropagation();
+                var event = document.createEvent('MouseEvent');
+                event.initMouseEvent(e.type, e.bubbles, e.cancelable, e.view, e.detail, e.screenX, e.screenY, e.clientX, e.clientY, e.ctrlKey, e.altKey, e.shiftKey, e.metaKey, e.button, e.relatedTarget);
+                (Typer.elementFromPoint(e.clientX, e.clientY) || document.body).dispatchEvent(event);
+            }
+        }
+
+        if (Typer.msie10) {
+            $.each('mousedown mouseup mousemove click'.split(' '), function (i, v) {
+                document.body.addEventListener(v, handlePointerEventNone, true);
+            });
+        }
+
         // helper element for detecting fixed position offset to the client screen
         originDiv = $('<div style="position:fixed;top:0;left:0;">').appendTo(document.body)[0];
     });

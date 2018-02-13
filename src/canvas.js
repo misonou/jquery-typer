@@ -5,7 +5,6 @@
         left: 10000,
         right: -10000
     };
-    var supported = !window.ActiveXObject;
     var root = document.documentElement;
     var allLayers = {};
     var pointerRegions = [];
@@ -204,7 +203,7 @@
 
     function refresh(force) {
         clearTimeout(timeout);
-        if (activeTyper && supported && document.activeElement === activeTyper.element) {
+        if (activeTyper && document.activeElement === activeTyper.element) {
             var canvas = new TyperCanvas();
             if (canvas.editorReflow || canvas.selectionChanged || canvas.pointerMoved) {
                 pointerRegions.splice(0);
@@ -337,7 +336,7 @@
     Typer.widgets.visualizer = {
         init: function (e) {
             $(e.typer.element).addClass('has-typer-visualizer');
-            if (supported && !init.init) {
+            if (!init.init) {
                 init();
                 init.init = true;
             }
@@ -357,7 +356,7 @@
         }
     };
 
-    Typer.defaultOptions.visualizer = supported;
+    Typer.defaultOptions.visualizer = true;
 
     Typer.canvas = {
         addLayer: addLayer
