@@ -124,7 +124,6 @@
                 tx.removeElement(v);
             }
         });
-        tx.trackChange(selection.focusNode);
     }
 
     /* ********************************
@@ -133,7 +132,6 @@
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
-        tx.trackChange(tx.selection.focusNode);
     }
 
     function inlineStyleCommand(tx) {
@@ -161,7 +159,6 @@
                 outdentCommand(tx, [v]);
             }
         });
-        tx.trackChange(tx.selection.focusNode);
     }
 
     function indentCommand(tx, elements) {
@@ -208,7 +205,6 @@
                 tx.removeElement(list);
             }
         });
-        tx.trackChange(tx.selection.focusNode);
     }
 
     Typer.widgets.inlineStyle = {
@@ -273,7 +269,6 @@
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2] || '';
-                            tx.trackChange(v);
                         }
                     });
                 }
