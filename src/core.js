@@ -796,12 +796,12 @@
 
             function handleMutations(mutations) {
                 $.each(mutations, function (i, v) {
-                    if (v.addedNodes[0] || v.removedNodes[0]) {
-                        if (!isBR(v.target)) {
+                    if (!isBR(v.target)) {
+                        if (v.addedNodes[0] || v.removedNodes[0]) {
                             dirtyElements.add(v.target);
+                        } else if (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style' && nodeMap.has(v.target)) {
+                            trackChange(nodeMap.get(v.target));
                         }
-                    } else if (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style') {
-                        trackChange(nodeMap.get(v.target));
                     }
                 });
             }
