@@ -1163,14 +1163,15 @@
                                 normalizeWhitespace(splitFirstNode);
                             }
                             if (isLineBreak) {
-                                caretPoint.moveTo(splitFirstNode, false);
-                            } else {
-                                caretNode = typer.getNode(splitFirstNode);
+                                createRange(splitFirstNode, true).insertNode(nodeToInsert);
                                 caretPoint.moveTo(splitFirstNode, 0);
-                                paragraphAsInline = !incompatParagraph;
-                                insertAsInline = insertAsInline && paragraphAsInline;
-                                hasInsertedBlock = true;
+                                return;
                             }
+                            caretNode = typer.getNode(splitFirstNode);
+                            caretPoint.moveTo(splitFirstNode, 0);
+                            paragraphAsInline = !incompatParagraph;
+                            insertAsInline = insertAsInline && paragraphAsInline;
+                            hasInsertedBlock = true;
                         }
                     }
                     insertAsInline = insertAsInline && is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
