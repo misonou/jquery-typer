@@ -35,7 +35,6 @@
     var elementFromPoint_ = IS_IE ? undefined : document.elementFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
-    var scrollIntoViewIfNeeded_ = root.scrollIntoViewIfNeeded;
 
     var isFunction = $.isFunction;
     var extend = $.extend;
@@ -496,15 +495,23 @@
         }
     }
 
-    function scrollByAmount(element, scrollAmount) {
-        for (var cur = element.offsetParent; cur !== root; cur = cur.parentNode) {
-            var style = window.getComputedStyle(cur);
-            if (style.overflow === 'scroll' || style.overflowY === 'scroll') {
-                cur.scrollTop += scrollAmount;
-                return;
+    function scrollRectIntoView(element, rect) {
+        for (; element !== root && window.getComputedStyle(element).overflow === 'visible'; element = element.offsetParent || element.parentNode);
+        var elmRect = getRect(element);
+        var deltaX = Math.max(0, rect.right - elmRect.right) || Math.min(rect.left - elmRect.left, 0);
+        var deltaY = Math.max(0, rect.bottom - elmRect.bottom) || Math.min(rect.top - elmRect.top, 0);
+        if (deltaX || deltaY) {
+            if (element !== root) {
+                element.scrollLeft += deltaX;
+                element.scrollTop += deltaY;
+            } else {
+                window.scrollTo(root.scrollLeft + deltaX, root.scrollTop + deltaY);
             }
         }
-        window.scrollTo(root.scrollLeft, root.scrollTop + scrollAmount);
+        return {
+            x: deltaX,
+            y: deltaY
+        };
     }
 
     function fixIEInputEvent(element, topElement) {
@@ -1449,14 +1456,27 @@
             }
 
             $self.mousedown(function (e) {
+                var extendCaret = currentSelection.extendCaret;
+                var scrollTimeout;
                 var handlers = {
+                    mouseout: function (e) {
+                        var lastX = e.clientX;
+                        var lastY = e.clientY;
+                        scrollTimeout = setInterval(function () {
+                            scrollRectIntoView(topElement, toPlainRect(lastX - 50, lastY - 50, lastX + 50, lastY + 50));
+                            if (!extendCaret.moveToPoint(lastX, lastY)) {
+                                clearInterval(scrollTimeout);
+                            }
+                        }, 20);
+                    },
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
                             handlers.mouseup();
                             return;
                         }
+                        clearInterval(scrollTimeout);
                         undoable.snapshot(200);
-                        currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
+                        extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
                             currentSelection.focus();
                         });
@@ -1464,6 +1484,7 @@
                     },
                     mouseup: function (e2) {
                         mousedown = false;
+                        clearInterval(scrollTimeout);
                         $(document.body).unbind(handlers);
                         if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
                             var node = typer.getNode(e2.target);
@@ -1475,7 +1496,7 @@
                     }
                 };
                 if (e.which === 1) {
-                    (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
+                    (e.shiftKey ? extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                     currentSelection.focus();
                     $(document.body).on(handlers);
                     mousedown = true;
@@ -2294,9 +2315,7 @@
                 if (!IS_IE && document.activeElement !== topElement) {
                     topElement.focus();
                 }
-                if (this.isCaret) {
-                    scrollIntoViewIfNeeded_.apply(this.startElement);
-                }
+                scrollRectIntoView(topElement, this.extendCaret.getRect());
             }
         },
         clone: function () {
@@ -2562,11 +2581,8 @@
             } while (deltaX && (node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
 
             if (newRect) {
-                var scrollAmount = Math.max(0, newRect.bottom - root.offsetHeight) || Math.min(newRect.top, 0);
-                if (scrollAmount) {
-                    scrollByAmount(self.typer.element, scrollAmount);
-                }
-                return self.moveToPoint(rect.left + deltaX, (newRect.top + newRect.bottom) / 2 - scrollAmount);
+                var delta = scrollRectIntoView(self.typer.element, newRect);
+                return self.moveToPoint(rect.left + deltaX - delta.x, (newRect.top + newRect.bottom) / 2 - delta.y);
             }
             if (nextBlock) {
                 return self.moveTo(nextBlock, true);
@@ -2788,19 +2804,6 @@
                 return createRange(element, -0);
             };
         }();
-    }
-
-    // polyfill for element.scrollIntoViewIfNeeded
-    if (!scrollIntoViewIfNeeded_) {
-        scrollIntoViewIfNeeded_ = function () {
-            var winRect = getRect(root);
-            var elmRect = getRect(this);
-            if (elmRect.top < winRect.top) {
-                this.scrollIntoView(true);
-            } else if (elmRect.bottom > winRect.bottom) {
-                this.scrollIntoView(false);
-            }
-        };
     }
 
     // detect support for textInput event
