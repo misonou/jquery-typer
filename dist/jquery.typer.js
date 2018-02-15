@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.10.7
+ * jQuery Typer Plugin v0.11.0
  *
  * The MIT License (MIT)
  *
@@ -24,13 +24,14 @@
  * THE SOFTWARE.
  */
 
-(function ($, window, document, String, Node, Range, DocumentFragment, WeakMap, array, RegExp) {
-    'use strict';
+(function (jQuery, window, document, Object, String, Array, Math, Node, Range, DocumentFragment, RegExp, shim) {
+'use strict';
 
+// source: src/core.js
+(function ($, root, array) {
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
-    var VOID_TAGS = 'area base br col command embed hr img input keygen link meta param source track wbr'.split(' ');
     var INNER_PTAG = 'h1,h2,h3,h4,h5,h6,p,q,blockquote,pre,code,li,caption,figcaption,summary,dt,th';
-    var SOURCE_PRIORITY = 'script keystroke textInput mouse touch cut paste'.split(' ');
+    var SOURCE_PRIORITY = 'script keyboard mouse touch input drop cut paste'.split(' ');
     var ZWSP = '\u200b';
     var ZWSP_ENTITIY = '&#8203;';
     var EMPTY_LINE = '<p>&#8203;</p>';
@@ -41,43 +42,53 @@
     var NODE_EDITABLE = 2;
     var NODE_EDITABLE_PARAGRAPH = 32;
     var NODE_PARAGRAPH = 4;
-    var NODE_OUTER_PARAGRAPH = 8;
     var NODE_INLINE = 16;
     var NODE_INLINE_WIDGET = 64;
     var NODE_INLINE_EDITABLE = 128;
-    var NODE_SHOW_EDITABLE = 4096;
     var NODE_SHOW_HIDDEN = 8192;
     var NODE_ANY_BLOCK_EDITABLE = NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH;
     var NODE_ANY_BLOCK = NODE_WIDGET | NODE_PARAGRAPH | NODE_ANY_BLOCK_EDITABLE;
     var NODE_ANY_INLINE = NODE_INLINE | NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE;
     var NODE_ANY_ALLOWTEXT = NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_INLINE | NODE_INLINE_EDITABLE;
-    var NODE_ALL_VISIBLE = -1 & ~NODE_SHOW_HIDDEN;
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
     var EVENT_CURRENT = 4;
-    var IS_IE = !!window.ActiveXObject || document.documentElement.style.msTouchAction !== undefined || document.documentElement.style.msUserSelect !== undefined;
+    var IS_IE10 = !!window.ActiveXObject;
+    var IS_IE = IS_IE10 || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
 
     // document.caretRangeFromPoint is still broken even in Edge browser
     // it does not return correct range for the points x or y larger than window's width or height
     var caretRangeFromPoint_ = IS_IE ? undefined : document.caretRangeFromPoint;
+    var elementFromPoint_ = IS_IE ? undefined : document.elementFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
+    var scrollIntoViewIfNeeded_ = root.scrollIntoViewIfNeeded;
 
     var isFunction = $.isFunction;
     var extend = $.extend;
     var selection = window.getSelection();
+    var setImmediate = window.setImmediate;
+    var clearImmediate = window.clearImmediate;
+    var MutationObserver = shim.MutationObserver;
+    var WeakMap = shim.WeakMap;
+    var Set = shim.Set;
+
     var clipboard = {};
-    var userFocus;
-    var caretNotification;
+    var userFocus = new WeakMap();
+    var selectionCache = new WeakMap();
+    var detachedElements = new WeakMap();
+    var dirtySelections = new Set();
     var windowFocusedOut;
     var permitFocusEvent;
     var supportTextInputEvent;
     var currentSource = [];
     var lastTouchedElement;
+    var checkNativeUpdate;
 
     function TyperSelection(typer, range) {
         var self = this;
+        selectionCache.set(self, {});
         self.typer = typer;
         self.baseCaret = new TyperCaret(typer, self);
         self.extendCaret = new TyperCaret(typer, self);
@@ -97,15 +108,16 @@
     function TyperEvent(eventName, typer, widget, data, props) {
         var self = extend(this, props);
         self.eventName = eventName;
-        self.source = currentSource[currentSource.length - 1][1];
-        self.timestamp = +new Date();
+        self.source = currentSource[1] === typer ? currentSource[0] : 'script';
+        self.timestamp = performance.now();
         self.typer = typer;
         self.widget = widget || null;
         self.data = data !== undefined ? data : null;
     }
 
-    function TyperNode(nodeType, element, widget) {
+    function TyperNode(typer, nodeType, element, widget) {
         var self = this;
+        self.typer = typer;
         self.childNodes = [];
         self.nodeType = nodeType;
         self.element = element;
@@ -120,16 +132,11 @@
         self.root = root;
     }
 
-    function TyperDOMNodeIterator(root, whatToShow, filter) {
+    function TyperDOMNodeIterator(iterator, whatToShow, filter) {
         var self = this;
         self.whatToShow = whatToShow;
         self.filter = filter || null;
-        nodeIteratorInit(self, is(root, TyperTreeWalker) || new TyperTreeWalker(root, NODE_WIDGET | NODE_ANY_ALLOWTEXT));
-    }
-
-    function TyperChangeTracker(typer) {
-        this.typer = typer;
-        this.changes = [];
+        nodeIteratorInit(self, iterator);
     }
 
     function TyperCaret(typer, selection) {
@@ -137,50 +144,23 @@
         this.selection = selection || null;
     }
 
-    function TyperCaretNotification() {
-        this.weakMap = new WeakMap();
-    }
-
     function transaction(finalize) {
+        var count = 0;
         return function run(callback, args, thisArg) {
-            var originalValue = run.executing;
             try {
-                run.executing = true;
+                count++;
                 return callback.apply(thisArg || this, args);
             } finally {
-                run.executing = originalValue;
-                if (!run.executing && finalize) {
+                if (--count === 0) {
                     finalize();
                 }
             }
         };
     }
 
-    function eventSource(typer, source, callback, args, thisArg) {
-        var len = currentSource.length;
-        var cur = currentSource[len - 1] || (currentSource.push([typer, source || 'script']), currentSource[len]);
-        if (cur[0] && typer && cur[0] !== typer) {
-            currentSource.push([typer, 'script']);
-        } else if (cur === currentSource[0] && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(cur[1])) {
-            cur[1] = source;
-        }
-        try {
-            return (callback || $.noop).apply(thisArg || null, args);
-        } finally {
-            if (!len) {
-                cur[0] = null;
-                setImmediate(function () {
-                    currentSource.splice(len);
-                });
-            } else {
-                currentSource.splice(len);
-            }
-        }
-    }
-
-    function defineProperty(obj, name, value, freeze) {
+    function defineProperty(obj, name, value) {
         Object.defineProperty(obj, name, {
-            configurable: !freeze,
+            configurable: true,
             writable: true,
             value: value
         });
@@ -193,13 +173,6 @@
 
     function slice(arr, start, end) {
         return array.slice.call(arr || {}, start || 0, end);
-    }
-
-    function mapFn(prop) {
-        mapFn[prop] = mapFn[prop] || function (v) {
-            return v[prop];
-        };
-        return mapFn[prop];
     }
 
     function any(arr, callback) {
@@ -237,8 +210,26 @@
         return callback ? $.map(result, callback) : result;
     }
 
+    function consume(set) {
+        var arr;
+        if (Array.from) {
+            arr = Array.from(set);
+        } else {
+            arr = [];
+            set.forEach(function (v) {
+                arr[arr.length] = v;
+            });
+        }
+        set.clear();
+        return arr;
+    }
+
     function trim(v) {
         return String(v || '').replace(/^[\s\u200b]+|[\s\u200b]+$/g, '');
+    }
+
+    function collapseWS(v) {
+        return String(v || '').replace(/[^\S\u00a0]+/g, ' ');
     }
 
     function capfirst(v) {
@@ -278,34 +269,30 @@
         return v && v.nodeType === 3 && v;
     }
 
+    function isBR(v) {
+        return tagName(v) === 'br' && v;
+    }
+
     function isTextNodeEnd(v, offset, dir) {
         var str = v.data;
         return (dir >= 0 && (offset === v.length || str.slice(offset) === ZWSP)) ? 1 : (dir <= 0 && (!offset || str.slice(0, offset) === ZWSP)) ? -1 : 0;
     }
 
     function closest(node, type) {
-        for (; node.parentNode && !is(node, type); node = node.parentNode);
-        return node;
-    }
-
-    function attrs(element) {
-        var value = {};
-        $.each($.makeArray(element && element.attributes), function (i, v) {
-            value[v.nodeName] = v.value;
-        });
-        return value;
+        for (; node && !is(node, type); node = node.parentNode);
+        return is(node, NODE_WIDGET) ? node.typer.getNode(node.widget.element) : node;
     }
 
     function compareAttrs(a, b) {
-        var thisAttr = attrs(a);
-        var prevAttr = attrs(b);
-        $.each(prevAttr, function (i, v) {
-            if (v === thisAttr[i]) {
-                delete thisAttr[i];
-                delete prevAttr[i];
-            }
+        var thisAttr = a.attributes;
+        var prevAttr = b.attributes;
+        return thisAttr.length === prevAttr.length && !any(thisAttr, function (v) {
+            return !prevAttr[v.nodeName] || v.value !== prevAttr[v.nodeName].value;
         });
-        return !Object.keys(thisAttr)[0] && !Object.keys(prevAttr)[0];
+    }
+
+    function sameElementSpec(a, b) {
+        return tagName(a) === tagName(b) && compareAttrs(a, b);
     }
 
     function comparePosition(a, b, strict) {
@@ -341,7 +328,7 @@
     }
 
     function getWholeTextOffset(node, textNode) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 5);
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT), 5);
         for (var offset = 0, cur; (cur = iterator.nextNode()) && cur !== textNode; offset += cur.length || 0);
         return offset;
     }
@@ -407,6 +394,29 @@
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
+    function getRect(elm) {
+        elm = elm || root;
+        if (!containsOrEquals(root, elm)) {
+            // IE10 throws Unspecified Error for detached elements
+            return toPlainRect(0, 0, 0, 0);
+        }
+        return elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
+    }
+
+    function toPlainRect(l, t, r, b) {
+        if (l.top !== undefined) {
+            return toPlainRect(l.left, l.top, l.right, l.bottom);
+        }
+        return {
+            top: t,
+            left: l,
+            right: r,
+            bottom: b,
+            width: r - l,
+            height: b - t
+        };
+    }
+
     function rectEquals(a, b) {
         function check(prop) {
             return Math.abs(a[prop] - b[prop]) < 1;
@@ -419,42 +429,19 @@
     }
 
     function pointInRect(x, y, rect) {
-        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        return rect.width && rect.height && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
     function computeTextRects(node) {
-        var target = is(node, Range) || createRange(node, 'contents');
-        var zeroLength = target.collapsed && isText(target.startContainer) && !target.startContainer.length;
-        if (zeroLength) {
-            // no rects are returned for zero-length text node
-            // return rects as if there was content
-            target.startContainer.data = ZWSP;
+        return $.map((is(node, Range) || createRange(node, 'contents')).getClientRects(), toPlainRect);
+    }
+
+    function rectFromPosition(node, offset) {
+        if (offset && offset === node.length) {
+            var rect = computeTextRects(createRange(node, offset - 1, node, offset))[0];
+            return rect && toPlainRect(rect.right, rect.top, rect.right, rect.bottom);
         }
-        try {
-            if (target.collapsed) {
-                // no rects are returned for caret ranges anchored at the end of text node
-                // calculate rect from the last character
-                if (target.startOffset === target.startContainer.length) {
-                    target.setStart(target.startContainer, target.startOffset - 1);
-                    var rect = target.getClientRects()[0];
-                    if (rect) {
-                        return [{
-                            top: rect.top,
-                            left: rect.right,
-                            right: rect.right,
-                            bottom: rect.bottom,
-                            width: 0,
-                            height: rect.height
-                        }];
-                    }
-                }
-            }
-            return target.getClientRects();
-        } finally {
-            if (zeroLength) {
-                target.startContainer.data = '';
-            }
-        }
+        return computeTextRects(createRange(node, offset))[0];
     }
 
     function getActiveRange(container) {
@@ -466,11 +453,11 @@
 
     function caretRangeFromPoint(x, y, element) {
         var range = caretRangeFromPoint_.call(document, x, y);
-        if (range && element && element !== document.body && pointInRect(x, y, element.getBoundingClientRect())) {
+        if (range && element && element !== document.body && pointInRect(x, y, getRect(element))) {
             var elm = [];
             try {
                 var container;
-                while (comparePosition(element, (container = range.commonAncestorContainer), true)) {
+                while (comparePosition(element, (container = range.startContainer), true)) {
                     var target = $(container).parentsUntil(getCommonAncestor(element, container)).slice(-1)[0] || container;
                     if (target === elm[elm.length - 1]) {
                         return null;
@@ -483,7 +470,7 @@
                 $(elm).css('pointer-events', '');
             }
         }
-        return range;
+        return range && containsOrEquals(element, range.startContainer) ? range : null;
     }
 
     function createDocumentFragment(node) {
@@ -502,12 +489,7 @@
         return document.createNodeIterator(root, whatToShow, null, false);
     }
 
-    function removeNode(node, silent) {
-        if (silent !== false) {
-            iterate(createNodeIterator(node, 1), function (v) {
-                caretNotification.update(v, node.parentNode);
-            });
-        }
+    function removeNode(node) {
         $(node).remove();
     }
 
@@ -542,11 +524,22 @@
         }
     }
 
+    function scrollByAmount(element, scrollAmount) {
+        for (var cur = element.offsetParent; cur !== root; cur = cur.parentNode) {
+            var style = window.getComputedStyle(cur);
+            if (style.overflow === 'scroll' || style.overflowY === 'scroll') {
+                cur.scrollTop += scrollAmount;
+                return;
+            }
+        }
+        window.scrollTo(root.scrollLeft, root.scrollTop + scrollAmount);
+    }
+
     function fixIEInputEvent(element, topElement) {
         // IE fires input and text-input event on the innermost element where the caret positions at
         // the event does not bubble up so need to trigger manually on the top element
         // also IE use all lowercase letter in the event name
-        $(element).bind('input textinput', function (e) {
+        $(element).on('input textinput', function (e) {
             e.stopPropagation();
             if (e.type === 'textinput' || topElement) {
                 var event = document.createEvent('Event');
@@ -554,6 +547,35 @@
                 event.data = e.data;
                 (topElement || element).dispatchEvent(event);
             }
+        });
+    }
+
+    function setImmediateOnce(fn) {
+        clearImmediate(fn._timeout);
+        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
+    }
+
+    function setEventSource(source, typer) {
+        if (!currentSource[0]) {
+            setImmediate(function () {
+                // allow the event source to be accessible in immediate async event in the first round
+                setImmediate(function () {
+                    currentSource = [];
+                });
+            });
+        }
+        if ((currentSource[1] || typer) === typer && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource[0])) {
+            currentSource = [source, typer];
+        }
+    }
+
+    function trackEventSource(element, typer) {
+        $(element).on('mousedown mouseup mousewheel keydown keyup keypress touchstart touchend', function (e) {
+            var ch = e.type.charAt(0);
+            setEventSource(ch === 'k' ? 'keyboard' : ch === 't' ? 'touch' : 'mouse', typer);
+
+            // document.activeElement or FocusEvent.relatedTarget does not report non-focusable element
+            lastTouchedElement = e.target;
         });
     }
 
@@ -569,44 +591,59 @@
         var widgets = [];
         var widgetOptions = {};
         var relatedElements = new WeakMap();
-        var tracker = new TyperChangeTracker(typer);
+        var changedWidgets = new Set();
         var undoable = {};
         var currentSelection;
+        var executing;
+        var needSnapshot;
+        var suppressTextEvent;
         var typerFocused = false;
         var $self = $(topElement);
 
         var codeUpdate = (function () {
             var run = transaction(function () {
-                var source = currentSource[currentSource.length - 1][1];
-                codeUpdate.executing = false;
-                if (codeUpdate.needSnapshot || tracker.changes[0]) {
+                executing = false;
+                typer.getNode(topElement);
+                if (needSnapshot || changedWidgets.size) {
+                    normalize(topElement);
                     undoable.snapshot();
                 }
+                var lastChanges = consume(changedWidgets);
                 setImmediate(function () {
-                    codeUpdate.suppressTextEvent = false;
-                    tracker.collect(function (changedWidgets) {
-                        codeUpdate(source, function () {
-                            $.each(changedWidgets, function (i, v) {
-                                normalize(v.element);
+                    suppressTextEvent = false;
+                    if (lastChanges[0]) {
+                        codeUpdate(function () {
+                            $.each(lastChanges, function (i, v) {
                                 if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(source, v, 'contentChange', source);
+                                    triggerEvent(v, 'contentChange');
                                 }
                             });
-                            triggerEvent(source, EVENT_STATIC, 'contentChange', source);
+                            triggerEvent(EVENT_STATIC, 'contentChange');
                         });
-                    });
+                    }
                 });
             });
-            return function (source, callback, args, thisArg) {
+            return function (callback, args, thisArg) {
                 // IE fires textinput event on the parent element when the text node's value is modified
                 // even if modification is done through JavaScript rather than user action
-                codeUpdate.suppressTextEvent = true;
-                codeUpdate.executing = true;
-                return eventSource(typer, source, run, [callback, args, thisArg]);
+                suppressTextEvent = true;
+                executing = true;
+                setEventSource('script', typer);
+                return run(callback, args, thisArg);
             };
         }());
 
         function TyperTransaction() { }
+
+        function matchWidgetList(id, prop, needle) {
+            var options = widgetOptions[id];
+            return !(prop in options) || options[prop] === '*' || (' ' + options[prop] + ' ').indexOf(' ' + needle + ' ') >= 0;
+        }
+
+        function widgetAllowed(id, node) {
+            node = closest(node, NODE_ANY_BLOCK_EDITABLE);
+            return (widgetOptions[id].inline || !is(node, NODE_EDITABLE_PARAGRAPH)) && matchWidgetList(node.widget.id, 'allowedWidgets', id);
+        }
 
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
@@ -628,104 +665,114 @@
             });
         }
 
-        function eventListened(widgets, name) {
-            if (!Array.isArray(widgets)) {
-                widgets = $.makeArray(is(widgets, TyperWidget) || getTargetedWidgets(widgets));
-            }
-            return !!any(widgets, function (v) {
-                return !v.destroyed && isFunction(widgetOptions[v.id][name]);
+        function triggerEvent(eventMode, eventName, data, props) {
+            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode)).filter(function (v) {
+                return !v.destroyed && isFunction(widgetOptions[v.id][eventName]);
             });
-        }
-
-        function triggerEvent(eventSource, eventMode, eventName, data, props) {
-            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode));
-            var handlerCalled;
-            if (eventListened(widgets, eventName)) {
-                codeUpdate(eventSource, function () {
+            if (widgets[0]) {
+                codeUpdate(function () {
                     $.each(widgets, function (i, v) {
-                        var options = widgetOptions[v.id];
-                        if (!v.destroyed && isFunction(options[eventName])) {
-                            handlerCalled = true;
-                            options[eventName].call(options, new TyperEvent(eventName, typer, v, data, props));
-                            return eventMode !== EVENT_HANDLER;
-                        }
+                        widgetOptions[v.id][eventName](new TyperEvent(eventName, typer, v, data, props));
+                        return eventMode !== EVENT_HANDLER;
                     });
                 });
             }
-            if (is(eventMode, TyperWidget) && eventListened(EVENT_STATIC, 'widget' + capfirst(eventName))) {
-                setImmediate(function () {
-                    triggerEvent(eventSource, EVENT_STATIC, 'widget' + capfirst(eventName), null, {
-                        targetWidget: eventMode
-                    });
-                });
-            }
-            return handlerCalled;
+            return !!widgets[0];
         }
 
-        function triggerDefaultPreventableEvent(eventSource, eventMode, eventName, data, eventObj) {
-            eventObj = eventObj || $.Event(eventName);
-            triggerEvent(eventSource, eventMode, eventName, data, {
+        function triggerDefaultPreventableEvent(eventMode, eventName, data, props) {
+            var eventObj = is(props, $.Event) || $.Event(eventName);
+            triggerEvent(eventMode, eventName, data, extend({
                 preventDefault: eventObj.preventDefault.bind(eventObj),
                 isDefaultPrevented: function () {
                     return eventObj.isDefaultPrevented();
                 }
-            });
+            }, props !== eventObj ? props : null));
             return eventObj.isDefaultPrevented();
         }
 
+        function trackChange(node) {
+            changedWidgets.add(node.widget);
+        }
+
         function createTyperDocument(rootElement, fireEvent) {
-            var nodeMap = new WeakMap();
-            var dirtyElements = [];
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
-            var observer;
+            var nodeMap = new WeakMap();
+            var dirtyElements = new Set();
+            var observer = new MutationObserver(handleMutations);
 
-            function addChild(parent, node) {
-                if (node.parentNode !== parent && node !== parent) {
-                    if (node.parentNode) {
-                        removeFromParent(node, true);
+            function triggerWidgetEvent(widget, event) {
+                if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
+                    if (widget.timeout) {
+                        clearImmediate(widget.timeout);
+                        delete widget.timeout;
+                    } else {
+                        widget.timeout = setImmediate(function () {
+                            triggerEvent(widget, event);
+                            triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
+                                targetWidget: widget
+                            });
+                            widget.destroyed = event === 'destroy';
+                            delete widget.timeout;
+                        });
                     }
-                    for (var index = parent.childNodes.length; index && compareRangePosition(node.element, parent.childNodes[index - 1].element) < 0; index--);
-                    node.parentNode = parent;
-                    node.previousSibling = parent.childNodes[index - 1];
-                    node.nextSibling = parent.childNodes[index];
-                    (node.previousSibling || {}).nextSibling = node;
-                    (node.nextSibling || {}).previousSibling = node;
-                    parent.childNodes.splice(index, 0, node);
                 }
             }
 
-            function removeFromParent(node, suppressEvent) {
-                if (node.parentNode) {
-                    var index = node.parentNode.childNodes.indexOf(node);
-                    if (index >= 0) {
-                        if (fireEvent && !suppressEvent && node.widget.element === node.element) {
-                            node.widget.destroyed = true;
-                            triggerEvent(null, node.widget, 'destroy');
-                        }
-                        node.parentNode.childNodes.splice(index, 1);
-                        node.parentNode = null;
-                        (node.previousSibling || {}).nextSibling = node.nextSibling;
-                        (node.nextSibling || {}).previousSibling = node.previousSibling;
+            function triggerWidgetEventRecursive(node, event) {
+                iterate(new TyperTreeWalker(node, -1), function (v) {
+                    if (v.widget.element === v.element) {
+                        triggerWidgetEvent(v.widget, event);
                     }
+                });
+            }
+
+            function addChild(parent, node) {
+                var arr = parent.childNodes;
+                for (var index = arr.length; index && comparePosition(node.element, arr[index - 1].element) <= 0; index--);
+                if (arr[index] !== node) {
+                    if (node.parentNode) {
+                        removeFromParent(node);
+                    } else {
+                        triggerWidgetEventRecursive(node, 'init');
+                    }
+                    arr.splice(index, 0, node);
+                    node.parentNode = parent;
+                    node.previousSibling = arr[index - 1] || null;
+                    node.nextSibling = arr[index + 1] || null;
+                    (node.previousSibling || {}).nextSibling = node;
+                    (node.nextSibling || {}).previousSibling = node;
+                }
+            }
+
+            function removeFromParent(node, destroyWidget) {
+                var parentNode = node.parentNode;
+                var arr = parentNode.childNodes;
+                arr.splice(arr.indexOf(node), 1);
+                (node.previousSibling || {}).nextSibling = node.nextSibling;
+                (node.nextSibling || {}).previousSibling = node.previousSibling;
+                node.parentNode = null;
+                node.nextSibling = null;
+                node.previousSibling = null;
+                if (destroyWidget) {
+                    triggerWidgetEventRecursive(node, 'destroy');
+                    iterate(new TyperTreeWalker(node, -1), function (v) {
+                        detachedElements.set(v.element, parentNode.element);
+                    });
                 }
             }
 
             function updateNode(node) {
                 var context = node.parentNode || nodeMap.get(rootElement);
                 if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
-                    if (fireEvent && node.widget && node.widget.element === node.element) {
-                        node.widget.destroyed = true;
-                        if (node.widget.id !== WIDGET_UNKNOWN) {
-                            triggerEvent(null, node.widget, 'destroy');
-                        }
+                    if (node.widget && node.widget.element === node.element) {
+                        triggerWidgetEvent(node.widget, 'destroy');
                     }
                     $.each(widgetOptions, function (i, v) {
                         if (is(node.element, v.element)) {
                             node.widget = new TyperWidget(nodeSource, i, node.element, v.options);
-                            if (fireEvent && node.widget.id !== WIDGET_UNKNOWN) {
-                                triggerEvent(null, node.widget, 'init');
-                            }
+                            triggerWidgetEvent(node.widget, 'init');
                             return false;
                         }
                     });
@@ -733,256 +780,237 @@
                 if (node.widget && node.widget.destroyed) {
                     delete node.widget;
                 }
-                if (node.widget && node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT)) {
+                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT))) {
                     node.widget = context.widget;
-                    node.nodeType = NODE_WIDGET;
+                }
+                var widgetOption = widgetOptions[node.widget.id];
+                if (node.widget === context.widget && !is(context, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                    node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
+                } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
+                    node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
                 } else {
-                    node.widget = node.widget || context.widget;
-                    var widgetOption = widgetOptions[node.widget.id];
-                    if (node.widget === context.widget && !is(context, NODE_WIDGET)) {
-                        node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
-                    } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
-                        node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
-                    } else {
-                        node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
-                    }
+                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
                 }
             }
 
-            function updateNodeFromElement(node) {
-                $.each(node.childNodes.slice(0), function (i, v) {
-                    if (!containsOrEquals(rootElement, v.element)) {
-                        removeFromParent(v);
-                        nodeMap.delete(v.element);
+            function visitElement(element) {
+                var thisNode = nodeMap.get(element);
+                $.each(thisNode.childNodes.slice(0), function (i, v) {
+                    if (!containsOrEquals(element, v.element)) {
+                        removeFromParent(v, true);
                     }
                 });
-            }
-
-            function visitElement(element, childOnly) {
-                var stack = [nodeMap.get(element)];
-                updateNodeFromElement(stack[0]);
-
-                // jQuery prior to 1.12.0 cannot directly apply selector to DocumentFragment
-                var $children = (childOnly ? $(element).children() : $(element).children().find('*').andSelf()).not('br');
-                $children.each(function (i, v) {
-                    while (!containsOrEquals(stack[0].element, v)) {
-                        stack.shift();
-                    }
-                    var unvisited = !nodeMap.has(v);
-                    var node = nodeMap.get(v) || new TyperNode(0, v);
-                    addChild(stack[0], node);
-                    updateNodeFromElement(node);
+                $(element.children).not('br').each(function (i, v) {
+                    var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
+                    var parentNode = node.parentNode;
+                    addChild(thisNode, node);
                     updateNode(node);
                     nodeMap.set(v, node);
-                    if (childOnly && unvisited) {
+                    if (!parentNode || v.parentNode !== parentNode.element) {
                         visitElement(v);
                         if (IS_IE) {
                             fixIEInputEvent(v, topElement);
                         }
                     }
-                    stack.unshift(node);
                 });
             }
 
             function handleMutations(mutations) {
-                var changedElements = $.map(mutations, function (v) {
-                    return (v.addedNodes[0] || v.removedNodes[0]) && tagName(v.target) !== 'br' ? v.target : null;
+                $.each(mutations, function (i, v) {
+                    if (!isBR(v.target)) {
+                        if (v.addedNodes[0] || v.removedNodes[0]) {
+                            dirtyElements.add(v.target);
+                        } else if (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style' && nodeMap.has(v.target)) {
+                            trackChange(nodeMap.get(v.target));
+                        }
+                    }
                 });
-                array.push.apply(dirtyElements, changedElements);
             }
 
             function ensureState() {
-                if (observer) {
-                    handleMutations(observer.takeRecords());
-                } else {
-                    clearImmediate(ensureState.handle);
-                    ensureState.handle = setImmediate(function () {
-                        dirtyElements.push(null);
+                handleMutations(observer.takeRecords());
+                if (dirtyElements.size) {
+                    var arr = consume(dirtyElements);
+                    arr.sort(function (a, b) {
+                        return !connected(root, a) ? -1 : comparePosition(a, b);
                     });
-                }
-                if (dirtyElements[0] === null) {
-                    visitElement(dirtyElements.splice(0) && rootElement);
-                } else if (dirtyElements[0]) {
-                    $(rootElement.parentNode || rootElement).find($.unique(dirtyElements.splice(0))).each(function (i, v) {
-                        visitElement(v, !!observer);
+                    $(rootElement.parentNode || rootElement).find(arr).each(function (i, v) {
+                        visitElement(v);
+                        trackChange(nodeMap.get(v));
                     });
+                    if (currentSelection) {
+                        selectionAtomic(function () {
+                            caretEnsureState(currentSelection.baseCaret);
+                            caretEnsureState(currentSelection.extendCaret);
+                        });
+                    }
                 }
             }
 
             function getNode(element) {
                 ensureState();
-                if (isText(element) || tagName(element) === 'br') {
+                if (isText(element) || isBR(element)) {
                     element = element.parentNode || element;
                 }
                 if (containsOrEquals(rootElement, element)) {
-                    for (var root = element; !nodeMap.has(root); root = root.parentNode);
-                    if (root !== element) {
-                        visitElement(root);
-                    }
-                    return nodeMap.get(element);
+                    var node = nodeMap.get(element);
+                    return is(node, NODE_WIDGET) ? nodeMap.get(node.widget.element) : node;
                 }
             }
 
             if (!rootElement.parentNode) {
                 rootElement = is(rootElement, DocumentFragment) || createDocumentFragment(rootElement);
             }
-            if (window.MutationObserver && fireEvent) {
-                observer = new MutationObserver(handleMutations);
+            if (fireEvent) {
                 observer.observe(rootElement, {
                     subtree: true,
-                    childList: true
+                    childList: true,
+                    attributes: true
                 });
             }
-            nodeMap.set(rootElement, new TyperNode(topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options)));
-            dirtyElements.push(null);
+            var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
+            nodeMap.set(rootElement, rootNode);
+            visitElement(rootElement);
 
             return extend(self, {
-                getNode: getNode,
-                getEditableNode: function (element) {
-                    var focusNode = getNode(element) || nodeMap.get(rootElement);
-                    return is(focusNode, NODE_WIDGET) ? getNode(focusNode.widget.element) : focusNode;
+                rootNode: rootNode,
+                getNode: getNode
+            });
+        }
+
+        function normalizeWhitespace(node) {
+            var textNodes = iterateToArray(createNodeIterator(node, 4));
+            var wholeText = '';
+            var index = [];
+            $.each(textNodes, function (i, v) {
+                wholeText = (wholeText + v.data).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+                index[i] = wholeText.length;
+            });
+            wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
+            $.each(textNodes, function (i, v) {
+                var text = wholeText.slice(index[i - 1] || 0, index[i]);
+                if (v.data !== text) {
+                    v.data = text;
                 }
             });
         }
 
-        function getRangeFromTextOffset(node, offset) {
-            var caret = new TyperCaret(typer);
-            caret.moveToText(node, offset);
-            return caret.getRange();
-        }
-
-        function checkEditable(node) {
-            if (is(node, NODE_EDITABLE) && !node.firstChild) {
-                $(node.element).html('<p>' + (trim(node.element.textContent) || ZWSP_ENTITIY) + '</p>');
-                return true;
-            }
-            if (is(node, NODE_EDITABLE_PARAGRAPH) && !node.element.firstChild) {
-                $(createTextNode()).appendTo(node.element);
-                return true;
-            }
-        }
-
-        function textNodeFreezed(textNode) {
-            var t1 = currentSelection.baseCaret;
-            var t2 = currentSelection.extendCaret;
-            if (textNode === t1.textNode || textNode === t2.textNode) {
-                return true;
-            }
-            if (IS_IE) {
-                // setting node value if text node that has selection anchored at position just between neighboring text node
-                // will also trigger selection change in IE
-                var v1 = t1.textNode && ((textNode === t1.textNode.previousSibling && t1.offset === 0) || (textNode === t1.textNode.nextSibling && t1.offset === t1.textNode.length));
-                var v2 = t2.textNode && ((textNode === t2.textNode.previousSibling && t2.offset === 0) || (textNode === t2.textNode.nextSibling && t2.offset === t2.textNode.length));
-                return v1 || v2;
-            }
-        }
-
-        function normalize(range) {
-            range = is(range, Range) || createRange(topElement, 'contents');
-            codeUpdate('script', function () {
-                iterate(new TyperSelection(typer, range).createTreeWalker(NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_EDITABLE), function (node) {
-                    if (checkEditable(node)) {
+        function normalize(element) {
+            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
+                var element = node.element;
+                if (is(node, NODE_EDITABLE)) {
+                    if (!node.firstChild) {
+                        $(element).html('<p>' + (trim(element.textContent) || ZWSP_ENTITIY) + '</p>');
                         return;
                     }
-                    var element = node.element;
-                    if (is(node, NODE_EDITABLE)) {
-                        $(element).contents().each(function (i, v) {
-                            if (v.parentNode === element) {
-                                var contents = [];
-                                for (; v && (isText(v) || tagName(v) === 'br' || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
-                                    if (contents.length || isElm(v) || trim(v.data)) {
-                                        contents.push(v);
-                                    }
-                                }
-                                if (contents.length) {
-                                    $(contents).wrap('<p>');
+                    $(element).contents().each(function (i, v) {
+                        if (v.parentNode === element) {
+                            var contents = [];
+                            for (; v && (isText(v) || isBR(v) || is(typer.getNode(v), NODE_ANY_INLINE)); v = v.nextSibling) {
+                                if (contents.length || isElm(v) || trim(v.data)) {
+                                    contents.push(v);
                                 }
                             }
-                        });
+                            if (contents.length) {
+                                $(contents).wrap('<p>');
+                            }
+                        }
+                    });
+                    return;
+                }
+                if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
+                    if (!element.firstChild) {
+                        $(createTextNode()).appendTo(element);
                         return;
                     }
-                    if (is(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) {
-                        // WebKit adds dangling <BR> element when a line is empty
-                        // normalize it into a ZWSP and continue process
-                        var lastBr = $('>br:last-child', element)[0];
-                        if (lastBr && !lastBr.nextSibling) {
-                            $(createTextNode()).insertBefore(lastBr);
-                            removeNode(lastBr);
-                        }
-                        var firstBr = $('>br:first-child', element)[0];
-                        if (firstBr && !firstBr.previousSibling) {
-                            removeNode(firstBr);
-                        }
+                    // WebKit adds dangling <BR> element when a line is empty
+                    // normalize it into a ZWSP and continue process
+                    var lastBr = $('>br:last-child', element)[0];
+                    if (lastBr && !lastBr.nextSibling) {
+                        $(createTextNode()).insertBefore(lastBr);
+                        removeNode(lastBr);
                     }
-                    if (is(node, NODE_ANY_ALLOWTEXT)) {
-                        $('>br', element).each(function (i, v) {
-                            if (!isText(v.nextSibling)) {
-                                $(createTextNode()).insertAfter(v);
+                    var firstBr = $('>br:first-child', element)[0];
+                    if (firstBr && !firstBr.previousSibling) {
+                        removeNode(firstBr);
+                    }
+                    if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
+                        $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
+                            v.data = collapseWS(v.data);
+                            if (isText(v.nextSibling)) {
+                                v.nextSibling.data = collapseWS(v.data + v.nextSibling.data);
+                                removeNode(v);
                             }
                         });
-                        $(element).contents().each(function (i, v) {
-                            if (isText(v) && !textNodeFreezed(v)) {
-                                var nextNode = v.nextSibling;
-                                if (/\b\u00a0$/.test(v.data) && isText(nextNode) && !/^[^\S\u00a0]/.test(nextNode.data)) {
-                                    // prevent unintended non-breaking space (&nbsp;) between word boundaries when inserting contents
-                                    v.data = v.data.slice(0, -1) + ' ';
-                                }
-                                v.data = v.data.replace(/(?=.)\u200b+(?=.)/g, '').replace(/\b\u00a0\b/g, ' ') || ZWSP;
-                                if (isText(nextNode) && !textNodeFreezed(nextNode)) {
-                                    nextNode.data = v.data + nextNode.data;
-                                    removeNode(v);
-                                }
-                            }
-                        });
-                        if (is(node, NODE_INLINE) && element !== currentSelection.startElement && element !== currentSelection.endElement) {
-                            if (tagName(element.previousSibling) === tagName(element) && compareAttrs(element, element.previousSibling)) {
-                                $(element).contents().appendTo(element.previousSibling);
-                                removeNode(element);
-                            }
-                        }
+                    }
+                }
+                if (is(node, NODE_INLINE) && currentSelection.startElement !== element && currentSelection.endElement !== element && !trim(element.textContent)) {
+                    removeNode(element);
+                }
+                $('>br', element).each(function (i, v) {
+                    if (!isText(v.nextSibling)) {
+                        $(createTextNode()).insertAfter(v);
                     }
                 });
-                // Mozilla adds <br type="_moz"> when a container is empty
-                $('br[type="_moz"]', topElement).remove();
             });
+            // Mozilla adds <br type="_moz"> when a container is empty
+            $('br[type="_moz"]', topElement).remove();
         }
 
         function extractContents(range, mode, callback) {
-            var dir = is(range, TyperSelection) ? range.direction : 1;
-            range = is(range, Range) || createRange(range);
-
             var method = mode === 'cut' ? 'extractContents' : mode === 'paste' ? 'deleteContents' : 'cloneContents';
             var cloneNode = mode !== 'paste';
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
-            var state = new TyperSelection(typer, range);
-            var allowTextFlow = state.isSingleEditable || ((state.startNode.widget.id === WIDGET_ROOT || widgetOptions[state.startNode.widget.id].textFlow) && (state.endNode.widget.id === WIDGET_ROOT || widgetOptions[state.endNode.widget.id].textFlow));
+            var state = is(range, TyperSelection) ? range.clone() : new TyperSelection(typer, range);
+            var isSingleEditable = state.isSingleEditable;
+            range = state.getRange();
 
-            codeUpdate(null, function () {
-                if (!range.collapsed) {
+            codeUpdate(function () {
+                if (!state.isCaret) {
                     var stack = [[topElement, fragment]];
-                    iterate(state.createTreeWalker(NODE_ALL_VISIBLE, function (node) {
+                    var shift = function () {
+                        var item = stack.shift();
+                        if (item[2] && item[2].element === item[0]) {
+                            triggerEvent(item[2], 'extract', null, {
+                                extractedNode: item[1]
+                            });
+                        }
+                    };
+                    iterate(state.createTreeWalker(-1, function (node) {
                         var element = node.element;
-                        var content;
-                        // skip focused editable element because all selected content is within the editable element
+                        var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
+                        var isWidgetHead = node.widget.element === element;
+
                         if (node === state.focusNode && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
-                        while (is(element, Node) && !containsOrEquals(stack[0][0], element)) {
-                            stack.shift();
+                        if (!handler && !isWidgetHead && is(node, NODE_WIDGET | NODE_EDITABLE)) {
+                            // ignore widget structure if the widget is partially selected
+                            // and there is no extract event handler defined
+                            return 3;
+                        }
+                        if (cloneNode) {
+                            while (!containsOrEquals(stack[0][0], element)) {
+                                shift();
+                            }
+                            if (handler && (!isWidgetHead || !rangeCovers(range, element))) {
+                                (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).addBack()).each(function (i, v) {
+                                    stack.unshift([v, v.cloneNode(false), node.widget]);
+                                    stack[1][1].appendChild(stack[0][1]);
+                                });
+                            }
                         }
                         if (rangeCovers(range, element)) {
                             if (cloneNode) {
-                                content = element.cloneNode(true);
-                                $(stack[0][1]).append(element === topElement ? content.childNodes : content);
+                                var clone = element.cloneNode(true);
+                                $(stack[0][1]).append(element === stack[0][0] ? clone.childNodes : clone);
                             }
                             if (clearNode) {
                                 if (is(node, NODE_EDITABLE)) {
                                     $(element).html(EMPTY_LINE);
-                                    tracker.track(node);
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
                                     $(element).html(ZWSP_ENTITIY);
-                                    tracker.track(node);
                                 } else {
                                     removeNode(element);
                                 }
@@ -990,130 +1018,166 @@
                             return 2;
                         }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
-                            content = createRange(element, range)[method]();
-                        }
-                        if (cloneNode) {
-                            if (element !== topElement && (!is(node, NODE_PARAGRAPH | NODE_INLINE) || (content && tagName(content.firstChild) !== tagName(element)))) {
-                                var clonedNode = element.cloneNode(false);
-                                stack[0][1].appendChild(clonedNode);
-                                if (!is(clonedNode, DocumentFragment)) {
-                                    stack.unshift([element, clonedNode]);
+                            var content = createRange(element, range)[method]();
+                            if (cloneNode && content) {
+                                var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
+                                if (!hasThisElement) {
+                                    content = wrapNode(content, [is(node, NODE_EDITABLE_PARAGRAPH) ? createElement('p') : element]);
+                                } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
+                                    content = content.firstChild.childNodes;
                                 }
+                                $(stack[0][1]).append(content);
                             }
-                            if (content) {
-                                stack[0][1].appendChild(content);
-                            }
+                            return 2;
                         }
-                        if (clearNode) {
-                            tracker.track(node);
-                        }
-                        return is(node, NODE_ANY_ALLOWTEXT) ? 2 : 1;
+                        return 1;
                     }));
+                    for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
-                    var startPoint = createRange(range, allowTextFlow ? true : dir > 0);
-                    var endPoint = !allowTextFlow ? startPoint : createRange(range, false);
-                    var newState = new TyperSelection(typer, createRange(startPoint, endPoint));
-
-                    // check if current insertion point is an empty editable element
-                    // normalize before inserting content
-                    if (is(newState.startNode, NODE_ANY_BLOCK_EDITABLE) && newState.startNode === newState.endNode && checkEditable(newState.startNode)) {
-                        newState = new TyperSelection(typer, createRange(newState.startNode.element, 'contents'));
+                    if (!isSingleEditable) {
+                        var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE, function (v) {
+                            return widgetOptions[v.widget.id].textFlow ? 1 : 3;
+                        });
+                        var start = closest(state.baseCaret.node, NODE_ANY_BLOCK_EDITABLE);
+                        var until = closest(state.extendCaret.node, NODE_ANY_BLOCK_EDITABLE);
+                        iterator.currentNode = start;
+                        while (iterator[state.direction > 0 ? 'nextNode' : 'previousNode']());
+                        if (iterator.currentNode !== until) {
+                            if (iterator.currentNode !== start) {
+                                state.extendCaret.moveTo(iterator.currentNode.element, 0 * -state.direction);
+                            } else {
+                                state.collapse();
+                            }
+                        }
                     }
-                    // ensure start point lies within valid selection
-                    if (compareRangePosition(startPoint, newState.startNode.element) < 0) {
-                        startPoint = createRange(newState.startNode.element, 0);
-                    }
-                    callback(newState, startPoint, endPoint);
+                    callback(state);
                 }
             });
+            $(fragment).find('[style]').removeAttr('style');
             return fragment;
         }
 
         function insertContents(range, content) {
-            content = is(content, Node) || $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>'));
-            content = slice(createDocumentFragment(content).childNodes);
-
-            extractContents(range, 'paste', function (state, startPoint) {
+            var textOnly;
+            if (is(content, Node)) {
+                if (containsOrEquals(topElement, content)) {
+                    removeNode(content);
+                }
+                content = slice(createDocumentFragment(content).childNodes);
+                textOnly = content.length === 1 && is(content[0], 'p:not([class])');
+            } else {
+                content = $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>').replace(/\s/g, '\u00a0'));
+                textOnly = true;
+            }
+            extractContents(range, 'paste', function (state) {
+                var startNode = state.startNode;
+                var endNode = state.endNode;
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
-                var caretPoint = startPoint.cloneRange();
-                var forcedInline = is(state.startNode, NODE_EDITABLE_PARAGRAPH);
-                var insertAsInline = is(state.startNode, NODE_ANY_ALLOWTEXT);
+                var caretPoint = state.getCaret('start').clone();
+                var startPoint = createRange(closest(startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
+                var forcedInline = is(startNode, NODE_EDITABLE_PARAGRAPH);
+                var insertAsInline = is(startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
                 var formattingNodes = [];
 
                 var cur = typer.getNode(state.startElement);
                 if (is(cur, NODE_ANY_INLINE)) {
-                    for (; cur !== state.startNode; cur = cur.parentNode) {
+                    for (; cur !== startNode; cur = cur.parentNode) {
                         if (is(cur, NODE_INLINE)) {
                             formattingNodes.push(cur.element);
                         }
                     }
-                    formattingNodes.push(state.startNode.element);
+                    formattingNodes.push(startNode.element);
                 } else if (is(cur, NODE_PARAGRAPH)) {
-                    formattingNodes[0] = state.startNode.element;
+                    formattingNodes[0] = startNode.element;
                 } else if (!is(cur, NODE_EDITABLE_PARAGRAPH)) {
                     formattingNodes[0] = createElement('p');
                 }
 
                 content.forEach(function (nodeToInsert) {
-                    var cur = typer.getEditableNode(caretPoint.startContainer);
-                    var node = new TyperNode(NODE_INLINE, nodeToInsert);
-                    var isLineBreak = tagName(nodeToInsert) === 'br';
+                    var caretNode = typer.getNode(caretPoint.element);
+                    var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
+                    var isLineBreak = isBR(nodeToInsert);
+                    var needSplit = false;
+                    var incompatParagraph = false;
+                    var splitEnd;
 
-                    if (isElm(nodeToInsert) && !isLineBreak) {
+                    if (!textOnly && !isLineBreak && isElm(nodeToInsert)) {
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (node.widget.id === WIDGET_UNKNOWN || (is(cur, NODE_EDITABLE_PARAGRAPH) && !widgetOptions[node.widget.id].inline) || (allowedWidgets[1] !== '*' && allowedWidgets.indexOf(node.widget.id) < 0)) {
-                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? nodeToInsert.textContent : extractText(nodeToInsert));
-                            node = new TyperNode(NODE_INLINE, nodeToInsert);
+                        if (!widgetAllowed(node.widget.id, caretNode)) {
+                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
+                            node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
-                    }
-                    if ((isLineBreak && !is(cur, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH)) || !is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE) || (!is(node, NODE_ANY_INLINE) && !paragraphAsInline)) {
-                        var splitLastNode = cur;
-                        while (!is(splitLastNode.parentNode, isLineBreak ? NODE_PARAGRAPH : NODE_ANY_BLOCK_EDITABLE)) {
-                            splitLastNode = splitLastNode.parentNode;
-                        }
-                        var splitEnd = createRange(splitLastNode.element, false);
-                        var splitContent = createRange(caretPoint, splitEnd).extractContents();
-                        if (!splitContent.firstChild) {
-                            // avoid unindented empty elements when splitting at end of line
-                            splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
-                        }
-                        var splitFirstNode = splitContent.firstChild;
-                        splitEnd.insertNode(splitContent);
-                        tracker.track(splitEnd.startContainer);
-
-                        for (var cur1 = typer.getNode(splitFirstNode); cur1 && !/\S/.test(cur1.element.textContent); cur1 = cur1.firstChild) {
-                            if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
-                                // avoid empty inline widget at the start of inserted line
-                                if (cur1.element.firstChild) {
-                                    $(cur1.element).contents().unwrap();
-                                } else {
-                                    $(cur1.element).remove();
-                                }
-                                break;
+                        if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
+                            if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
+                                receivedNode: nodeToInsert,
+                                caret: caretPoint.clone()
+                            })) {
+                                return;
                             }
                         }
-                        if (is(splitLastNode, NODE_ANY_ALLOWTEXT) && !splitLastNode.element.firstChild) {
-                            $(createTextNode()).appendTo(splitLastNode.element);
-                        }
-                        if (splitLastNode.element.textContent.slice(-1) === ' ') {
-                            var n1 = iterateToArray(createNodeIterator(splitLastNode.element, 4)).filter(mapFn('data')).slice(-1)[0];
-                            n1.data = n1.data.slice(0, -1) + '\u00a0';
-                        }
-                        if (splitFirstNode.textContent.charAt(0) === ' ') {
-                            var n2 = iterateToArray(createNodeIterator(splitFirstNode, 4)).filter(mapFn('data'))[0];
-                            n2.data = n2.data.slice(1);
-                        }
+                    }
+                    if (!is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
                         if (isLineBreak) {
-                            caretPoint = createRange(splitEnd, true);
-                        } else {
-                            for (var w = new TyperTreeWalker(typer.getNode(splitFirstNode), NODE_ANY_ALLOWTEXT); w.firstChild(););
-                            caretPoint = createRange(w.currentNode.element, 0);
-                            paragraphAsInline = true;
+                            needSplit = !is(caretNode, NODE_PARAGRAPH);
+                            for (; is(caretNode.parentNode, NODE_ANY_INLINE); caretNode = caretNode.parentNode);
+                            splitEnd = createRange(caretNode.element, false);
+                        } else if (!is(node, NODE_ANY_INLINE)) {
+                            caretNode = closest(caretNode, NODE_PARAGRAPH) || caretNode;
+                            splitEnd = createRange(caretNode.element, false);
+                            if (is(node, NODE_PARAGRAPH)) {
+                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
+                                needSplit = incompatParagraph || !paragraphAsInline;
+                            } else if (trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)))) {
+                                needSplit = trim(createRange(splitEnd, createRange(caretPoint)));
+                                if (!needSplit) {
+                                    caretNode = caretNode.nextSibling || caretNode.parentNode;
+                                    caretPoint.moveTo(splitEnd);
+                                }
+                            }
+                        }
+                        if (needSplit) {
+                            var splitContent = createRange(createRange(caretPoint), splitEnd).extractContents();
+                            if (!trim(splitContent.textContent)) {
+                                // avoid unindented empty elements when splitting at end of line
+                                splitContent = createDocumentFragment(wrapNode(createTextNode(), formattingNodes));
+                            }
+                            var splitFirstNode = splitContent.firstChild;
+                            splitEnd.insertNode(splitContent);
+
+                            for (var cur1 = typer.getNode(splitFirstNode); cur1 && !trim(cur1.element.textContent); cur1 = cur1.firstChild) {
+                                if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
+                                    // avoid empty inline widget at the start of inserted line
+                                    if (cur1.element.firstChild) {
+                                        $(cur1.element).contents().unwrap();
+                                    } else {
+                                        $(cur1.element).remove();
+                                    }
+                                    break;
+                                }
+                            }
+                            if (is(caretNode, NODE_ANY_ALLOWTEXT) && !(caretNode.element.firstChild || '').length) {
+                                $(createTextNode()).appendTo(caretNode.element);
+                            }
+                            if (trim(caretNode.element.textContent) && caretNode.element.textContent.slice(-1) === ' ') {
+                                normalizeWhitespace(caretNode.element);
+                            }
+                            if (trim(splitFirstNode.textContent) && splitFirstNode.textContent.charAt(0) === ' ') {
+                                normalizeWhitespace(splitFirstNode);
+                            }
+                            if (isLineBreak) {
+                                createRange(splitFirstNode, true).insertNode(nodeToInsert);
+                                caretPoint.moveTo(splitFirstNode, 0);
+                                return;
+                            }
+                            caretNode = typer.getNode(splitFirstNode);
+                            caretPoint.moveTo(splitFirstNode, 0);
+                            paragraphAsInline = !incompatParagraph;
+                            insertAsInline = insertAsInline && paragraphAsInline;
                             hasInsertedBlock = true;
                         }
                     }
@@ -1128,57 +1192,71 @@
                     var lastNode = createDocumentFragment(nodeToInsert).lastChild;
                     if (insertAsInline) {
                         if (lastNode) {
-                            caretPoint.insertNode(nodeToInsert);
+                            caretPoint.getRange().insertNode(nodeToInsert);
+                            normalizeWhitespace(caretNode.element);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
-                                caretPoint = createRange(lastNode, false);
-                                caretPoint.insertNode(createTextNode());
-                                caretPoint.collapse(false);
+                                var textNode = createTextNode();
+                                createRange(lastNode, false).insertNode(textNode);
+                                caretPoint.moveTo(textNode, -0);
                             } else {
-                                caretPoint = createRange(lastNode, -0);
+                                caretPoint.moveTo(lastNode, -0);
                             }
                         }
                         paragraphAsInline = forcedInline;
                     } else {
-                        var caretNode = typer.getEditableNode(caretPoint.startContainer);
-                        if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
-                            caretPoint.insertNode(nodeToInsert);
-                        } else {
-                            createRange(caretNode.element, true).insertNode(nodeToInsert);
+                        // check for the first block either if there is content or the insert point is a paragraph
+                        // to avoid two empty lines inserted before block widget
+                        if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
+                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                                createRange(caretNode.element, -0).insertNode(nodeToInsert);
+                            } else {
+                                createRange(caretNode.element, true).insertNode(nodeToInsert);
+                            }
+                            insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
+                            caretPoint.moveTo(lastNode, insertAsInline ? -0 : false);
+                            paragraphAsInline = forcedInline || !insertAsInline;
                         }
-                        insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
-                        caretPoint = insertAsInline ? createRange(lastNode, -0) : createRange(lastNode, false);
-                        paragraphAsInline = forcedInline || !insertAsInline;
                         hasInsertedBlock = true;
                     }
-                    tracker.track(caretPoint.startContainer);
                 });
-                if (!hasInsertedBlock && state.startNode !== state.endNode && is(state.startNode, NODE_PARAGRAPH) && is(state.endNode, NODE_PARAGRAPH)) {
-                    if (caretPoint) {
-                        var caretNode = closest(typer.getNode(caretPoint.startContainer), -1 & ~NODE_ANY_INLINE);
-                        caretPoint = createRange(caretNode.element, -0);
-                    } else {
-                        caretPoint = createRange(state.startNode.element, -0);
+                if (!hasInsertedBlock && startNode !== endNode) {
+                    if (!extractText(startNode.element)) {
+                        caretPoint.moveTo(endNode.element, is(endNode, NODE_ANY_ALLOWTEXT) ? 0 : true);
+                        removeNode(startNode.element);
+                    } else if (is(startNode, NODE_PARAGRAPH) && is(endNode, NODE_PARAGRAPH)) {
+                        var glueContent = createDocumentFragment(createRange(endNode.element, 'contents').extractContents());
+                        var glueFirstNode = glueContent.firstChild;
+                        caretPoint.moveTo(startNode.element, -0);
+                        createRange(startNode.element, -0).insertNode(glueContent);
+                        removeNode(endNode.element);
+                        while (isElm(glueFirstNode) && sameElementSpec(glueFirstNode, glueFirstNode.previousSibling)) {
+                            var nodeToRemove = glueFirstNode;
+                            glueFirstNode = $(glueFirstNode.childNodes).appendTo(glueFirstNode.previousSibling)[0];
+                            removeNode(nodeToRemove);
+                        }
+                        normalizeWhitespace(startNode.element);
                     }
-                    caretPoint.insertNode(createRange(state.endNode.element, 'contents').extractContents());
-                    caretPoint.collapse(true);
-                    removeNode(state.endNode.element);
-                    tracker.track(state.endNode);
-                    tracker.track(state.startNode);
                 }
                 currentSelection.select(caretPoint);
             });
         }
 
         function extractText(content) {
-            var range = createRange(content || topElement);
-            var lastNode, lastWidget;
-            var text = '';
-            var iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(NODE_ALL_VISIBLE), 5, function (v) {
-                return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
-            });
+            var range = createRange(content || topElement, 'contents');
+            var iterator, doc;
+            if (is(content, Node) && !connected(topElement, content)) {
+                doc = createTyperDocument(content);
+                iterator = new TyperDOMNodeIterator(new TyperTreeWalker(doc.rootNode, -1), 5);
+            } else {
+                iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(-1), 5, function (v) {
+                    return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
+                });
+            }
+
+            var lastNode, lastWidget, text = '';
             iterate(iterator, function (v) {
-                var node = typer.getNode(v);
+                var node = (doc || typer).getNode(v);
                 var widgetOption = widgetOptions[node.widget.id];
                 if (node !== lastNode) {
                     if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
@@ -1200,7 +1278,7 @@
                             value = value.slice(range.startOffset);
                         }
                         text += value;
-                    } else if (tagName(v) === 'br') {
+                    } else if (isBR(v)) {
                         text += '\n';
                     }
                 }
@@ -1209,76 +1287,65 @@
         }
 
         function initUndoable() {
-            var MARKER_ATTR = ['x-typer-end', 'x-typer-start'];
-            var lastValue = trim(topElement.innerHTML);
             var snapshots = [];
             var currentIndex = 0;
-            var snapshotTimeout;
+            var suppressUntil = 0;
 
             function triggerStateChange() {
-                setImmediate(function () {
-                    triggerEvent(null, EVENT_ALL, 'beforeStateChange');
-                    triggerEvent(null, EVENT_ALL, 'stateChange');
+                triggerEvent(EVENT_ALL, 'beforeStateChange');
+                triggerEvent(EVENT_ALL, 'stateChange');
+            }
+
+            function saveCaret(caret) {
+                var arr = [];
+                for (var node = caret.node; node.parentNode; node = node.parentNode) {
+                    arr.unshift(node.parentNode.childNodes.indexOf(node));
+                }
+                arr[arr.length] = caret.textNode ? caret.wholeTextOffset : caret.offset;
+                return arr.join(' ');
+            }
+
+            function restoreCaret(caret, pos) {
+                var arr = pos.split(' ');
+                var element = topElement;
+                var offset = arr.splice(-1)[0];
+                arr.forEach(function (v) {
+                    element = element.children[+v];
                 });
-            }
-
-            function checkActualChange() {
-                var value = trim(topElement.innerHTML.replace(/\s+(style|x-typer-(start|end))(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
-                if (value !== lastValue) {
-                    lastValue = value;
-                    return true;
-                }
-            }
-
-            function setMarker(node, offset, start) {
-                if (isText(node)) {
-                    $(node.parentNode).attr(MARKER_ATTR[+start], getWholeTextOffset(typer.getNode(node), node) + offset);
-                } else if (node) {
-                    $(node).attr(MARKER_ATTR[+start], '');
-                }
-            }
-
-            function getRangeFromMarker(start) {
-                var attr = MARKER_ATTR[+start];
-                var element = $self.find('[' + attr + ']')[0] || $self.filter('[' + attr + ']')[0];
-                var offset = parseInt($(element).attr(attr));
-                if (element) {
-                    $(element).removeAttr(attr);
-                    return +offset === offset ? getRangeFromTextOffset(element, offset) : createRange(element, !!start);
+                if (isNaN(offset)) {
+                    caret.moveTo(element, offset === 'true');
+                } else {
+                    caret.moveToText(element, +offset);
                 }
             }
 
             function takeSnapshot() {
-                triggerStateChange();
-                setMarker(currentSelection.startTextNode || currentSelection.startElement, currentSelection.startOffset, true);
-                if (!currentSelection.isCaret) {
-                    setMarker(currentSelection.endTextNode || currentSelection.endElement, currentSelection.endOffset, false);
-                }
-                var newValue = topElement.outerHTML;
-                if (newValue !== snapshots[0]) {
-                    var hasChange = checkActualChange();
-                    snapshots.splice(0, currentIndex + !hasChange, newValue);
+                var value = trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
+                if (!snapshots[0] || value !== snapshots[currentIndex].value) {
+                    snapshots.splice(0, currentIndex, {
+                        value: value
+                    });
                     snapshots.splice(Typer.historyLevel);
                     currentIndex = 0;
                 }
-                $self.find('[x-typer-start], [x-typer-end]').andSelf().removeAttr('x-typer-start x-typer-end');
+                snapshots[currentIndex].basePos = saveCaret(currentSelection.baseCaret);
+                snapshots[currentIndex].extendPos = saveCaret(currentSelection.extendCaret);
+                snapshots[currentIndex].html = topElement.innerHTML;
+                needSnapshot = false;
+                setImmediateOnce(triggerStateChange);
             }
 
-            function applySnapshot(value) {
-                var content = $.parseHTML(value)[0];
-                $self.empty().append(content.childNodes).attr(attrs(content));
-                currentSelection.select(getRangeFromMarker(true), getRangeFromMarker(false));
-                triggerStateChange();
-                checkActualChange();
+            function applySnapshot(state) {
+                $self.html(state.html);
+                restoreCaret(currentSelection, state.basePos);
+                restoreCaret(currentSelection.extendCaret, state.extendPos);
+                setImmediateOnce(triggerStateChange);
+                needSnapshot = false;
             }
 
             extend(undoable, {
                 getValue: function () {
-                    if (codeUpdate.needSnapshot) {
-                        codeUpdate.needSnapshot = false;
-                        takeSnapshot();
-                    }
-                    return lastValue;
+                    return snapshots[currentIndex].value;
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
@@ -1296,23 +1363,28 @@
                         applySnapshot(snapshots[--currentIndex]);
                     }
                 },
-                snapshot: function (delay) {
-                    clearImmediate(snapshotTimeout);
-                    if (+delay === delay || !currentSelection) {
-                        snapshotTimeout = setImmediate(takeSnapshot, delay);
-                    } else if (delay === true || !codeUpdate.executing) {
-                        codeUpdate.needSnapshot = false;
+                snapshot: function (ms) {
+                    suppressUntil = (+new Date() + ms) || suppressUntil;
+                    if (!executing && suppressUntil < +new Date()) {
                         takeSnapshot();
                     } else {
-                        codeUpdate.needSnapshot = true;
-                        triggerStateChange();
+                        needSnapshot = true;
+                        setImmediateOnce(triggerStateChange);
                     }
                 }
             });
         }
 
+        function focusRetained(element) {
+            for (; element; element = element.parentNode) {
+                if (relatedElements.has(element)) {
+                    userFocus.set(typer, element);
+                    return true;
+                }
+            }
+        }
+
         function normalizeInputEvent() {
-            var lastInputTime = 0;
             var mousedown;
             var composition;
             var modifierCount;
@@ -1323,77 +1395,85 @@
             var activeWidget;
 
             function getEventName(e, suffix) {
-                return lowfirst(((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '') + capfirst(suffix));
+                var mod = ((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '');
+                return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
             }
 
-            function triggerWidgetFocusout(source) {
-                var widget = activeWidget;
-                if (activeWidget && !activeWidget.destroyed) {
-                    activeWidget = null;
-                    triggerEvent(source, widget, 'focusout');
+            function updateWidgetFocus() {
+                var widget = currentSelection.focusNode.widget;
+                if (activeWidget !== widget) {
+                    if (activeWidget && !activeWidget.destroyed) {
+                        triggerEvent(activeWidget, 'focusout');
+                        activeWidget = null;
+                    }
+                    if (widget.id !== WIDGET_ROOT) {
+                        activeWidget = widget;
+                        triggerEvent(activeWidget, 'focusin');
+                    }
                 }
             }
 
-            function triggerClick(source, e, point) {
+            function triggerClick(e, point) {
                 var props = {
                     clientX: (point || e).clientX,
                     clientY: (point || e).clientY,
                     target: e.target
                 };
-                triggerEvent(source, EVENT_HANDLER, getEventName(e, 'click'), null, props);
-            }
-
-            function ensureFocused(source) {
-                eventSource(typer, source, currentSelection.focus, null, currentSelection);
+                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
             }
 
             function updateFromNativeInput() {
                 var activeRange = getActiveRange(topElement);
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
+                    undoable.snapshot(200);
                     currentSelection.select(activeRange);
-                    if (currentSelection.focusNode.widget !== activeWidget) {
-                        triggerWidgetFocusout('textInput');
-                    }
-                    var timeStamp = +new Date();
-                    setImmediate(function () {
-                        undoable.snapshot(timeStamp - lastInputTime < 200 ? 200 : 0);
-                        lastInputTime = timeStamp;
-                    });
+                    updateWidgetFocus();
                 }
             }
 
             function deleteNextContent(e) {
                 if (!currentSelection.isCaret) {
-                    codeUpdate('keystroke', function () {
-                        insertContents(currentSelection, '');
-                    });
+                    insertContents(currentSelection, '');
                 } else {
                     var selection = currentSelection.clone();
                     if (selection.extendCaret.moveByCharacter(e.data === 'backspace' ? -1 : 1)) {
-                        codeUpdate('keystroke', function () {
-                            insertContents(selection, '');
-                        });
+                        insertContents(selection, '');
                     }
                 }
             }
 
             function handleTextInput(inputText, compositionend) {
-                if (inputText && triggerDefaultPreventableEvent('textInput', EVENT_ALL, 'textInput', inputText)) {
+                setEventSource('input', typer);
+                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
                     return true;
                 }
                 if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
-                    codeUpdate('textInput', function () {
-                        insertContents(currentSelection, inputText);
-                    });
+                    insertContents(currentSelection, inputText);
                     return true;
                 }
                 setImmediate(function () {
+                    setEventSource('input', typer);
                     updateFromNativeInput();
-                    if (getTargetedWidgets(EVENT_CURRENT).id !== WIDGET_ROOT) {
-                        triggerEvent('textInput', EVENT_CURRENT, 'contentChange', 'textInput');
-                    }
-                    triggerEvent('textInput', EVENT_STATIC, 'contentChange', 'textInput');
+                    normalizeWhitespace(currentSelection.startElement);
+                    currentSelection.focus();
                 });
+                trackChange(currentSelection.focusNode);
+                codeUpdate($.noop);
+            }
+
+            function handleDataTransfer(clipboardData) {
+                if ($.inArray('application/x-typer', clipboardData.types) >= 0) {
+                    var html = clipboardData.getData('text/html');
+                    var content = createDocumentFragment($(html).filter('#Typer').contents());
+                    insertContents(currentSelection, content);
+                } else {
+                    var textContent = clipboardData.getData(IS_IE ? 'Text' : 'text/plain');
+                    if (textContent === clipboard.textContent) {
+                        insertContents(currentSelection, clipboard.content.cloneNode(true));
+                    } else {
+                        handleTextInput(textContent, true);
+                    }
+                }
             }
 
             $self.mousedown(function (e) {
@@ -1403,27 +1483,35 @@
                             handlers.mouseup();
                             return;
                         }
+                        undoable.snapshot(200);
                         currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
-                            ensureFocused('mouse');
+                            currentSelection.focus();
                         });
                         e.preventDefault();
                     },
-                    mouseup: function () {
+                    mouseup: function (e2) {
                         mousedown = false;
                         $(document.body).unbind(handlers);
+                        if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
+                            var node = typer.getNode(e2.target);
+                            if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                                currentSelection.select(node.widget.element);
+                            }
+                        }
+                        updateWidgetFocus();
                     }
                 };
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                    ensureFocused('mouse');
-                    $(document.body).bind(handlers);
+                    currentSelection.focus();
+                    $(document.body).on(handlers);
                     mousedown = true;
                 }
                 e.preventDefault();
             });
 
-            $self.bind('compositionstart compositionupdate compositionend', function (e) {
+            $self.on('compositionstart compositionupdate compositionend', function (e) {
                 e.stopPropagation();
                 composition = e.type.slice(-1) !== 'd';
                 if (!composition) {
@@ -1436,7 +1524,7 @@
                 }
             });
 
-            $self.bind('keydown keypress keyup', function (e) {
+            $self.on('keydown keypress keyup', function (e) {
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1453,16 +1541,16 @@
                     modifiedKeyCode = e.keyCode;
                     if (modifierCount) {
                         var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent('keystroke', EVENT_HANDLER, keyEventName)) {
+                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
                             e.preventDefault();
                         }
-                        if (triggerDefaultPreventableEvent('keystroke', EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
                             e.preventDefault();
                         }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
                     if (!keyDefaultPrevented) {
-                        codeUpdate.suppressTextEvent = false;
+                        suppressTextEvent = false;
                     }
                     setImmediate(function () {
                         if (!composition && !keyDefaultPrevented) {
@@ -1483,37 +1571,20 @@
                 }
             });
 
-            $self.bind('keypress input textInput', function (e) {
-                if (!codeUpdate.executing && !codeUpdate.suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent)) {
+            $self.on('keypress input textInput', function (e) {
+                if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
                 }
             });
 
-            $self.bind('dragstart', function (e) {
-                var selectedRange = createRange(currentSelection);
-                var handlers = {
-                    drop: function (e) {
-                        codeUpdate('drop', function () {
-                            var range = caretRangeFromPoint(e.originalEvent.clientX, e.originalEvent.clientY);
-                            var content = extractContents(selectedRange, e.ctrlKey ? 'copy' : 'cut');
-                            insertContents(range, content);
-                            e.preventDefault();
-                            $self.unbind(handlers);
-                        });
-                    }
-                };
-                $self.bind(handlers);
-            });
-
-            $self.bind('cut copy', function (e) {
+            $self.on('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                codeUpdate('cut', function () {
-                    clipboard.content = extractContents(currentSelection, e.type);
-                    clipboard.textContent = extractText(currentSelection);
-                });
-                if (window.clipboardData) {
+                setEventSource('cut', typer);
+                clipboard.content = extractContents(currentSelection, e.type);
+                clipboard.textContent = extractText(currentSelection);
+                if (IS_IE) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
                     clipboardData.setData('text/plain', clipboard.textContent);
@@ -1523,27 +1594,9 @@
                 e.preventDefault();
             });
 
-            $self.bind('paste', function (e) {
-                var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
-                var acceptHtml = widgetOptions[currentSelection.focusNode.widget.id].accept !== 'text';
-                if (acceptHtml && $.inArray('application/x-typer', clipboardData.types) >= 0) {
-                    var html = clipboardData.getData('text/html');
-                    var content = createDocumentFragment($(html).filter('#Typer').contents());
-                    codeUpdate('paste', function () {
-                        insertContents(currentSelection, content);
-                    });
-                } else {
-                    var textContent = clipboardData.getData(window.clipboardData ? 'Text' : 'text/plain');
-                    if (acceptHtml && textContent === clipboard.textContent) {
-                        codeUpdate('paste', function () {
-                            insertContents(currentSelection, clipboard.content.cloneNode(true));
-                        });
-                    } else if (!triggerDefaultPreventableEvent('paste', EVENT_ALL, 'textInput', textContent)) {
-                        codeUpdate('paste', function () {
-                            insertContents(currentSelection, textContent);
-                        });
-                    }
-                }
+            $self.on('paste', function (e) {
+                setEventSource('paste', typer);
+                handleDataTransfer(e.originalEvent.clipboardData || window.clipboardData);
                 e.preventDefault();
                 if (IS_IE) {
                     // IE put the caret in the wrong position after user code
@@ -1555,104 +1608,91 @@
                 }
             });
 
-            $self.bind('mousedown mouseup mscontrolselect', function (e) {
-                var node = typer.getNode(e.target);
-                if (activeWidget !== node.widget) {
-                    triggerWidgetFocusout('mouse');
+            $self.on('drop', function (e) {
+                setEventSource('drop', typer);
+                if (currentSelection.moveToPoint(e.originalEvent.clientX, e.originalEvent.clientY)) {
+                    handleDataTransfer(e.originalEvent.dataTransfer);
                 }
-                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                    // disable resize handle on image element on IE and Firefox
-                    // also select the whole widget when clicking on uneditable elements
-                    setImmediate(function () {
-                        ensureFocused('mouse');
-                    });
-                    currentSelection.select(node.widget.element);
-                    if (activeWidget !== node.widget) {
-                        activeWidget = node.widget;
-                        triggerEvent('mouse', node.widget, 'focusin');
-                    }
-                }
+                currentSelection.focus();
+                e.preventDefault();
             });
 
-            $self.bind('touchstart touchmove touchend', function (e) {
+            $self.on('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
-                    ensureFocused('touch');
-                    triggerClick('touch', e, touchObj);
+                    currentSelection.focus();
+                    triggerClick(e, touchObj);
                     e.preventDefault();
                 }
                 var touches = e.originalEvent.touches;
                 touchObj = e.type === 'touchstart' && !touches[1] && touches[0];
             });
 
-            $self.bind('contextmenu', function (e) {
+            $self.on('contextmenu', function (e) {
                 var range = caretRangeFromPoint(e.clientX, e.clientY, topElement);
                 if (currentSelection.isCaret || !rangeIntersects(currentSelection, range)) {
                     currentSelection.select(range);
                 }
             });
 
-            $self.bind('click', function (e) {
-                triggerClick('mouse', e);
+            $self.on('click', function (e) {
+                triggerClick(e);
                 e.preventDefault();
             });
 
-            $self.bind('dblclick', function (e) {
-                if (!triggerEvent('mouse', EVENT_HANDLER, 'dblclick')) {
+            $self.on('dblclick', function (e) {
+                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
                     currentSelection.select('word');
                 }
                 e.preventDefault();
             });
 
-            $self.bind('mousewheel', function (e) {
-                if (typerFocused && triggerDefaultPreventableEvent('mouse', EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
+            $self.on('mousewheel', function (e) {
+                if (typerFocused && triggerDefaultPreventableEvent(EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
                     e.preventDefault();
                 }
             });
 
-            $self.bind('focusin', function (e) {
+            $self.on('focusin', function (e) {
+                userFocus.delete(typer);
                 // prevent focus event triggered due to content updates through code
                 // when current editor is not focused
-                if (typerFocused || (codeUpdate.executing && !permitFocusEvent)) {
+                if (typerFocused || (executing && !permitFocusEvent)) {
                     return;
                 }
                 permitFocusEvent = false;
                 windowFocusedOut = false;
-                if (!userFocus.has(typer)) {
+                checkNativeUpdate = updateFromNativeInput;
+                if (!typerFocused) {
                     typerFocused = true;
-                    triggerEvent(null, EVENT_ALL, 'focusin');
+                    triggerEvent(EVENT_ALL, 'focusin');
                     if (!mousedown) {
                         currentSelection.focus();
                     }
                 }
-                userFocus.delete(typer);
             });
 
-            $self.bind('focusout', function (e) {
+            $self.on('focusout', function (e) {
                 if (document.activeElement !== topElement && typerFocused) {
                     if (e.relatedTarget === undefined) {
                         // Chrome triggers focusout event with relatedTarget equals undefined
                         // after contextmenu event by right mouse click
                         return;
                     }
-                    for (var element = e.relatedTarget; element; element = element.parentNode) {
-                        if (relatedElements.has(element)) {
-                            userFocus.set(typer, element);
-                            return;
-                        }
-                    }
-                    typerFocused = false;
-                    triggerWidgetFocusout();
-                    triggerEvent(null, EVENT_ALL, 'focusout');
-                    normalize();
+                    if (!focusRetained(e.relatedTarget || lastTouchedElement)) {
+                        typerFocused = false;
+                        checkNativeUpdate = null;
+                        updateWidgetFocus();
+                        triggerEvent(EVENT_ALL, 'focusout');
 
-                    // prevent focus returns to current editor
-                    // due to content updates through code
-                    if (containsOrEquals(topElement, document.activeElement)) {
-                        if (e.relatedTarget) {
-                            e.relatedTarget.focus();
-                        } else {
-                            topElement.blur();
+                        // prevent focus returns to current editor
+                        // due to content updates through code
+                        if (containsOrEquals(topElement, document.activeElement)) {
+                            if (e.relatedTarget) {
+                                e.relatedTarget.focus();
+                            } else {
+                                topElement.blur();
+                            }
                         }
                     }
                 }
@@ -1664,6 +1704,9 @@
                 ctrlShiftZ: undoable.redo,
                 backspace: deleteNextContent,
                 delete: deleteNextContent,
+                space: function () {
+                    insertContents(currentSelection, ' ');
+                },
                 escape: function () {
                     topElement.blur();
                     if (getActiveRange(topElement)) {
@@ -1721,11 +1764,21 @@
                 // to avoid unknown behavior while editing
                 element: options.disallowedElement || ':not(' + INNER_PTAG + ',br,b,em,i,u,strike,small,strong,sub,sup,ins,del,mark,span)'
             };
+            options.textFlow = true;
+
+            var contentWidgets = Object.keys(widgetOptions).slice(0, -1).filter(function (v) {
+                return widgetOptions[v].element;
+            });
+            contentWidgets.forEach(function (v) {
+                widgetOptions[v].allowedWidgets = contentWidgets.filter(function (w) {
+                    return w !== WIDGET_ROOT && matchWidgetList(w, 'allowedIn', v) && matchWidgetList(v, 'allow', w);
+                }).join(' ');
+            });
         }
 
         function retainFocusHandler(e) {
             var relatedTarget = e.relatedTarget || lastTouchedElement;
-            if (!containsOrEquals(e.currentTarget, relatedTarget)) {
+            if (!containsOrEquals(e.currentTarget, relatedTarget) && !focusRetained(relatedTarget)) {
                 if (userFocus.get(typer) === e.currentTarget) {
                     userFocus.delete(typer);
                 }
@@ -1739,6 +1792,7 @@
             }
         }
 
+        trackEventSource(topElement, typer);
         initUndoable();
         initWidgets();
         normalizeInputEvent();
@@ -1754,6 +1808,10 @@
             },
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
+            },
+            widgetAllowed: function (id, node) {
+                node = is(node, TyperNode) || typer.getNode(node || topElement);
+                return !!widgetAllowed(id, node);
             },
             getWidgetOption: function (id, name) {
                 return widgetOptions[id] && widgetOptions[id][name];
@@ -1772,14 +1830,10 @@
             extractText: function (selection) {
                 return extractText(selection);
             },
-            nodeFromPoint: function (x, y) {
-                var range = caretRangeFromPoint(x, y, topElement);
-                return range && typer.getNode(range.commonAncestorContainer);
-            },
             retainFocus: function (element) {
                 if (!relatedElements.has(element)) {
                     relatedElements.set(element, true);
-                    $(element).bind('focusout', retainFocusHandler);
+                    $(element).on('focusout', retainFocusHandler);
                 }
             },
             releaseFocus: function (element) {
@@ -1794,8 +1848,9 @@
                     command = tx.widget && widgetOptions[tx.widget.id].commands[command];
                 }
                 if (isFunction(command)) {
-                    codeUpdate('script', function () {
+                    codeUpdate(function () {
                         command.call(typer, tx, value);
+                        undoable.snapshot();
                         if (typerFocused && !userFocus.has(typer)) {
                             currentSelection.focus();
                         }
@@ -1814,7 +1869,7 @@
                 insertContents(currentSelection, text);
             },
             insertHtml: function (content) {
-                insertContents(currentSelection, createDocumentFragment(content));
+                insertContents(currentSelection, is(content, Node) || createDocumentFragment(content));
             },
             insertWidget: function (name, options) {
                 if (widgetOptions[name] && isFunction(widgetOptions[name].insert)) {
@@ -1835,33 +1890,17 @@
             replaceElement: function (oldElement, newElement) {
                 newElement = is(newElement, Node) || createElement(newElement);
                 $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
-                caretNotification.update(oldElement, newElement);
-                removeNode(oldElement, false);
-                tracker.track(newElement.parentNode);
+                removeNode(oldElement);
                 return newElement;
             },
             removeElement: function (element) {
-                tracker.track(element.parentNode);
                 removeNode(element);
-            },
-            trackChange: function (node) {
-                tracker.track(node);
-            },
-            execCommand: function (commandName, value) {
-                var r1, r2;
-                $.each(currentSelection.getEditableRanges(), function (i, v) {
-                    applyRange(v);
-                    document.execCommand(commandName, false, value || '');
-                    r1 = r1 || selection.getRangeAt(0);
-                    r2 = selection.getRangeAt(0);
-                });
-                currentSelection.select(createRange(r1, true), createRange(r2, false));
             }
         });
 
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
-        normalize();
-        triggerEvent(null, EVENT_STATIC, 'init');
+        codeUpdate(normalize);
+        triggerEvent(EVENT_STATIC, 'init');
     }
 
     window.Typer = Typer;
@@ -1874,18 +1913,21 @@
         NODE_INLINE: NODE_INLINE,
         NODE_INLINE_WIDGET: NODE_INLINE_WIDGET,
         NODE_INLINE_EDITABLE: NODE_INLINE_EDITABLE,
-        NODE_OUTER_PARAGRAPH: NODE_OUTER_PARAGRAPH,
-        NODE_SHOW_EDITABLE: NODE_SHOW_EDITABLE,
         NODE_ANY_ALLOWTEXT: NODE_ANY_ALLOWTEXT,
         NODE_ANY_BLOCK_EDITABLE: NODE_ANY_BLOCK_EDITABLE,
         NODE_ANY_INLINE: NODE_ANY_INLINE,
         ZWSP: ZWSP,
         ZWSP_ENTITIY: ZWSP_ENTITIY,
+        msie: IS_IE,
+        msie10: IS_IE10,
         is: is,
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
-        compareAttrs: compareAttrs,
+        setImmediateOnce: setImmediateOnce,
+        closest: closest,
+        getCommonAncestor: getCommonAncestor,
+        sameElementSpec: sameElementSpec,
         comparePosition: comparePosition,
         compareRangePosition: compareRangePosition,
         containsOrEquals: containsOrEquals,
@@ -1898,16 +1940,43 @@
         rectEquals: rectEquals,
         rectCovers: rectCovers,
         pointInRect: pointInRect,
+        toPlainRect: toPlainRect,
+        getRect: getRect,
         caretRangeFromPoint: caretRangeFromPoint,
+        elementFromPoint: function (x, y) {
+            return elementFromPoint_.call(document, x, y);
+        },
         historyLevel: 100,
         defaultOptions: {
-            disallowedWidgets: 'keepText',
             widgets: {}
         },
         widgets: {}
     });
 
     definePrototype(Typer, {
+        createCaret: function (node, offset) {
+            var caret = new TyperCaret(this);
+            if (node) {
+                caret.moveTo(node, offset);
+            }
+            return caret;
+        },
+        createSelection: function (startNode, startOffset, endNode, endOffset) {
+            return new TyperSelection(this, createRange(startNode, startOffset, endNode, endOffset));
+        },
+        nodeFromPoint: function (x, y, whatToShow) {
+            var range = caretRangeFromPoint(x, y, this.element);
+            if (range) {
+                var node = this.getNode(range.startContainer);
+                if (is(node, NODE_EDITABLE)) {
+                    node = any(node.childNodes, function (v) {
+                        var r = getRect(v.element);
+                        return r.top <= y && r.bottom >= y;
+                    }) || node;
+                }
+                return closest(node, whatToShow || -1);
+            }
+        },
         hasContent: function () {
             return !!this.getValue();
         },
@@ -1930,12 +1999,13 @@
             return this.childNodes[0] || null;
         },
         get lastChild() {
-            return this.childNodes.slice(-1)[0] || null;
+            var arr = this.childNodes;
+            return arr[arr.length - 1] || null;
         }
     });
 
     function treeWalkerIsNodeVisible(inst, node) {
-        return node && ((inst.whatToShow & NODE_SHOW_EDITABLE) || !is(node, NODE_WIDGET | NODE_ANY_BLOCK_EDITABLE)) && ((inst.whatToShow & NODE_SHOW_HIDDEN) || is(node.element, ':visible')) && node;
+        return node && ((inst.whatToShow & NODE_SHOW_HIDDEN) || node.element.offsetWidth > 0 || node.element.offsetHeight > 0) && node;
     }
 
     function treeWalkerAcceptNode(inst, node, checkWidget) {
@@ -2064,9 +2134,10 @@
     });
 
     function nodeIteratorInit(inst, iterator) {
-        var typer = iterator.currentNode.widget.typer;
+        var typer = iterator.currentNode.typer;
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
-            return treeWalkerAcceptNode(iterator, typer.getNode(v), true) !== 1 ? 3 : acceptNode(inst, v) | 1;
+            var node = typer.getNode(v);
+            return (node.element !== (isElm(v) || v.parentNode) && !isBR(v)) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
         }, false);
         defineProperty(inst, 'iterator', iterator2);
     }
@@ -2088,8 +2159,14 @@
 
     function selectionCreateTreeWalker(inst, whatToShow, filter) {
         var range = createRange(inst);
-        return new TyperTreeWalker(inst.focusNode, whatToShow | NODE_SHOW_EDITABLE, function (v) {
+        return new TyperTreeWalker(inst.focusNode, whatToShow & ~NODE_SHOW_HIDDEN, function (v) {
             return !rangeIntersects(v.element, range) ? 2 : !filter ? 1 : filter(v);
+        });
+    }
+
+    function selectionIterateTextNodes(inst) {
+        return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4), null, inst.startTextNode || inst.startElement, function (v) {
+            return comparePosition(v, inst.endTextNode || inst.endElement) <= 0;
         });
     }
 
@@ -2102,7 +2179,7 @@
         }
         if (p1.textNode && !isTextNodeEnd(p1.textNode, p1.offset, -1)) {
             var offset = p1.offset;
-            selectionAtomic(inst, function () {
+            selectionAtomic(function () {
                 if (offset === p1.textNode.length) {
                     var iterator = caretTextNodeIterator(p1);
                     if (iterator.nextNode()) {
@@ -2120,37 +2197,43 @@
         }
     }
 
+    function selectionAtomic(callback, args, thisArg) {
+        selectionAtomic.executing = true;
+        return selectionAtomic.run(callback, args, thisArg);
+    }
+    selectionAtomic.run = transaction(function () {
+        selectionAtomic.executing = false;
+        dirtySelections.forEach(selectionUpdate);
+        dirtySelections.clear();
+    });
+
     function selectionUpdate(inst) {
+        if (selectionAtomic.executing) {
+            dirtySelections.add(inst);
+            return;
+        }
+        inst.timestamp = performance.now();
         inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
         inst.isCaret = !inst.direction;
         for (var i = 0, p1 = inst.getCaret('start'), p2 = inst.getCaret('end'); i < 4; i++) {
             inst[selectionUpdate.NAMES[i + 4]] = p1[selectionUpdate.NAMES[i]];
             inst[selectionUpdate.NAMES[i + 8]] = p2[selectionUpdate.NAMES[i]];
         }
+        var node = inst.typer.getNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
+        inst.focusNode = closest(node, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE);
+        selectionCache.get(inst).m = 0;
+        if (inst === inst.typer.getSelection()) {
+            if (inst.typer.focused() && !userFocus.has(inst.typer)) {
+                inst.focus();
+            }
+            inst.typer.snapshot();
+        }
     }
     selectionUpdate.NAMES = 'node element textNode offset startNode startElement startTextNode startOffset endNode endElement endTextNode endOffset'.split(' ');
-
-    function selectionAtomic(inst, callback, args, thisArg) {
-        inst._lock = inst._lock || transaction(function () {
-            delete inst._lock;
-            selectionUpdate(inst);
-            if (inst === inst.typer.getSelection()) {
-                if (inst.typer.focused() && !userFocus.has(inst.typer)) {
-                    inst.focus();
-                }
-                inst.typer.snapshot();
-            }
-        });
-        return inst._lock(callback, args, thisArg);
-    }
 
     definePrototype(TyperSelection, {
         get isSingleEditable() {
             return this.isCaret || !selectionCreateTreeWalker(this, NODE_ANY_BLOCK_EDITABLE).nextNode();
-        },
-        get focusNode() {
-            var node = this.typer.getEditableNode(getCommonAncestor(this.baseCaret.element, this.extendCaret.element));
-            return closest(node, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE);
         },
         getCaret: function (point) {
             var b = this.baseCaret;
@@ -2174,21 +2257,6 @@
             }
             return createRange(b.getRange(), e.getRange());
         },
-        getEditableRanges: function () {
-            var self = this;
-            var range = createRange(self);
-            if (self.isCaret || is(self.focusNode, NODE_ANY_INLINE)) {
-                return [range];
-            }
-            var ranges = iterateToArray(selectionCreateTreeWalker(self, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH), function (v) {
-                return createRange(range, createRange(v.element));
-            });
-            return $.grep(ranges, function (v, i) {
-                return !i || !any(ranges.slice(0, i), function (w) {
-                    return rangeCovers(w, v);
-                });
-            });
-        },
         getWidgets: function () {
             var nodes = [];
             for (var node = this.focusNode; node; node = node.parentNode) {
@@ -2202,17 +2270,16 @@
             if (self.startNode === self.endNode) {
                 return is(self.startNode, NODE_PARAGRAPH) ? [self.startNode.element] : [];
             }
-            return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH | NODE_SHOW_EDITABLE), mapFn('element'), self.startNode, self.endNode);
+            return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH), function (v) {
+                return v.element;
+            }, self.startNode, self.endNode);
         },
         getSelectedElements: function () {
             var self = this;
             if (self.isCaret) {
                 return [self.startElement];
             }
-            var commonContainer = getCommonAncestor(self.startElement, self.endElement);
-            return iterateToArray(selectionCreateTreeWalker(self, NODE_ANY_ALLOWTEXT | NODE_INLINE_WIDGET), mapFn('element')).filter(function (v) {
-                return containsOrEquals(commonContainer, v);
-            });
+            return $(selectionIterateTextNodes(self)).parent().get();
         },
         getSelectedText: function () {
             return this.typer.extractText(this.getRange());
@@ -2223,9 +2290,7 @@
                 return [];
             }
             selectionSplitText(self);
-            return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(self, NODE_ANY_ALLOWTEXT), 4), null, self.startTextNode || self.startElement, function (v) {
-                return comparePosition(v, self.endTextNode || self.endElement) <= 0;
-            });
+            return selectionIterateTextNodes(self);
         },
         createTreeWalker: function (whatToShow, filter) {
             return selectionCreateTreeWalker(this, whatToShow, filter);
@@ -2236,7 +2301,7 @@
         },
         select: function (startNode, startOffset, endNode, endOffset) {
             var self = this;
-            return selectionAtomic(self, function () {
+            return selectionAtomic(function () {
                 if (startNode === 'word') {
                     return self.getCaret('start').moveByWord(-1) + self.getCaret('end').moveByWord(1) > 0;
                 }
@@ -2257,167 +2322,162 @@
                 if (!IS_IE && document.activeElement !== topElement) {
                     topElement.focus();
                 }
+                if (this.isCaret) {
+                    scrollIntoViewIfNeeded_.apply(this.startElement);
+                }
             }
         },
         clone: function () {
             var self = this;
             var inst = new TyperSelection(self.typer);
-            selectionAtomic(inst, function () {
+            selectionAtomic(function () {
                 inst.baseCaret.moveTo(self.baseCaret);
                 inst.extendCaret.moveTo(self.extendCaret);
             });
             return inst;
         },
         widgetAllowed: function (id) {
-            var self = this;
-            if (is(self.focusNode, NODE_EDITABLE_PARAGRAPH) && !self.typer.getWidgetOption(self.focusNode.widget.id, 'inline')) {
-                return false;
-            }
-            var allowedWidgets = self.typer.getWidgetOption(self.focusNode.widget.id, 'allowedWidgets');
-            return !allowedWidgets || allowedWidgets === '*' || (' __root__ ' + allowedWidgets + ' ').indexOf(' ' + id + ' ') >= 0;
+            return this.typer.widgetAllowed(id, this.focusNode);
         }
     });
 
-    $.each('moveToPoint moveToText moveByLine moveToLineEnd moveByWord moveByCharacter'.split(' '), function (i, v) {
+    $.each('moveTo moveToPoint moveToText moveByLine moveToLineEnd moveByWord moveByCharacter'.split(' '), function (i, v) {
         TyperSelection.prototype[v] = function () {
-            return selectionAtomic(this, function () {
-                return TyperCaret.prototype[v].apply(this.extendCaret, arguments) + this.collapse('extend') > 0;
+            var self = this;
+            return selectionAtomic(function () {
+                return TyperCaret.prototype[v].apply(self.extendCaret, arguments) + self.collapse('extend') > 0;
             }, slice(arguments));
         };
     });
-
-    definePrototype(TyperCaretNotification, {
-        listen: function (inst, element) {
-            var map = this.weakMap;
-            var arr = map.get(element) || (map.set(element, []), map.get(element));
-            if (arr.indexOf(inst) < 0) {
-                arr.push(inst);
+    $.each('getWidgets getParagraphElements getSelectedElements getSelectedText getSelectedTextNodes'.split(' '), function (i, v) {
+        var fn = TyperSelection.prototype[v];
+        TyperSelection.prototype[v] = function () {
+            var cache = selectionCache.get(this);
+            if (!(cache.m & (1 << i))) {
+                cache[v] = fn.apply(this, arguments);
+                cache.m |= (1 << i);
             }
-        },
-        unlisten: function (inst, element) {
-            var arr = this.weakMap.get(element);
-            if (arr && arr.indexOf(inst) >= 0) {
-                arr.splice(arr.indexOf(inst), 1);
-            }
-        },
-        update: function (oldElement, newElement) {
-            var carets = this.weakMap.get(oldElement);
-            if (carets && carets.length) {
-                selectionAtomic(carets[0].selection, function () {
-                    carets.forEach(function (caret) {
-                        var n1 = caret.node.element === oldElement ? caret.typer.getNode(newElement) : caret.node;
-                        var n2 = caret.element === oldElement ? newElement : caret.element;
-                        var n3 = containsOrEquals(newElement, caret.textNode) ? caret.textNode : null;
-                        if (n1 !== caret.node || n2 !== caret.element) {
-                            caretSetPositionRaw(caret, n1, n2, n3, n3 ? caret.offset : true);
-                        }
-                    });
-                });
-            }
-        }
+            return cache[v];
+        };
     });
 
     function caretTextNodeIterator(inst, root, whatToShow) {
-        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(is(root, TyperNode) || inst.typer.getNode(root || inst.typer.element), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), whatToShow | 4);
+        var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(root || inst.typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_WIDGET), whatToShow | 4);
         iterator.currentNode = inst.textNode || inst.element;
         return iterator;
     }
 
     function caretAtomic(inst, callback) {
-        return inst.selection ? selectionAtomic(inst.selection, callback, null, inst) : callback.call(inst);
+        return inst.selection ? selectionAtomic(callback, null, inst) : callback.call(inst);
+    }
+
+    function caretEnsureState(inst) {
+        var root = inst.typer.element;
+        var node = inst.textNode || inst.element;
+        if (!containsOrEquals(root, node) || inst.offset > node.length) {
+            if (!inst.node) {
+                inst.moveTo(root, 0);
+            } else if (containsOrEquals(root, inst.textNode) && inst.offset <= node.length) {
+                inst.moveTo(node, inst.offset);
+            } else if (containsOrEquals(root, inst.node.element)) {
+                inst.moveToText(inst.node.element, inst.wholeTextOffset);
+            } else {
+                inst.typer.getNode(node);
+                for (var replace = inst.element; detachedElements.has(replace); replace = detachedElements.get(replace));
+                inst.moveTo(replace, false);
+            }
+        }
+        return inst;
     }
 
     function caretSetPositionRaw(inst, node, element, textNode, offset) {
-        caretAtomic(inst, function () {
-            if (inst.selection && inst.selection === inst.typer.getSelection()) {
-                if (inst.node !== node && inst.node.element !== inst.element) {
-                    caretNotification.unlisten(inst, inst.node.element);
-                }
-                if (inst.element !== element && inst.element !== inst.node.element) {
-                    caretNotification.unlisten(inst, inst.element);
-                }
-                caretNotification.listen(inst, node.element);
-                caretNotification.listen(inst, element);
-            }
-            inst.node = node;
-            inst.element = element;
-            inst.textNode = textNode || null;
-            inst.offset = offset;
-            inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
-        });
+        inst.node = node;
+        inst.element = element;
+        inst.textNode = textNode || null;
+        inst.offset = offset;
+        inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
+        if (inst.selection) {
+            selectionUpdate(inst.selection);
+        }
         return true;
     }
 
-    function caretGetNode(node) {
-        return is(node, NODE_ANY_BLOCK) || closest(node, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH);
-    }
-
-    function caretSetPosition(inst, element, offset, end) {
-        var node, textNode, textOffset;
-        if (tagName(element) === 'br') {
+    function caretSetPosition(inst, element, offset) {
+        var textNode, end;
+        if (isBR(element)) {
             textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
-            element = textNode.parentNode;
             offset = 0;
-        } else if (isElm(element) && element.firstChild) {
-            if (offset === element.childNodes.length || (end && isElm(element.childNodes[(offset || 1) - 1]))) {
-                element = element.childNodes[(offset || 1) - 1];
-                offset = element.length;
-                end = true;
-            } else {
-                element = element.childNodes[offset];
-                offset = 0;
+        } else {
+            if (element.firstChild) {
+                end = offset === element.childNodes.length;
+                element = element.childNodes[offset] || element.lastChild;
+                offset = end ? element.length : 0;
             }
+            textNode = isText(element);
         }
-        if (isText(element)) {
-            textNode = element;
-            element = textNode.parentNode;
+        var node = inst.typer.getNode(element);
+        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET)) {
+            var child = any(node.childNodes, function (v) {
+                return comparePosition(textNode, v.element) < 0;
+            });
+            node = child || node.lastChild || node;
+            textNode = null;
+            end = !child;
         }
-        node = inst.typer.getEditableNode(textNode || element);
-        if (textNode) {
-            if (node.element !== textNode.parentNode) {
-                element = node.element;
-                textNode = null;
-            } else if (!is(node, NODE_ANY_ALLOWTEXT)) {
-                node = any(node.childNodes, function (v) {
-                    return comparePosition(textNode, v.element) < 0;
-                }) || node.lastChild || node;
-                element = node.element;
-                textNode = null;
-                end = true;
-            }
+        if (inst.selection && inst === inst.selection.extendCaret && is(node.previousSibling, NODE_WIDGET) === inst.selection.baseCaret.node) {
+            node = node.previousSibling;
+            textNode = null;
+            end = true;
         }
         if (!textNode && is(node, NODE_ANY_ALLOWTEXT)) {
-            var iterator2 = new TyperDOMNodeIterator(node, 4);
-            iterator2.currentNode = element;
-            while (iterator2.nextNode() && end);
-            textNode = isText(iterator2.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](element)[0];
-            offset = end ? textNode.length : 0;
+            var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(node, NODE_ANY_ALLOWTEXT), 4);
+            while (iterator.nextNode() && end);
+            textNode = isText(iterator.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](node.element)[0];
+            offset = textNode && end ? textNode.length : 0;
         }
         if (textNode) {
             var moveToMostInner = function (dir, pSib, pChild, mInsert) {
                 var next = isTextNodeEnd(textNode, offset, dir) && isElm(textNode[pSib]);
-                if (next && tagName(next) !== 'br' && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
-                    element = next;
-                    textNode = isText(element[pChild]) || $(createTextNode())[mInsert](element)[0];
+                if (next && !isBR(next) && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
+                    textNode = isText(next[pChild]) || $(createTextNode())[mInsert](next)[0];
                     offset = getOffset(textNode, 0 * dir);
                     return true;
                 }
             };
             while (moveToMostInner(-1, 'previousSibling', 'lastChild', 'appendTo') || moveToMostInner(1, 'nextSibling', 'firstChild', 'prependTo'));
+            if (!textNode.length) {
+                textNode.data = ZWSP;
+                offset = 1;
+            }
         }
-        return caretSetPositionRaw(inst, caretGetNode(node), element, textNode, textNode ? offset : !end);
+        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end);
     }
 
     definePrototype(TyperCaret, {
-        getRange: function () {
-            var self = this;
-            var node = self.textNode || self.element;
-            if (!containsOrEquals(self.typer.element, node) || (isText(node) && self.offset > node.length)) {
-                // use calculated text offset from paragraph node in case anchored text node is detached from DOM
-                // assuming that there is no unmanaged edit after the previous selection
-                self.moveToText(self.node.element, self.wholeTextOffset);
-                node = self.textNode || self.element;
+        getRect: function () {
+            var self = caretEnsureState(this);
+            if (!self.textNode) {
+                var prop = self.offset ? 'left' : 'right';
+                var elmRect = getRect(self.element);
+                return toPlainRect(elmRect[prop], elmRect.top, elmRect[prop], elmRect.bottom);
             }
+            var rect = rectFromPosition(self.textNode, self.offset);
+            if (!rect || !rect.height) {
+                // Mozilla returns a zero height rect and IE returns no rects for range collapsed at whitespace characters
+                // infer the position by getting rect for preceding non-whitespace character
+                var iterator = caretTextNodeIterator(self, self.node);
+                do {
+                    var r = rectFromPosition(iterator.currentNode, /(\s)$/.test(iterator.currentNode.data) ? -RegExp.$1.length : -0);
+                    if (r && r.height) {
+                        return rect ? toPlainRect(rect.left, r.top, rect.left, r.bottom) : r;
+                    }
+                } while (iterator.previousNode());
+            }
+            return rect || toPlainRect(0, 0, 0, 0);
+        },
+        getRange: function () {
+            var self = caretEnsureState(this);
+            var node = self.textNode || self.element;
             if (IS_IE && self.offset === node.length && isElm(node.nextSibling) && !/inline/.test($(node.nextSibling).css('display'))) {
                 // IE fails to visually position caret when it is at the end of text line
                 // and there is a next sibling element which its display mode is not inline
@@ -2440,31 +2500,32 @@
         },
         moveTo: function (node, offset) {
             var range = is(node, Range) || createRange(node, offset);
-            if (range) {
-                var selection = this.selection;
-                var end = selection && this === selection.extendCaret && compareRangePosition(selection.baseCaret, range) < 0;
-                return caretSetPosition(this, range.startContainer, range.startOffset, end);
+            if (range && containsOrEquals(this.typer.element, range.startContainer)) {
+                return caretSetPosition(this, range.startContainer, range.startOffset);
             }
             return false;
         },
         moveToPoint: function (x, y) {
             var range = caretRangeFromPoint(x, y, this.typer.element);
-            var node = this.typer.getNode(range.startContainer);
-            if (is(node, NODE_WIDGET)) {
-                // range returned is anchored at the closest text node which may or may not be at the point (x, y)
-                // avoid moving caret to widget element that does not actually cover that point
-                if (!pointInRect(x, y, node.widget.element.getBoundingClientRect())) {
-                    range = createRange(node.widget.element, false);
+            if (range) {
+                var node = this.typer.getNode(range.startContainer);
+                if (is(node, NODE_WIDGET)) {
+                    // range returned is anchored at the closest text node which may or may not be at the point (x, y)
+                    // avoid moving caret to widget element that does not actually cover that point
+                    if (!pointInRect(x, y, getRect(node.element))) {
+                        range = createRange(node.element, false);
+                    }
                 }
+                return this.moveTo(range);
             }
-            return this.moveTo(range);
+            return false;
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
-                var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT | NODE_SHOW_EDITABLE), 4);
-                if (offset) {
+                var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT), 4);
+                if (1 / offset > 0) {
                     for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
-                } else if (1 / offset < 0) {
+                } else {
                     while (iterator.nextNode());
                 }
                 node = iterator.currentNode;
@@ -2472,9 +2533,9 @@
             return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
         moveToLineEnd: function (direction) {
-            var self = this;
+            var self = caretEnsureState(this);
             var iterator = caretTextNodeIterator(self, self.node);
-            var rect = computeTextRects(self)[0];
+            var rect = self.getRect();
             var minx = rect.left;
             do {
                 $.each(computeTextRects(iterator.currentNode), function (i, v) {
@@ -2487,17 +2548,57 @@
         },
         moveByLine: function (direction) {
             var self = this;
-            var iterator = caretTextNodeIterator(self);
-            var rect = computeTextRects(self)[0];
+            var iterator = new TyperTreeWalker(self.typer.rootNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET);
+            var rect = self.getRect();
+            var node = self.node;
+            var deltaX = Infinity;
+            var untilY = Infinity * direction;
+            var nextBlock;
+            var newRect;
+
+            iterator.currentNode = node;
             do {
-                var rects = computeTextRects(iterator.currentNode);
-                var newRect = any(direction < 0 ? slice(rects).reverse() : rects, function (v) {
-                    return direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom;
-                });
-                if (newRect) {
-                    return self.moveToPoint(rect.left, newRect.top + newRect.height / 2);
+                if (is(node, NODE_WIDGET)) {
+                    if (!containsOrEquals(node.element, self.element)) {
+                        nextBlock = nextBlock || node.element;
+                    }
+                } else {
+                    var elmRect = getRect(node.element);
+                    if (direction > 0 ? elmRect.top > untilY : elmRect.bottom < untilY) {
+                        break;
+                    }
+                    var rects = computeTextRects(node.element);
+                    $.each(direction < 0 ? slice(rects).reverse() : rects, function (i, v) {
+                        if (direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom) {
+                            if ((v.top + v.bottom) / 2 * direction > untilY * direction) {
+                                return false;
+                            }
+                            untilY = direction > 0 ? v.bottom : v.top;
+                            if (v.right >= rect.left && v.left <= rect.left) {
+                                deltaX = 0;
+                                newRect = v;
+                            } else if (Math.abs(v.right - rect.left) < Math.abs(deltaX)) {
+                                deltaX = v.right - rect.left;
+                                newRect = v;
+                            } else if (Math.abs(v.left - rect.left) < Math.abs(deltaX)) {
+                                deltaX = v.left - rect.left;
+                                newRect = v;
+                            }
+                        }
+                    });
                 }
-            } while (iterator[direction < 0 ? 'previousNode' : 'nextNode']());
+            } while (deltaX && (node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
+
+            if (newRect) {
+                var scrollAmount = Math.max(0, newRect.bottom - root.offsetHeight) || Math.min(newRect.top, 0);
+                if (scrollAmount) {
+                    scrollByAmount(self.typer.element, scrollAmount);
+                }
+                return self.moveToPoint(rect.left + deltaX, (newRect.top + newRect.bottom) / 2 - scrollAmount);
+            }
+            if (nextBlock) {
+                return self.moveTo(nextBlock, true);
+            }
             return self.moveToLineEnd(direction);
         },
         moveByWord: function (direction) {
@@ -2531,7 +2632,7 @@
         },
         moveByCharacter: function (direction) {
             var self = this;
-            var rect = computeTextRects(self)[0];
+            var rect = self.getRect();
             var iterator = caretTextNodeIterator(self, null, 5);
             var node = isText(iterator.currentNode);
             var offset = self.offset;
@@ -2542,13 +2643,16 @@
                         if (!node) {
                             return false;
                         }
-                        overBr |= tagName(node) === 'br';
+                        if (is(self.typer.getNode(node), NODE_WIDGET) && !containsOrEquals(node, self.element)) {
+                            return self.moveToText(node, 0 * direction) || self.moveTo(node, direction < 0);
+                        }
+                        overBr |= isBR(node);
                     }
-                    offset = (direction < 0 ? node.length : 0) + ((overBr || caretGetNode(self.typer.getNode(node)) !== self.node) && -direction);
+                    offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
                 offset += direction;
-                var newRect = node.data.charAt(offset) !== ZWSP && computeTextRects(createRange(node, offset))[0];
-                if (!rect || (newRect && !rectEquals(rect, newRect))) {
+                var newRect = node.data.charAt(offset) !== ZWSP && rectFromPosition(node, offset);
+                if (newRect && !rectEquals(rect, newRect)) {
                     return self.moveToText(node, offset);
                 }
             }
@@ -2558,8 +2662,9 @@
     $.each('moveByLine moveByWord moveByCharacter'.split(' '), function (i, v) {
         var fn = TyperCaret.prototype[v];
         TyperCaret.prototype[v] = function (direction) {
-            return caretAtomic(this, function () {
-                for (var step = direction; step && fn.call(this, direction / Math.abs(direction)); step += step > 0 ? -1 : 1);
+            var self = caretEnsureState(this);
+            return caretAtomic(self, function () {
+                for (var step = direction; step && fn.call(self, direction / Math.abs(direction)); step += step > 0 ? -1 : 1);
                 return !direction || step !== direction;
             });
         };
@@ -2574,21 +2679,6 @@
         }
     });
 
-    definePrototype(TyperChangeTracker, {
-        track: function (node) {
-            node = is(node, TyperNode) || this.typer.getNode(node);
-            if (node && this.changes.indexOf(node.widget) < 0) {
-                this.changes.push(node.widget);
-            }
-        },
-        collect: function (callback) {
-            var arr = this.changes.splice(0);
-            if (arr[0] && isFunction(callback)) {
-                callback(arr);
-            }
-        }
-    });
-
     // disable Mozilla object resizing and inline table editing controls
     if (!IS_IE) {
         try {
@@ -2599,7 +2689,13 @@
         document.designMode = 'off';
     }
 
-    $(window).bind('focusin focusout', function (e) {
+    setInterval(function () {
+        if (!windowFocusedOut && checkNativeUpdate) {
+            checkNativeUpdate();
+        }
+    }, 100);
+
+    $(window).on('focusin focusout', function (e) {
         // IE raise event on the current active element instead of window object when browser loses focus
         // need to check if there is related target instead
         if (IS_IE ? !e.relatedTarget : e.target === window) {
@@ -2607,49 +2703,45 @@
         }
     });
 
-    var EVT_SOURCES = {
-        mouse: 'mousedown mouseup click',
-        keystroke: 'keydown keyup keypress',
-        touch: 'touchstart touchmove touchend'
-    };
     $(function () {
-        $.each(EVT_SOURCES, function (i, v) {
-            $(document.body).bind(v, function () {
-                eventSource(null, i);
-            });
-        });
-        $(document.body).bind('touchstart mousedown', function (e) {
-            // document.activeElement or FocusEvent.relatedTarget does not report non-focusable element
-            lastTouchedElement = e.target;
-        });
+        trackEventSource(document.body);
     });
 
-    // polyfill for WeakMap
-    // simple and good enough as we only need to associate data to a DOM object
-    if (typeof WeakMap === 'undefined') {
-        WeakMap = function () {
-            defineProperty(this, '__dataKey__', 'typer' + Math.random().toString(36).substr(2, 8), true);
-        };
-        definePrototype(WeakMap, {
-            get: function (key) {
-                return key && key[this.__dataKey__];
-            },
-            set: function (key, value) {
-                key[this.__dataKey__] = value;
-            },
-            has: function (key) {
-                return key && this.__dataKey__ in key;
-            },
-            delete: function (key) {
-                delete key[this.__dataKey__];
+    // polyfill for document.elementFromPoint and especially for IE
+    if (!elementFromPoint_) {
+        elementFromPoint_ = function (x, y) {
+            function hitTestChildElements(node) {
+                var currentZIndex;
+                var target;
+                $(node).children().each(function (i, v) {
+                    var style = window.getComputedStyle(v);
+                    var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
+                    if (style.pointerEvents !== 'none' && (currentZIndex === undefined || zIndex >= currentZIndex)) {
+                        var containsPoint = any(style.display === 'inline' ? v.getClientRects() : [getRect(v)], function (v) {
+                            return pointInRect(x, y, v);
+                        });
+                        if (containsPoint) {
+                            currentZIndex = zIndex;
+                            target = v;
+                        }
+                    }
+                });
+                return target;
             }
-        });
+
+            // IE returns outer element when the coordinate exactly on the box boundaries
+            // manually finds the innermost selectable element and starts searching caret position there first
+            // also before IE11 pointer-events does not thus cannot use document.elementFromPoint
+            var element = IS_IE10 ? document.body : document.elementFromPoint(x, y);
+            for (var child = element; child; element = child || element) {
+                child = hitTestChildElements(element);
+            }
+            return element;
+        };
     }
-    userFocus = new WeakMap();
-    caretNotification = new TyperCaretNotification();
 
     // polyfill for document.caretRangeFromPoint
-    if (typeof caretRangeFromPoint_ === 'undefined') {
+    if (!caretRangeFromPoint_) {
         caretRangeFromPoint_ = function () {
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
@@ -2665,22 +2757,11 @@
                 }
 
                 function distanceFromCharacter(node, index) {
-                    while (node.data.charCodeAt(index) === 10 && --index);
-                    var rect;
-                    if (node.data.charCodeAt(index) === 32 && index) {
-                        // IE11 (update version 11.0.38) crashes with memory access violation when
-                        // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
-                        // https://jsfiddle.net/b6q4p664/
-                        rect = computeTextRects(createRange(node, index - 1))[0];
-                        rect = rect && {
-                            top: rect.top,
-                            left: rect.right,
-                            right: rect.right,
-                            bottom: rect.bottom
-                        };
-                    } else {
-                        rect = computeTextRects(createRange(node, index))[0];
-                    }
+                    // IE11 (update version 11.0.38) crashes with memory access violation when
+                    // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
+                    // https://jsfiddle.net/b6q4p664/
+                    while (/[^\S\u00a0]/.test(node.data.charAt(index)) && --index);
+                    var rect = rectFromPosition(node, index);
                     if (rect) {
                         var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
                         var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
@@ -2700,31 +2781,8 @@
                     return Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1;
                 }
 
-                function hitTestChildElements(node) {
-                    var currentZIndex;
-                    var target;
-                    $(node).children().each(function (i, v) {
-                        var style = window.getComputedStyle(v, null);
-                        if (style.pointerEvents !== 'none' && style.display !== 'inline' && pointInRect(x, y, v.getBoundingClientRect())) {
-                            var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
-                            if (currentZIndex === undefined || zIndex > currentZIndex) {
-                                currentZIndex = zIndex;
-                                target = v;
-                            }
-                        }
-                    });
-                    return target;
-                }
-
-                // IE returns outer element when the coordinate exactly on the box boundaries
-                // manually finds the innermost selectable element and starts searching caret position there first
-                // also before IE11 pointer-events does not thus cannot use document.elementFromPoint
-                var element = window.ActiveXObject ? document.body : document.elementFromPoint(x, y);
-                for (var child = element; child; element = child || element) {
-                    child = hitTestChildElements(element);
-                }
-
                 var newY = y;
+                var element = elementFromPoint_.call(document, x, y);
                 for (var target = element, distY, lastDistY; isElm(target); element = target || element) {
                     distY = Infinity;
                     target = null;
@@ -2733,7 +2791,7 @@
                         if (isText(v)) {
                             rects = computeTextRects(v);
                         } else if (isElm(v) && $(v).css('pointer-events') !== 'none') {
-                            rects = [v.getBoundingClientRect()];
+                            rects = [getRect(v)];
                         }
                         for (var j = 0, length = (rects || '').length; j < length; j++) {
                             if (rects[j].top <= y && rects[j].bottom >= y) {
@@ -2760,6 +2818,19 @@
         }();
     }
 
+    // polyfill for element.scrollIntoViewIfNeeded
+    if (!scrollIntoViewIfNeeded_) {
+        scrollIntoViewIfNeeded_ = function () {
+            var winRect = getRect(root);
+            var elmRect = getRect(this);
+            if (elmRect.top < winRect.top) {
+                this.scrollIntoView(true);
+            } else if (elmRect.bottom > winRect.bottom) {
+                this.scrollIntoView(false);
+            }
+        };
+    }
+
     // detect support for textInput event
     function detectTextInputEvent(e) {
         var self = detectTextInputEvent;
@@ -2777,17 +2848,16 @@
     document.addEventListener('keypress', detectTextInputEvent, true);
     document.addEventListener('textInput', detectTextInputEvent, true);
 
-}(jQuery, window, document, String, Node, Range, DocumentFragment, window.WeakMap, Array.prototype, RegExp));
+}(jQuery, document.documentElement, Array.prototype));
 
+// source: src/presets.js
 (function ($, Typer) {
-    'use strict';
-
     function fixTextOverflow(typer) {
         var topElement = typer.element;
         var style = window.getComputedStyle(topElement);
         if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
-            var rect = Typer.ui.getRect(topElement);
-            var pos = Typer.ui.getRect(typer.getSelection().extendCaret.getRange());
+            var rect = Typer.getRect(topElement);
+            var pos = Typer.getRect(typer.getSelection().extendCaret.getRange());
             if (pos.left - rect.right >= 1) {
                 topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
             } else if (rect.left - pos.left >= 1) {
@@ -2805,7 +2875,6 @@
 
         options = {
             inline: true,
-            accept: 'text',
             defaultOptions: false,
             disallowedElement: '*',
             widgets: {},
@@ -2847,11 +2916,10 @@
         });
     };
 
-} (jQuery, window.Typer));
+}(jQuery, Typer));
 
-(function ($, Typer, Object, RegExp, Node, window, document) {
-    'use strict';
-
+// source: src/ui.js
+(function ($, Typer) {
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
     var SELECTOR_FOCUSABLE = ':input, [contenteditable], a[href], area[href], iframe';
     var BOOL_ATTRS = 'checked selected disabled readonly multiple ismap';
@@ -2901,6 +2969,7 @@
     var isPlainObject = $.isPlainObject;
     var getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
     var containsOrEquals = Typer.containsOrEquals;
+    var getRect = Typer.getRect;
     var dummyDiv = document.createElement('div');
 
     var definedControls = {};
@@ -2933,11 +3002,6 @@
     function lowfirst(v) {
         v = String(v || '');
         return v.charAt(0).toLowerCase() + v.slice(1);
-    }
-
-    function setImmediateOnce(fn) {
-        clearImmediate(fn._timeout);
-        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
     }
 
     function exclude(haystack, needle) {
@@ -3091,11 +3155,6 @@
         return maxZIndex + 1;
     }
 
-    function getRect(elm) {
-        var rect = $.extend({}, (elm || document.documentElement).getBoundingClientRect());
-        return delete rect.x, delete rect.y, delete rect.toJSON, rect;
-    }
-
     function cssFromPoint(x, y, origin, parent) {
         parent = Typer.is(parent || origin, Node);
         var refRect = getRect(parent || originDiv);
@@ -3112,8 +3171,8 @@
         return style;
     }
 
-    function cssFromRect(rect) {
-        var style = cssFromPoint(rect);
+    function cssFromRect(rect, parent) {
+        var style = cssFromPoint(rect, null, parent);
         style.width = ((rect.width || rect.right - rect.left) | 0) + 'px';
         style.height = ((rect.height || rect.bottom - rect.top) | 0) + 'px';
         return style;
@@ -3368,6 +3427,7 @@
                 inst.shortcut = typerUI.getShortcut(inst.execute);
             }
             contextualParent.all[name] = inst;
+            defineProperty(inst, '_m', 'c', 0);
             createControls(inst, contextualParent, (control === ui || control === contextualParent) && $.extend({}, exclusions));
             return inst;
         });
@@ -3398,7 +3458,7 @@
         }
 
         function bindPlaceholder(element) {
-            $(element).find('*').andSelf().filter('[x\\:bind]').each(function (i, v) {
+            $(element).find('*').addBack().filter('[x\\:bind]').each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:bind'));
                 $.each(t.params, function (i, w) {
                     if (!bindedProperties[w]) {
@@ -3457,37 +3517,56 @@
         });
     }
 
+    function ensureFlag(control, flag, callback) {
+        var mask = flag << 8;
+        if (!(control._m & mask)) {
+            control._m |= mask | (callback() * flag);
+        }
+        return (control._m & flag) > 0;
+    }
+
     function isEnabled(control) {
-        var ui = control.ui;
-        if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
-            return false;
-        }
-        if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
-            (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
-            return false;
-        }
-        if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
-            (control.requireWidget && !control.widget)) {
-            return false;
-        }
-        if (control.requireChildControls === true && !control.controls.some(isEnabled)) {
-            return false;
-        }
-        return control.enabled !== false && callFunction(control, 'enabled') !== false;
+        return ensureFlag(control, 0x01, function () {
+            var ui = control.ui;
+            if (!ui.typer && (control.requireTyper || control.requireWidget || control.requireWidgetEnabled || control.requireCommand)) {
+                return false;
+            }
+            if ((control.requireCommand && !ui.typer.hasCommand(control.requireCommand)) ||
+                (control.requireWidgetEnabled && !ui.typer.widgetEnabled(control.requireWidgetEnabled))) {
+                return false;
+            }
+            if ((control.requireWidget === true && !Object.getOwnPropertyNames(ui._widgets)[0]) ||
+                (control.requireWidget && !control.widget)) {
+                return false;
+            }
+            if (control.requireChildControls === true && (!control.controls.some(isEnabled) || control.controls.every(isHidden))) {
+                return false;
+            }
+            return control.enabled !== false && callFunction(control, 'enabled') !== false;
+        });
     }
 
     function isActive(control) {
-        return control.active === true || !!callFunction(control, 'active');
+        return ensureFlag(control, 0x02, function () {
+            return control.active === true || !!callFunction(control, 'active');
+        });
+    }
+
+    function isHidden(control) {
+        return ensureFlag(control, 0x04, function () {
+            return (!isEnabled(control) && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false;
+        });
     }
 
     function updateControl(control) {
         var ui = control.ui;
         var theme = definedThemes[ui.theme];
+        control._m = 0;
 
         var suppressStateChange;
         if (control.requireWidget || control.requireWidgetEnabled) {
             control.widget = ui._widgets[control.requireWidget || control.requireWidgetEnabled] || ui.widget;
-            suppressStateChange = !control.widget;
+            suppressStateChange = control.requireWidget && !control.widget;
         }
         if (!suppressStateChange && callstack.indexOf(control, 1) < 0) {
             if (control.getState(theme.controlErrorClass || 'error')) {
@@ -3502,7 +3581,7 @@
         }
         control.setState(theme.controlDisabledClass || 'disabled', disabled);
         control.setState(theme.controlActiveClass || 'active', isActive(control));
-        control.setState(theme.controlHiddenClass || 'hidden', (disabled && control.hiddenWhenDisabled) || control.visible === false || callFunction(control, 'visible') === false);
+        control.setState(theme.controlHiddenClass || 'hidden', isHidden(control));
     }
 
     function executeControlWithFinal(control, callback, optArg) {
@@ -3618,7 +3697,7 @@
     function getElementContainers(control) {
         var arr = [control.element];
         foreachControl(control, function (v) {
-            if (!containsOrEquals(v.element, v.parent.element) && containsOrEquals(document.body, v.element)) {
+            if (!containsOrEquals(v.element, v.parent.element)) {
                 for (var elm = v.element; elm.parentNode && !$.contains(elm.parentNode, arr[0]); elm = elm.parentNode);
                 arr[arr.length] = elm;
             }
@@ -3713,7 +3792,7 @@
             }
         },
         hide: function (control) {
-            control = control === undefined ? this : resolveControlParam(this, control);
+            control = !control ? this : resolveControlParam(this, control);
             return control && hideCallout(control);
         },
         enabled: function (control) {
@@ -3723,6 +3802,10 @@
         active: function (control) {
             control = resolveControlParam(this, control);
             return control && isActive(control);
+        },
+        visible: function (control) {
+            control = resolveControlParam(this, control);
+            return control && !isHidden(control);
         },
         getIcon: function (control) {
             return (definedIcons[control.icon] || definedIcons[control.name] || definedIcons[control] || '')[this.iconset || definedThemes[this.theme].iconset] || '';
@@ -3943,7 +4026,7 @@
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
-                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf()[0].focus();
+                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').addBack()[0].focus();
             }
         },
         alert: function (message) {
@@ -4349,17 +4432,17 @@
                 setImmediate(typerUI.focus, currentDialog.control.element);
             }
         });
-        $(window).bind('resize scroll orientationchange', function () {
-            setImmediateOnce(updateSnaps);
+        $(window).on('resize scroll orientationchange', function () {
+            Typer.setImmediateOnce(updateSnaps);
         });
-        $(document.body).bind('mousemove mousewheel keyup touchend', function () {
-            setImmediateOnce(updateSnaps);
+        $(document.body).on('mousemove mousewheel keyup touchend', function () {
+            Typer.setImmediateOnce(updateSnaps);
         });
         $(document.body).on('click', 'label', function (e) {
             // IE does not focus on focusable element when clicking containing LABEL element
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
-        $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
+        $(document.body).on(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
             if (currentDialog && currentDialog.clickReject && !elementOfControl(currentDialog.control, e.target)) {
                 currentDialog.clickReject();
             }
@@ -4374,10 +4457,10 @@
             // focusout event is not fired immediately after the element loses focus when user touches other element
             // manually blur and trigger focusout event to notify Typer and other component
             var lastActiveElement;
-            $(document.body).bind('focusin focusout', function (e) {
+            $(document.body).on('focusin focusout', function (e) {
                 lastActiveElement = e.type === 'focusin' ? e.target : null;
             });
-            $(document.body).bind('touchend', function (e) {
+            $(document.body).on('touchend', function (e) {
                 if (lastActiveElement && !containsOrEquals(lastActiveElement, e.target)) {
                     lastActiveElement.blur();
                     $(lastActiveElement).trigger($.Event('focusout', {
@@ -4387,15 +4470,455 @@
             });
         }
 
+        function handlePointerEventNone(e) {
+            if (window.getComputedStyle(e.target).pointerEvents === 'none') {
+                e.stopPropagation();
+                var event = document.createEvent('MouseEvent');
+                event.initMouseEvent(e.type, e.bubbles, e.cancelable, e.view, e.detail, e.screenX, e.screenY, e.clientX, e.clientY, e.ctrlKey, e.altKey, e.shiftKey, e.metaKey, e.button, e.relatedTarget);
+                Typer.elementFromPoint(e.clientX, e.clientY).dispatchEvent(event);
+            }
+        }
+
+        if (Typer.msie10) {
+            $.each('mousedown mouseup mousemove click'.split(' '), function (i, v) {
+                document.body.addEventListener(v, handlePointerEventNone, true);
+            });
+        }
+
         // helper element for detecting fixed position offset to the client screen
         originDiv = $('<div style="position:fixed;top:0;left:0;">').appendTo(document.body)[0];
     });
 
-}(jQuery, window.Typer, Object, RegExp, Node, window, document));
+}(jQuery, Typer));
 
+// source: src/canvas.js
 (function ($, Typer) {
-    'use strict';
+    var INVALID = {
+        left: 10000,
+        right: -10000
+    };
+    var root = document.documentElement;
+    var parseFloat = window.parseFloat;
+    var allLayers = {};
+    var pointerRegions = [];
+    var freeDiv = [];
+    var state = {};
+    var lastState = {};
+    var activeTyper;
+    var oldLayers;
+    var newLayers;
+    var container;
+    var timeout;
 
+    function TyperCanvas() {
+        state.timestamp = activeTyper.getSelection().timestamp;
+        state.rect = translate(Typer.getRect(activeTyper.element), root.scrollLeft, root.scrollTop);
+        $.extend(this, {
+            typer: activeTyper,
+            pointerX: state.x,
+            pointerY: state.y,
+            mousedown: state.mousedown,
+            editorReflow: !lastState.rect || !Typer.rectEquals(lastState.rect, state.rect),
+            pointerMoved: lastState.x != state.x || lastState.y != state.y,
+            selectionChanged: lastState.timestamp !== state.timestamp
+        });
+        $.extend(lastState, state);
+    }
+
+    function init() {
+        var repl = {
+            N: 'typer-visualizer',
+            E: 'before',
+            F: 'after',
+            G: 'background',
+            L: 'left',
+            R: 'right',
+            T: 'top',
+            B: 'bottom',
+            U: 'radius',
+            P: 'polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%)',
+            X: 'transform'
+        };
+        var style =
+            '.has-N:focus{outline:none;}' +
+            '.has-N::selection,.has-N ::selection{G:transparent;}' +
+            '.has-N::-moz-selection,.has-N ::-moz-selection{G:transparent;}' +
+            '.N{position:absolute;T:0;L:0;font-family:serif;font-size:12px;}' +
+            '.N>div{position:absolute;pointer-events:none;}' +
+            '.N>.c{pointer-events:all;border:1px solid black;G:white;}' +
+            '.N>.f{G:rgba(0,31,81,0.2);}' +
+            '.N>.m:E{content:"\\0000b6";position:absolute;top:50%;margin-top:-0.5em;left:4px;color:rgba(0,0,0,0.5);line-height:1;text-shadow:0 0 1px white,0 0 2px white;}' +
+            '.N>.m-br:E{content:"\\0021a9";}' +
+            '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:E,.N>.tl-r:E,.N>.br-r:F,.N>.tr-r:F{content:"";display:block;position:absolute;G:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:P;clip-path:P;}}' +
+            '.N>.bl{border-B-L-U:4px;}' +
+            '.N>.tl{border-T-L-U:4px;}' +
+            '.N>.br{border-B-R-U:4px;}' +
+            '.N>.tr{border-T-R-U:4px;}' +
+            '.N>.bl-r:E{R:100%;B:0;}' +
+            '.N>.tl-r:E{R:100%;T:0;-webkit-X:flipY();X:flipY();}' +
+            '.N>.br-r:F{L:100%;B:0;-webkit-X:flipX();X:flipX();}' +
+            '.N>.tr-r:F{L:100%;T:0;-webkit-X:rotate(180deg);X:rotate(180deg);}';
+        $(document.body).append('<style>' + style.replace(/\b[A-Z]/g, function (v) {
+            return repl[v] || v;
+        }) + '</style>');
+        container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
+
+        $(window).on('scroll resize orientationchange focus', refresh);
+        $(document.body).on('mousewheel mousedown mouseup keyup', refresh);
+
+        $(document.body).mousedown(function (e) {
+            $.each(pointerRegions, function (i, v) {
+                if (Typer.pointInRect(e.clientX, e.clientY, translate(v.rect, -root.scrollLeft, -root.scrollTop))) {
+                    var promise = handlePointer(e);
+                    v.handler(promise);
+                    promise.always(function () {
+                        if (activeTyper) {
+                            activeTyper.getSelection().focus();
+                        }
+                    });
+                    e.preventDefault();
+                    return false;
+                }
+            });
+        });
+        $(document.body).mousemove(function (e) {
+            timeout = setTimeout(refresh);
+            $.extend(state, {
+                x: e.clientX,
+                y: e.clientY,
+                mousedown: !!(e.buttons & 1)
+            });
+        });
+    }
+
+    function translate(rect, x, y) {
+        return Typer.toPlainRect(rect.left + x, rect.top + y, rect.right + x, rect.bottom + y);
+    }
+
+    function computeFillRects(range) {
+        var container = range.commonAncestorContainer;
+        var bRect = Typer.getRect(container.nodeType === 1 ? container : container.parentNode);
+        var rects = $.map(range.getClientRects(), Typer.toPlainRect);
+        var result = [];
+        rects.sort(function (a, b) {
+            return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
+        });
+        $.each(rects, function (i, v) {
+            var prev = result[0];
+            if (v.width <= 1) {
+                v.right += 5;
+            }
+            if (prev) {
+                if (v.left >= prev.right && v.top < prev.bottom) {
+                    result.shift();
+                    v.top = Math.min(v.top, prev.top);
+                    v.left = prev.left;
+                    v.bottom = Math.max(v.bottom, prev.bottom);
+                    prev = result[0];
+                } else if (v.top >= prev.bottom) {
+                    prev.left = result[1] ? bRect.left : prev.left;
+                    prev.right = bRect.right;
+                }
+            }
+            if (prev) {
+                if (Typer.rectCovers(prev, v)) {
+                    return;
+                }
+                if (v.top > prev.top) {
+                    prev.bottom = v.top;
+                }
+                if (result[1] && prev.left === result[1].left && prev.right === result[1].right) {
+                    prev.top = result.splice(1, 1)[0].top;
+                }
+            }
+            result.unshift((delete v.width, delete v.height, v));
+        });
+        return result;
+    }
+
+    function handlePointer(e) {
+        var deferred = $.Deferred();
+        var handlers = {};
+        var hasMoved;
+
+        handlers.mousemove = function (e) {
+            if (!e.which) {
+                handlers.mouseup();
+            } else if (lastState.x != state.x || lastState.y != state.y) {
+                hasMoved = true;
+                deferred.notify(e);
+            }
+        };
+        handlers.mouseup = function () {
+            $(document.body).unbind(handlers);
+            deferred.resolve(hasMoved);
+        };
+        if (e.which === 1) {
+            $(document.body).on(handlers);
+        } else {
+            deferred.reject();
+        }
+        return deferred.promise();
+    }
+
+    function addLayer(name, callback) {
+        allLayers[name] = [callback, []];
+    }
+
+    function addObject(kind, state, callback, handler) {
+        for (var i = 0, len = oldLayers.length; i < len; i++) {
+            if (oldLayers[i].state === state && oldLayers[i].kind === kind) {
+                newLayers[newLayers.length] = oldLayers.splice(i, 1)[0];
+                return;
+            }
+        }
+        newLayers[newLayers.length] = {
+            kind: kind,
+            state: state,
+            callback: $.isFunction(callback) ? callback : paint.bind(null, kind, state, callback, handler)
+        };
+    }
+
+    function paint(className, rect, extraCSS, handler) {
+        newLayers[newLayers.length] = {
+            className: className,
+            rect: translate('top' in rect ? rect : rect.getRect ? rect.getRect() : Typer.getRect(rect), root.scrollLeft, root.scrollTop),
+            css: extraCSS,
+            handler: handler
+        };
+    }
+
+    function freeUnusedDOM(layers) {
+        layers.forEach(function (v) {
+            freeDiv[freeDiv.length] = $(v).detach().removeAttr('style')[0];
+        });
+    }
+
+    function refresh(force) {
+        clearTimeout(timeout);
+        if (activeTyper && document.activeElement === activeTyper.element) {
+            var canvas = new TyperCanvas();
+            if (canvas.editorReflow || canvas.selectionChanged || canvas.pointerMoved) {
+                pointerRegions.splice(0);
+                $.each(allLayers, function (i, v) {
+                    newLayers = v[1];
+                    oldLayers = [];
+                    v[0].call(null, canvas);
+                    oldLayers.forEach(function (v) {
+                        freeUnusedDOM(v.dom || []);
+                    });
+                    newLayers.forEach(function (v) {
+                        if (!v.dom || canvas.editorReflow || force === true) {
+                            var arr = v.dom || (v.dom = []);
+                            newLayers = v.layers = [];
+                            v.callback(v.state);
+                            freeUnusedDOM(arr.splice(newLayers.length));
+                            newLayers.forEach(function (v, i) {
+                                var dom = arr[i] || (arr[i] = $(freeDiv.pop() || document.createElement('div')).appendTo(container)[0]);
+                                dom.className = v.className;
+                                $(dom).css($.extend(Typer.ui.cssFromRect(translate(v.rect, -root.scrollLeft, -root.scrollTop), container), v.css));
+                            });
+                        }
+                        v.layers.forEach(function (w) {
+                            if (w.handler) {
+                                pointerRegions[pointerRegions.length] = w;
+                            }
+                        });
+                    });
+                });
+            }
+        }
+    }
+
+    $.extend(TyperCanvas.prototype, {
+        refresh: function () {
+            setImmediate(refresh, true);
+        },
+        clear: function () {
+            oldLayers.push.apply(oldLayers, newLayers.splice(0));
+        },
+        fill: function (range) {
+            if (range instanceof Node) {
+                addObject('f tl tr bl br', range);
+            } else {
+                var arr = [];
+                Typer.iterate(activeTyper.createSelection(range).createTreeWalker(-1, function (v) {
+                    if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT) || Typer.rangeCovers(range, v.element)) {
+                        var r = Typer.createRange(range, Typer.createRange(v.element));
+                        if (!arr[0] || arr[0].commonAncestorContainer !== v.element.parentNode) {
+                            arr.unshift(r);
+                        } else {
+                            arr[0] = Typer.createRange(Typer.createRange(arr[0], true), Typer.createRange(r, false));
+                        }
+                        return 2;
+                    }
+                }));
+                arr.forEach(function (v) {
+                    addObject('f', v, function (range) {
+                        var rects = computeFillRects(range);
+                        $.each(rects, function (i, v) {
+                            var prev = rects[i - 1] || INVALID;
+                            var next = rects[i + 1] || INVALID;
+                            var className = [
+                                v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
+                                v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
+                                v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
+                                v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
+                            paint('f' + className, v);
+                        });
+                    });
+                }, this);
+            }
+        },
+        drawBorder: function (element, mtop, mright, mbottom, mleft, color, inset) {
+            var style = {};
+            style.border = 'solid ' + color;
+            style.borderWidth = [parseFloat(mtop), parseFloat(mright), parseFloat(mbottom), parseFloat(mleft), ''].join('px ');
+            style.margin = inset ? '0px' : style.borderWidth.replace(/(^|\s)(\d)/g, '$1-$2');
+            style.boxSizing = inset ? 'border-box' : 'auto';
+            addObject('b', element, style);
+        },
+        drawLineBreak: function (node) {
+            if (Typer.is(node, Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH)) {
+                $('br', node.element).each(function (i, v) {
+                    addObject('m m-br', v);
+                });
+            }
+        },
+        drawLine: function (x1, y1, x2, y2, width, color, lineStyle) {
+            var style = {};
+            style.borderTop = parseFloat(width) + 'px ' + (lineStyle || 'solid') + ' ' + (color || '');
+            style.marginTop = -parseFloat(width) + 'px';
+            style.transformOrigin = '0% 50%';
+            style.transform = 'rotate(' + Math.atan2(y2 - y1, x2 - x1) + 'rad)';
+            addObject('l', Typer.toPlainRect(x1, y1, x1 + (Math.sqrt((y2 - y1) * (y2 - y1) + (x2 - x1) * (x2 - x1))), y1), style);
+        },
+        addControlPoint: function (element, cursor, callback) {
+            addObject('c', element, function () {
+                var r = Typer.getRect(element);
+                paint('c', Typer.toPlainRect(r.right, r.top - 8, r.right + 8, r.top), {
+                    cursor: cursor || 'pointer'
+                }, callback);
+            });
+        }
+    });
+
+    addLayer('pointedNode', function (canvas) {
+        canvas.clear();
+        if (!canvas.mousedown) {
+            var node = canvas.typer.nodeFromPoint(canvas.pointerX, canvas.pointerY, Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH);
+            if (node) {
+                var style = window.getComputedStyle(node.element);
+                canvas.drawBorder(node.element, style.marginTop, style.marginRight, style.marginBottom, style.marginLeft, 'rgba(255,158,98,0.2)');
+            }
+        }
+    });
+    addLayer('selection', function (canvas) {
+        canvas.clear();
+        var selection = canvas.typer.getSelection();
+        var startNode = selection.startNode;
+        if (selection.isCaret) {
+            canvas.drawLineBreak(startNode);
+        } else if (Typer.is(startNode, Typer.NODE_WIDGET) === selection.focusNode) {
+            canvas.fill(startNode.element);
+        } else {
+            canvas.fill(selection.getRange());
+        }
+    });
+
+    Typer.widgets.visualizer = {
+        init: function (e) {
+            $(e.typer.element).addClass('has-typer-visualizer');
+            if (!init.init) {
+                init();
+                init.init = true;
+            }
+            e.typer.retainFocus(container);
+        },
+        focusin: function (e) {
+            activeTyper = e.typer;
+            Typer.ui.setZIndex(container, activeTyper.element);
+            refresh();
+        },
+        focusout: function (e) {
+            activeTyper = null;
+            $(container).children().detach();
+        },
+        stateChange: function (e) {
+            refresh();
+        }
+    };
+
+    Typer.defaultOptions.visualizer = true;
+
+    Typer.canvas = {
+        addLayer: addLayer
+    };
+
+})(jQuery, Typer);
+
+// source: src/extensions/dragwidget.js
+(function ($, Typer) {
+    var activeNode;
+    var isDragging;
+    var insertPoint;
+
+    Typer.canvas.addLayer('dragWidget', function (canvas) {
+        canvas.clear();
+        if (!isDragging && canvas.pointerMoved) {
+            activeNode = canvas.typer.nodeFromPoint(canvas.pointerX, canvas.pointerY, Typer.NODE_WIDGET) || activeNode;
+        }
+        if (activeNode && activeNode.typer === canvas.typer) {
+            var rect = Typer.getRect(activeNode.element);
+            if (Typer.pointInRect(canvas.pointerX, canvas.pointerY, Typer.toPlainRect(rect.left - 10, rect.top - 10, rect.right + 10, rect.bottom + 10))) {
+                canvas.addControlPoint(activeNode.element, 'move', function (d) {
+                    d.progress(function () {
+                        isDragging = true;
+                    });
+                    d.done(function () {
+                        if (isDragging && insertPoint) {
+                            canvas.typer.invoke(function (tx) {
+                                tx.selection.select(insertPoint);
+                                tx.insertHtml(activeNode.element);
+                            });
+                        } else {
+                            canvas.typer.select(activeNode.element);
+                        }
+                        isDragging = false;
+                        insertPoint = null;
+                        canvas.refresh();
+                    });
+                });
+            }
+        }
+        if (isDragging) {
+            var node = canvas.typer.nodeFromPoint(canvas.pointerX, canvas.pointerY, Typer.NODE_PARAGRAPH | Typer.NODE_WIDGET);
+            if (node && !Typer.containsOrEquals(activeNode.element, node.element)) {
+                var rectA = Typer.getRect(node.element);
+                var rectC = Typer.getRect(Typer.closest(node, Typer.NODE_EDITABLE).element);
+                var before = canvas.pointerY < (rectA.top + rectA.bottom) / 2;
+                var nextNode = before ? node.previousSibling : node.nextSibling;
+                if (nextNode !== activeNode && canvas.typer.widgetAllowed(activeNode.widget.id, node)) {
+                    var y;
+                    if (nextNode) {
+                        var rectB = Typer.getRect(nextNode.element);
+                        y = (rectA.bottom <= rectB.top ? rectA.bottom + rectB.top : rectB.bottom + rectA.top) / 2;
+                    } else {
+                        y = rectA[before ? 'top' : 'bottom'] + (Math.max(0, parseFloat(window.getComputedStyle(node.element)[before ? 'marginTop' : 'marginBottom'])) / 2) * (before ? -1 : 1);
+                    }
+                    canvas.drawLine(rectC.left, y, rectC.right, y, 1, 'red', 'dashed');
+                    insertPoint = canvas.typer.createCaret(node.element, before);
+                    return;
+                }
+            }
+            insertPoint = null;
+        }
+    });
+
+})(jQuery, Typer);
+
+// source: src/extensions/formatting.js
+(function ($, Typer) {
     var ALIGN_VALUE = {
         justifyLeft: 'left',
         justifyRight: 'right',
@@ -4403,12 +4926,16 @@
         justifyFull: 'justify'
     };
     var STYLE_TAGNAME = {
-        bold: 'b',
-        italic: 'i',
+        bold: 'b,strong',
+        italic: 'i,em',
         underline: 'u',
-        strikeThrough: 'strike',
-        superscript: 'sup',
-        subscript: 'sub'
+        strikeThrough: 'strike'
+    };
+    var STYLE_CHECK = {
+        bold: ['fontWeight', 'bold 700'],
+        italic: ['fontStyle', 'italic'],
+        underline: ['textDecoration', 'underline'],
+        strikeThrough: ['textDecoration', 'line-through']
     };
     var LIST_STYLE_TYPE = {
         '1': 'decimal',
@@ -4434,9 +4961,9 @@
         var direction = $(element).css('direction');
         switch (textAlign) {
             case '-webkit-left':
-                return 'left';
             case '-webkit-right':
-                return 'right';
+            case '-webkit-center':
+                return textAlign.slice(8);
             case 'start':
                 return direction === 'ltr' ? 'left' : 'right';
             case 'end':
@@ -4476,29 +5003,58 @@
         return element;
     }
 
+    function applyInlineStyle(tx, wrapElm, unwrapSpec, currentState, styleCheck) {
+        var selection = tx.selection;
+        var paragraphs = selection.getParagraphElements();
+        if (selection.isCaret && !currentState) {
+            tx.insertHtml(wrapElm);
+            wrapElm.appendChild(Typer.createTextNode());
+            selection.moveToText(wrapElm, -0);
+        } else {
+            var textNodes = selection.getSelectedTextNodes();
+            paragraphs.forEach(function (v) {
+                if (!styleCheck || !Typer.ui.matchWSDelim(window.getComputedStyle(v)[styleCheck[0]], styleCheck[1])) {
+                    if (!currentState) {
+                        $(v).find(textNodes).wrap(wrapElm);
+                    } else {
+                        var $unwrapNodes = $(textNodes, v).parentsUntil(v).filter(unwrapSpec);
+                        var $rewrapNodes = $unwrapNodes.contents().filter(function (i, v) {
+                            return textNodes.every(function (w) {
+                                return !Typer.containsOrEquals(v, w);
+                            });
+                        });
+                        $unwrapNodes.contents().unwrap();
+                        $rewrapNodes.wrap(wrapElm);
+                    }
+                }
+            });
+            selection.select(textNodes[0], 0, textNodes[textNodes.length - 1], -0);
+        }
+        $(paragraphs).find(unwrapSpec).filter(':has(' + unwrapSpec + ')').each(function (i, v) {
+            $(v).contents().unwrap().filter(function (i, v) {
+                return v.nodeType === 3;
+            }).wrap(v);
+        });
+        $(paragraphs).find('span[class=""],span:not([class])').contents().unwrap();
+        $(paragraphs).find(unwrapSpec).each(function (i, v) {
+            if (Typer.sameElementSpec(v.previousSibling, v)) {
+                $(v.childNodes).appendTo(v.previousSibling);
+                tx.removeElement(v);
+            }
+        });
+    }
+
     /* ********************************
      * Commands
      * ********************************/
 
     function justifyCommand(tx) {
         $(tx.selection.getParagraphElements()).attr('align', ALIGN_VALUE[tx.commandName]);
-        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function inlineStyleCommand(tx) {
-        if (tx.selection.isCaret) {
-            tx.insertHtml(createElementWithClassName(STYLE_TAGNAME[tx.commandName]));
-        } else {
-            // IE will nest <sub> and <sup> elements on the subscript and superscript command
-            // clear the subscript or superscript format before applying the opposite command
-            if (tx.widget.subscript && tx.commandName === 'superscript') {
-                tx.execCommand('subscript');
-            } else if (tx.widget.superscript && tx.commandName === 'subscript') {
-                tx.execCommand('superscript');
-            }
-            tx.execCommand(tx.commandName);
-            tx.trackChange(tx.selection.focusNode.element);
-        }
+        var kind = tx.commandName;
+        applyInlineStyle(tx, createElementWithClassName(STYLE_TAGNAME[kind].split(',')[0]), STYLE_TAGNAME[kind], tx.widget[kind], STYLE_CHECK[kind]);
     }
 
     function listCommand(tx, type) {
@@ -4521,7 +5077,6 @@
                 outdentCommand(tx, [v]);
             }
         });
-        tx.trackChange(tx.selection.focusNode.element);
     }
 
     function indentCommand(tx, elements) {
@@ -4568,20 +5123,14 @@
                 tx.removeElement(list);
             }
         });
-        tx.trackChange(tx.selection.focusNode.element);
     }
 
     Typer.widgets.inlineStyle = {
         beforeStateChange: function (e) {
             var elements = e.typer.getSelection().getSelectedElements();
-            $.extend(e.widget, {
-                bold: !!Typer.ui.matchWSDelim(computePropertyValue(elements, 'fontWeight'), 'bold 700'),
-                italic: computePropertyValue(elements, 'fontStyle') === 'italic',
-                underline: computePropertyValue(elements, 'textDecoration') === 'underline',
-                strikeThrough: computePropertyValue(elements, 'textDecoration') === 'line-through',
-                superscript: !!$(elements).filter('sup')[0],
-                subscript: !!$(elements).filter('sub')[0],
-                inlineClass: computePropertyValue($(elements).filter('span'), 'inlineClass')
+            e.widget.inlineClass = computePropertyValue($(elements).filter('span'), 'inlineClass');
+            $.each(STYLE_CHECK, function (i, v) {
+                e.widget[i] = !!Typer.ui.matchWSDelim(computePropertyValue(elements, v[0]), v[1]);
             });
         },
         commands: {
@@ -4592,31 +5141,7 @@
             superscript: inlineStyleCommand,
             subscript: inlineStyleCommand,
             applyClass: function (tx, className) {
-                var isCaret = tx.selection.isCaret;
-                var span = createElementWithClassName('span', className);
-                if (tx.selection.isCaret) {
-                    tx.insertHtml(span);
-                    span.appendChild(Typer.createTextNode());
-                } else {
-                    $(tx.selection.getSelectedTextNodes()).wrap(span);
-                }
-                var $elm = $(tx.selection.getSelectedElements());
-                $elm.filter('span:has(span)').each(function (i, v) {
-                    $(v).contents().unwrap().filter(function (i, v) {
-                        return v.nodeType === 3;
-                    }).wrap(createElementWithClassName('span', v.className));
-                });
-                $elm.filter('span[class=""],span:not([class])').contents().unwrap();
-                $elm.filter('span+span').each(function (i, v) {
-                    if (Typer.is(v.previousSibling, 'span.' + v.className)) {
-                        $(v).contents().appendTo(v.previousSibling);
-                        $(v).remove();
-                    }
-                });
-                if (isCaret) {
-                    tx.selection.select(span, -0);
-                }
-                tx.trackChange(tx.selection.focusNode.element);
+                applyInlineStyle(tx, createElementWithClassName('span', className), 'span');
             }
         }
     };
@@ -4662,13 +5187,19 @@
                             tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2] || '';
-                            tx.trackChange(v);
                         }
                     });
                 }
             },
             insertLine: function (tx) {
                 tx.insertText('\n\n');
+            },
+            insertLineBefore: function (tx) {
+                var widget = tx.selection.focusNode.widget;
+                if (widget.id !== '__root__') {
+                    tx.selection.select(widget.element, true);
+                    tx.insertText('\n\n');
+                }
             }
         }
     };
@@ -4949,7 +5480,8 @@
         underline: 'ctrlU',
         justifyLeft: 'ctrlShiftL',
         justifyCenter: 'ctrlShiftE',
-        justifyRight: 'ctrlShiftR'
+        justifyRight: 'ctrlShiftR',
+        insertLineBefore: 'ctrlEnter'
     });
 
     Typer.ui.addHook('tab', function (e) {
@@ -4959,11 +5491,10 @@
         }
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/link.js
 (function ($, Typer) {
-    'use strict';
-
     function normalizeUrl(url) {
         var anchor = document.createElement('A');
         anchor.href = url || '';
@@ -4979,24 +5510,23 @@
         element: 'a[href]',
         inline: true,
         insert: function (tx, value) {
-            value = normalizeUrl(value || (/^[a-z]+:\/\//g.test(tx.selection.getSelectedText()) && RegExp.input));
-            if (tx.selection.isCaret) {
-                var element = $('<a>').text(value).attr('href', value)[0];
-                tx.insertHtml(element);
+            value = normalizeUrl(value);
+            if (tx.selection.focusNode.widget.id === 'link') {
+                tx.invoke('setURL', value);
             } else {
-                tx.execCommand('createLink', value);
-                tx.selection.collapse('end');
-                tx.trackChange(tx.selection.startElement);
+                tx.insertHtml($('<a>').text(tx.selection.getSelectedText() || value).attr('href', value)[0]);
             }
         },
         remove: 'keepText',
+        init: function (e) {
+            $(e.widget.element).css('cursor', 'text');
+        },
         ctrlClick: function (e) {
             window.open(e.widget.element.href);
         },
         commands: {
             setURL: function (tx, value) {
                 tx.widget.element.href = normalizeUrl(value);
-                tx.trackChange(tx.widget.element);
             },
             unlink: function (tx) {
                 tx.removeWidget(tx.widget);
@@ -5031,34 +5561,33 @@
                 }
                 var href = value.href || value;
                 var text = value.text || href;
+                var element;
                 if (self.widget) {
-                    $(self.widget.element).text(text);
-                    tx.typer.invoke('setURL', href);
-                    if (value.blank) {
-                        $(self.widget.element).attr('target', '_blank');
-                    } else {
-                        $(self.widget.element).removeAttr('target');
-                    }
-                    tx.trackChange(self.widget.element);
+                    element = self.widget.element;
                 } else {
-                    var textNode = Typer.createTextNode(text);
-                    tx.insertHtml(textNode);
-                    tx.selection.select(textNode);
-                    tx.insertWidget('link', href);
-                    if (tx.selection.focusNode.widget.id === 'link') {
-                        if (value.blank) {
-                            $(tx.selection.focusNode.widget.element).attr('target', '_blank');
-                        } else {
-                            $(tx.selection.focusNode.widget.element).removeAttr('target');
-                        }
-                    }
+                    element = $('<a href="">').text(text)[0];
+                    tx.insertHtml(element);
+                    tx.selection.select(element, 'contents');
+                }
+                $(element).text(text);
+                tx.typer.invoke('setURL', href);
+                if (value.blank) {
+                    $(element).attr('target', '_blank');
+                } else {
+                    $(element).removeAttr('target');
                 }
             },
             active: function (toolbar, self) {
-                return self.widget;
+                return toolbar.is('toolbar') ? self.widget : false;
+            },
+            visible: function (toolbar, self) {
+                return toolbar.is('toolbar') || !!self.widget;
+            },
+            stateChange: function (toolbar, self) {
+                self.label = self.widget ? 'typer:toolbar:link:edit' : 'typer:toolbar:link';
             }
         }),
-        'contextmenu:link': Typer.ui.group('typer:link:*(type:button)'),
+        'contextmenu:link': Typer.ui.group('typer:toolbar:link typer:link:*(type:button)'),
         'link:open': Typer.ui.button({
             requireWidget: 'link',
             hiddenWhenDisabled: true,
@@ -5110,6 +5639,7 @@
 
     Typer.ui.addLabels('en', 'typer', {
         'toolbar:link': 'Insert hyperlink',
+        'toolbar:link:edit': 'Edit hyperlink',
         'link:url': 'Link URL',
         'link:blank': 'Open in new window',
         'link:open': 'Open hyperlink',
@@ -5133,8 +5663,8 @@
             if (e.data === 'enter') {
                 selection.moveByCharacter(-1);
             }
-            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^(([a-z]+:)\/\/^s+|\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
-                var link = (RegExp.$2 || 'mailto:') + RegExp.$1;
+            if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^([a-z]+:\/\/\S+)|(\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
+                var link = RegExp.$1 || ('mailto:' + RegExp.$2);
                 e.typer.snapshot(true);
                 e.typer.select(selection);
                 e.typer.invoke(function (tx) {
@@ -5148,11 +5678,10 @@
         }
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/media.js
 (function ($, Typer) {
-    'use strict';
-
     var reMediaType = /\.(?:(jpg|jpeg|png|gif|webp)|(mp4|ogg|webm)|(mp3))(?:\?.*)?$/i;
 
     Typer.widgets.media = {
@@ -5179,7 +5708,7 @@
                 if (typeof toolbar.options.selectMedia === 'function') {
                     return toolbar.options.selectMedia(type);
                 }
-                return toolbar.prompt('typer:media:selectImage');
+                return Typer.ui.prompt('typer:media:selectImage');
             },
             execute: function (toolbar, self, tx, value) {
                 tx.insertWidget('media', value);
@@ -5212,7 +5741,6 @@
             },
             execute: function (toolbar, self, tx, value) {
                 $(self.widget.element).attr('src', value.src || value);
-                tx.trackChange(self.widget.element);
             }
         }),
         'media:altText': Typer.ui.textbox({
@@ -5223,7 +5751,6 @@
             },
             execute: function (toolbar, self, tx) {
                 $(self.widget.element).attr('alt', self.value).attr('title', self.value);
-                tx.trackChange(self.widget.element);
             }
         })
     });
@@ -5241,13 +5768,12 @@
         'media:altText': '\ue0b9'  // comment
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/stateclass.js
 (function ($, Typer) {
-    'use strict';
-
     function toggleClass(widget, className, value) {
-        $(widget.typer.element).parents(widget.options.target).andSelf().eq(0).toggleClass(widget.options[className], value);
+        $(widget.typer.element).parents(widget.options.target).addBack().eq(0).toggleClass(widget.options[className], value);
     }
 
     Typer.widgets.stateclass = {
@@ -5270,14 +5796,14 @@
         }
     };
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/table.js
 (function ($, Typer) {
-    'use strict';
-
     var TD_HTML = '<td></td>';
     var TH_HTML = '<th></th>';
     var TR_HTML = '<tr>%</tr>';
+    var TR_SELECTOR = '>tbody>tr';
 
     function repeat(str, count) {
         return new Array(count + 1).join(str);
@@ -5298,6 +5824,14 @@
         };
     }
 
+    function getRow(widget, index) {
+        return $(TR_SELECTOR, widget.element || widget)[index];
+    }
+
+    function countColumns(widget) {
+        return getRow(widget, 0).childElementCount;
+    }
+
     function tabNextCell(selection, dir, selector) {
         if (selection.isSingleEditable) {
             var nextCell = $(selection.focusNode.element)[dir]()[0] || $(selection.focusNode.element).parent()[dir]().children(selector)[0];
@@ -5307,11 +5841,24 @@
         }
     }
 
-    function setEditorStyle(element) {
-        $('td,th', element).css({
-            outline: '1px dotted black',
+    function setEditorStyle(widget) {
+        $('td,th', widget.element || widget).css({
+            outline: '1px dotted rgba(0,0,0,0.3)',
             minWidth: '3em'
         });
+    }
+
+    function insertColumn(widget, index, count, before) {
+        var s = typeof index === 'string' ? index + '-child' : 'nth-child(' + (index + 1) + ')';
+        var m = before ? 'before' : 'after';
+        $(widget.element || widget).find(TR_SELECTOR + '>th:' + s)[m](repeat(TH_HTML, count));
+        $(widget.element || widget).find(TR_SELECTOR + '>td:' + s)[m](repeat(TD_HTML, count));
+        setEditorStyle(widget);
+    }
+
+    function insertRow(widget, index, kind, before) {
+        $(getRow(widget, index))[before ? 'before' : 'after'](TR_HTML.replace('%', repeat(kind, countColumns(widget))));
+        setEditorStyle(widget);
     }
 
     Typer.ui.define('tableGrid', {
@@ -5322,14 +5869,37 @@
         element: 'table',
         editable: 'th,td',
         insert: function (tx, options) {
-            options = $.extend({
-                rows: 2,
-                columns: 2
-            }, options);
-            tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns)), options.rows) + '</table>');
+            options = options || {};
+            tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns || 2)), options.rows || 2) + '</table>');
         },
         init: function (e) {
-            setEditorStyle(e.widget.element);
+            setEditorStyle(e.widget);
+        },
+        extract: function (e) {
+            var $row = $(TR_SELECTOR, e.extractedNode);
+            if ($row[1]) {
+                var count = countColumns(e.widget);
+                $row.each(function (i, v) {
+                    if (v.childElementCount < count) {
+                        $(repeat($('>th', v)[0] ? TH_HTML : TD_HTML, count - v.childElementCount))[i ? 'appendTo' : 'prependTo'](v);
+                    }
+                });
+            }
+        },
+        receive: function (e) {
+            if (e.source === 'paste') {
+                var missCount = countColumns(e.receivedNode) - countColumns(e.widget);
+                if (missCount > 0) {
+                    insertColumn(e.widget, 'last', missCount, false);
+                } else if (missCount < 0) {
+                    insertColumn(e.receivedNode, 'last', -missCount, false);
+                }
+                $(TR_SELECTOR, e.receivedNode).insertBefore($(e.caret.element).closest('tr')).children('th').wrapInner('<p>').each(function (i, v) {
+                    $(v).replaceWith($(TD_HTML).append(v.childNodes));
+                });
+                setEditorStyle(e.widget);
+                e.preventDefault();
+            }
         },
         tab: function (e) {
             tabNextCell(e.typer.getSelection(), 'next', ':first-child');
@@ -5337,67 +5907,48 @@
         shiftTab: function (e) {
             tabNextCell(e.typer.getSelection(), 'prev', ':last-child');
         },
-        ctrlEnter: function (e) {
-            e.typer.invoke(function (tx) {
-                tx.selection.select(tx.widget.element, Typer.COLLAPSE_START_OUTSIDE);
-                tx.insertText('');
-            });
-        },
         commands: {
             addColumnBefore: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.minColumn + 1) + ')').before(TH_HTML);
-                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.minColumn + 1) + ')').before(TD_HTML);
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertColumn(tx.widget, info.minColumn, 1, true);
             },
             addColumnAfter: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr>th:nth-child(' + (info.maxColumn + 1) + ')').after(TH_HTML);
-                $(tx.widget.element).find('>tbody>tr>td:nth-child(' + (info.maxColumn + 1) + ')').after(TD_HTML);
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertColumn(tx.widget, info.maxColumn, 1, false);
             },
             addRowAbove: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.minRow];
-                $(tableRow).before(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertRow(tx.widget, info.minRow, TD_HTML, true);
             },
             addRowBelow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                var tableRow = $(tx.widget.element).find('>tbody>tr')[info.maxRow];
-                $(tableRow).after(TR_HTML.replace('%', repeat(TD_HTML, tableRow.childElementCount)));
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                insertRow(tx.widget, info.maxRow, TD_HTML, false);
             },
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(tx.widget.element).find('>tbody>tr').each(function (i, v) {
-                    $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
+                $(TR_SELECTOR, tx.widget.element).each(function (i, v) {
+                    $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).forEach(tx.removeElement);
                 });
-                tx.trackChange(tx.widget.element);
+                tx.selection.moveTo(getRow(tx.widget, info.minRow).children[Math.max(0, info.minColumn - 1)], -0);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $($(tx.widget.element).find('>tbody>tr').splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
-                tx.trackChange(tx.widget.element);
+                $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).forEach(tx.removeElement);
+                tx.selection.moveTo(getRow(tx.widget, Math.max(0, info.minRow - 1)).children[info.minColumn], -0);
             },
             toggleTableHeader: function (tx) {
-                if ($(tx.widget.element).find('th')[0]) {
-                    $(tx.widget.element).find('th').wrapInner('<p>').each(function (i, v) {
+                var $header = $(TR_SELECTOR + '>th', tx.widget.element);
+                if ($header[0]) {
+                    $header.wrapInner('<p>').each(function (i, v) {
                         tx.replaceElement(v, 'td');
                     });
                 } else {
-                    var columnCount = $(tx.widget.element).find('>tbody>tr')[0].childElementCount;
-                    $(tx.widget.element).find('tbody').prepend(TR_HTML.replace('%', repeat(TH_HTML, columnCount)));
-                    $(tx.widget.element).find('th').text(function (i, v) {
+                    insertRow(tx.widget, 0, TH_HTML, true);
+                    $('>*', getRow(tx.widget, 0)).text(function (i) {
                         return 'Column ' + (i + 1);
                     });
                 }
-                setEditorStyle(tx.widget.element);
-                tx.trackChange(tx.widget.element);
+                setEditorStyle(tx.widget);
             }
         }
     };
@@ -5405,18 +5956,18 @@
     $.extend(Typer.ui.themeExtensions, {
         tableGrid: '<div class="typer-ui-grid"><div class="typer-ui-grid-wrapper"></div><br x:t="label"/></div>',
         tableGridInit: function (toolbar, self) {
-            var html = repeat('<div class="typer-ui-grid-row">' + repeat('<div class="typer-ui-grid-cell"></div>', 7) + '</div>', 7);
-            $(self.element).find('.typer-ui-grid-wrapper').append(html);
-            $(self.element).find('.typer-ui-grid-cell').mouseover(function () {
+            var $self = $(self.element);
+            $self.find('.typer-ui-grid-wrapper').append(repeat('<div class="typer-ui-grid-row">' + repeat('<div class="typer-ui-grid-cell"></div>', 7) + '</div>', 7));
+            $self.find('.typer-ui-grid-cell').mouseover(function () {
                 self.value.rows = $(this).parent().index() + 1;
                 self.value.columns = $(this).index() + 1;
                 self.label = self.value.rows + ' \u00d7 ' + self.value.columns;
-                $(self.element).find('.typer-ui-grid-cell').removeClass('active');
-                $(self.element).find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
+                $self.find('.typer-ui-grid-cell').removeClass('active');
+                $self.find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().addBack().addClass('active');
             });
             self.label = '0 \u00d7 0';
             self.value = {};
-            $(self.element).click(function () {
+            $self.click(function () {
                 toolbar.execute(self);
             });
         }
@@ -5442,15 +5993,6 @@
             hiddenWhenDisabled: true,
             defaultNS: 'typer:table'
         }),
-        'selection:selectTable': Typer.ui.button({
-            requireWidget: 'table',
-            hiddenWhenDisabled: true,
-            execute: function (toolbar, self) {
-                var selection = toolbar.typer.getSelection();
-                selection.select(self.widget.element);
-                selection.focus();
-            }
-        }),
         'table:toggleTableHeader': Typer.ui.checkbox({
             requireWidget: 'table',
             execute: 'toggleTableHeader',
@@ -5458,45 +6000,48 @@
                 self.value = !!$(self.widget.element).find('th')[0];
             }
         }),
-        'table:style': Typer.ui.callout({
+        'table:style': Typer.ui.dropdown({
             requireWidget: 'table',
             controls: function (toolbar, self) {
                 var definedOptions = $.map(Object.keys(toolbar.options.tableStyles || {}), function (v) {
                     return Typer.ui.button({
-                        requireWidget: 'table',
                         value: v,
-                        label: toolbar.options.tableStyles[v],
-                        execute: function (toolbar, self, tx) {
-                            self.widget.element.className = v;
-                            tx.trackChange(self.widget.element);
-                        }
+                        label: toolbar.options.tableStyles[v]
                     });
                 });
                 var fallbackOption = Typer.ui.button({
-                    requireWidget: 'table',
-                    label: 'typer:table:styleDefault',
-                    execute: function (toolbar, self, tx) {
-                        self.widget.element.className = '';
-                        tx.trackChange(self.widget.element);
-                    }
+                    value: '',
+                    label: 'typer:table:styleDefault'
                 });
                 return definedOptions.concat(fallbackOption);
+            },
+            execute: function (toolbar, self, tx) {
+                self.widget.element.className = self.value || '';
+            },
+            stateChange: function (toolbar, self) {
+                self.value = self.widget.element.className || '';
+                self.selectedText = self.label;
             }
         }),
-        'table:tableWidth': Typer.ui.callout(),
-        'table:tableWidth:fitContent': Typer.ui.button({
+        'table:tableWidth': Typer.ui.dropdown({
             requireWidget: 'table',
             execute: function (toolbar, self, tx) {
-                $(self.widget.element).removeAttr('width');
-                tx.trackChange(self.widget.element);
+                if (self.value) {
+                    $(self.widget.element).attr('width', '100%');
+                } else {
+                    $(self.widget.element).removeAttr('width');
+                }
+            },
+            stateChange: function (toolbar, self) {
+                self.value = $(self.widget.element).attr('width') || '';
+                self.selectedText = self.label;
             }
+        }),
+        'table:tableWidth:fitContent': Typer.ui.button({
+            value: ''
         }),
         'table:tableWidth:fullWidth': Typer.ui.button({
-            requireWidget: 'table',
-            execute: function (toolbar, self, tx) {
-                $(self.widget.element).attr('width', '100%');
-                tx.trackChange(self.widget.element);
-            }
+            value: '100%'
         }),
         'table:addRemoveCell': Typer.ui.group(),
         'table:addRemoveCell:addColumnBefore': Typer.ui.button({
@@ -5509,7 +6054,10 @@
         }),
         'table:addRemoveCell:addRowAbove': Typer.ui.button({
             requireWidget: 'table',
-            execute: 'addRowAbove'
+            execute: 'addRowAbove',
+            enabled: function (toolbar, self) {
+                return !$(TR_SELECTOR, self.widget.element).has('th')[0] || getSelectionInfo(toolbar.typer.getSelection()).minRow > 0;
+            }
         }),
         'table:addRemoveCell:addRowBelow': Typer.ui.button({
             requireWidget: 'table',
@@ -5528,11 +6076,8 @@
     Typer.ui.addLabels('en', 'typer', {
         'insert:table': 'Table',
         'contextmenu:table': 'Modify table',
-        'selection:selectTable': 'Select table',
         'table:toggleTableHeader': 'Show header',
-        'table:columnWidth': 'Set column width',
-        'table:tableWidth': 'Set table width',
-        'table:style': 'Set table style',
+        'table:style': 'Table style',
         'table:styleDefault': 'Default',
         'table:addRemoveCell:addColumnBefore': 'Add column before',
         'table:addRemoveCell:addColumnAfter': 'Add column after',
@@ -5540,17 +6085,16 @@
         'table:addRemoveCell:addRowBelow': 'Add row below',
         'table:addRemoveCell:removeColumn': 'Remove column',
         'table:addRemoveCell:removeRow': 'Remove row',
+        'table:tableWidth': 'Table width',
         'table:tableWidth:fitContent': 'Fit to content',
         'table:tableWidth:fullWidth': 'Full width'
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/toolbar.js
 (function ($, Typer) {
-    'use strict';
-
     var activeToolbar;
-    var timeout;
 
     function nativePrompt(message, value) {
         value = window.prompt(message, value);
@@ -5578,46 +6122,49 @@
         }
     }
 
+    function positionToolbar(toolbar, position) {
+        var height = $(toolbar.element).height();
+        if (position) {
+            toolbar.position = 'fixed';
+        } else if (toolbar.position !== 'fixed') {
+            var rect = Typer.getRect((toolbar.widget || toolbar.typer).element);
+            if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
+                // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
+                return;
+            }
+            position = {
+                position: 'fixed',
+                left: rect.left,
+                top: Math.max(0, rect.top - height - 10)
+            };
+        }
+        if (position) {
+            var range = toolbar.typer.getSelection().getRange();
+            if (range) {
+                var r = range.getClientRects()[0] || Typer.getRect(range);
+                if (r.top >= position.top && r.top <= position.top + height) {
+                    position.top = r.bottom + 10;
+                }
+            }
+            $(toolbar.element).css(position);
+        }
+    }
+
     function showToolbar(toolbar, position) {
         toolbar.update();
         if (toolbar.widget || !toolbar.options.container) {
-            clearTimeout(timeout);
             if (activeToolbar !== toolbar) {
                 hideToolbar();
                 activeToolbar = toolbar;
                 $(toolbar.element).appendTo(document.body);
                 Typer.ui.setZIndex(toolbar.element, toolbar.typer.element);
             }
-            var height = $(toolbar.element).height();
-            if (position) {
-                toolbar.position = 'fixed';
-            } else if (toolbar.position !== 'fixed') {
-                var rect = Typer.ui.getRect((toolbar.widget || toolbar.typer).element);
-                if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
-                    // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
-                    return;
-                }
-                position = {
-                    position: 'fixed',
-                    left: rect.left,
-                    top: Math.max(0, rect.top - height - 10)
-                };
-            }
-            if (position) {
-                var range = toolbar.typer.getSelection().getRange();
-                if (range) {
-                    var r = range.getClientRects()[0] || Typer.ui.getRect(range);
-                    if (r.top >= position.top && r.top <= position.top + height) {
-                        position.top = r.bottom + 10;
-                    }
-                }
-                $(toolbar.element).css(position);
-            }
+            positionToolbar(toolbar, position);
         }
     }
 
-    function hideToolbar(toolbar) {
-        if (activeToolbar && (!toolbar || activeToolbar === toolbar)) {
+    function hideToolbar(typer) {
+        if (activeToolbar && (!typer || activeToolbar.typer === typer)) {
             $(activeToolbar.element).detach();
             activeToolbar.position = '';
             activeToolbar = null;
@@ -5635,7 +6182,7 @@
             options: options,
             showButtonLabel: type === 'contextmenu',
             executed: function (ui, control) {
-                if (control.is('button dropdown')) {
+                if (!control.is('textbox')) {
                     ui.typer.getSelection().focus();
                 }
             }
@@ -5662,7 +6209,7 @@
             });
         }
         if (type === 'contextmenu') {
-            $(typer.element).bind('contextmenu', function (e) {
+            $(typer.element).on('contextmenu', function (e) {
                 e.preventDefault();
                 toolbar.update();
                 toolbar.show({
@@ -5675,8 +6222,8 @@
                     toolbar.element.focus();
                 });
             });
-            $(typer.element).bind('click', function (e) {
-                if (e.which === 1)  {
+            $(typer.element).on('click', function (e) {
+                if (e.which === 1) {
                     toolbar.hide();
                 }
             });
@@ -5701,43 +6248,33 @@
         init: function (e) {
             e.widget.toolbar = createToolbar(e.typer, e.widget.options);
             e.widget.contextmenu = createToolbar(e.typer, e.widget.options, null, 'contextmenu');
-            e.widget.widgets = {};
+            e.widget.toolbars = {};
         },
         focusin: function (e) {
             showToolbar(e.widget.toolbar);
         },
         focusout: function (e) {
-            hideToolbar(e.widget.toolbar);
-        },
-        widgetFocusin: function (e) {
-            if (!e.widget.widgets[e.targetWidget.id]) {
-                if (Typer.ui.controls['typer:widget:' + e.targetWidget.id]) {
-                    e.widget.widgets[e.targetWidget.id] = createToolbar(e.typer, e.widget.options, e.targetWidget);
-                }
-            }
-            if (e.widget.widgets[e.targetWidget.id]) {
-                e.widget.widgets[e.targetWidget.id].widget = e.targetWidget;
-                showToolbar(e.widget.widgets[e.targetWidget.id]);
-            }
-        },
-        widgetFocusout: function (e) {
-            showToolbar(e.widget.toolbar);
-        },
-        widgetDestroy: function (e) {
-            if (activeToolbar && activeToolbar.typer === e.typer) {
-                showToolbar(e.widget.toolbar);
-            }
+            hideToolbar(e.typer);
         },
         stateChange: function (e) {
             if (activeToolbar && activeToolbar.typer === e.typer) {
-                showToolbar(activeToolbar);
+                var toolbar = e.widget.toolbar;
+                var selection = e.typer.getSelection();
+                var currentWidget = selection.focusNode.widget;
+                if (currentWidget.id !== '__root__' && selection.focusNode.element === currentWidget.element) {
+                    if (Typer.ui.controls['typer:widget:' + currentWidget.id]) {
+                        toolbar = e.widget.toolbars[currentWidget.id] || (e.widget.toolbars[currentWidget.id] = createToolbar(e.typer, e.widget.options, currentWidget));
+                        toolbar.widget = currentWidget;
+                    }
+                }
+                showToolbar(toolbar);
             }
         }
     };
 
     $(window).scroll(function () {
         if (activeToolbar) {
-            showToolbar(activeToolbar);
+            positionToolbar(activeToolbar);
         }
     });
 
@@ -5746,10 +6283,11 @@
      * ********************************/
 
     Typer.ui.addControls('typer', {
-        'contextmenu': Typer.ui.group('history selection clipboard *'),
+        'contextmenu': Typer.ui.group('history selection clipboard insert *'),
         'contextmenu:history': Typer.ui.group('typer:history:*'),
         'contextmenu:selection': Typer.ui.group('typer:selection:*'),
         'contextmenu:clipboard': Typer.ui.group('typer:clipboard:*'),
+        'contextmenu:insert': Typer.ui.group('typer:toolbar:insert'),
         'toolbar': Typer.ui.group(),
         'toolbar:insert': Typer.ui.callout({
             before: '*',
@@ -5865,11 +6403,10 @@
         'widget:delete': '\ue872'        // delete
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/extensions/validation.js
 (function ($, Typer) {
-    'use strict';
-
     Typer.widgets.validation = {
         init: function (e) {
             var options = e.widget.options;
@@ -5904,315 +6441,10 @@
         }
     };
 
-} (jQuery, window.Typer));
+}(jQuery, Typer));
 
-(function ($, Typer, window, document) {
-
-    var INVALID = {
-        left: 10000,
-        right: -10000
-    };
-
-    var rectEquals = Typer.rectEquals;
-    var rectCovers = Typer.rectCovers;
-
-    var supported = !window.ActiveXObject;
-    var selectionLayers = [];
-    var hoverLayers = [];
-    var freeDiv = [];
-    var windowWidth = $(window).width();
-    var windowHeight = $(window).height();
-    var lastClientX;
-    var lastClientY;
-    var container;
-    var activeTyper;
-    var activeWidget;
-    var previousRect;
-
-    function init() {
-        var style =
-            '.has-N:focus{outline:none;}' +
-            '.has-N::selection,.has-N ::selection{background-color:transparent;}' +
-            '.has-N::-moz-selection,.has-N ::-moz-selection{background-color:transparent;}' +
-            '.N{position:fixed;pointer-events:none;width:100%;height:100%;font-family:monospace;font-size:10px;}' +
-            '.N>div{position:fixed;}' +
-            '.N>.border{box-sizing:border-box;border:1px solid rgba(0,31,81,0.2);}' +
-            '.N>.fill{background-color:rgba(0,31,81,0.2);}' +
-            '.N>.fill-margin{border:solid rgba(255,158,98,0.2);}' +
-            '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:before,.N>.tl-r:before,.N>.br-r:after,.N>.tr-r:after{content:"";display:block;position:absolute;background-color:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);clip-path:polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%);}}' +
-            '.N>.bl{border-bottom-left-radius:4px;}' +
-            '.N>.tl{border-top-left-radius:4px;}' +
-            '.N>.br{border-bottom-right-radius:4px;}' +
-            '.N>.tr{border-top-right-radius:4px;}' +
-            '.N>.bl-r:before{right:100%;bottom:0;}' +
-            '.N>.tl-r:before{right:100%;top:0;-webkit-transform:flipY();transform:flipY();}' +
-            '.N>.br-r:after{left:100%;bottom:0;-webkit-transform:flipX();transform:flipX();}' +
-            '.N>.tr-r:after{left:100%;top:0;-webkit-transform:rotate(180deg);transform:rotate(180deg);}' +
-            '.N>.newline:before{content:"\\0021a9";position:absolute;top:50%;left:2px;margin-top:-0.5em;line-height:1;background-color:white;box-shadow:0 0 1px black;opacity:0.5;padding:0 0.25em;}' +
-            '.N>.elm:before{content:attr(elm);box-shadow:0 0 1px white;background-color:rgba(0,31,81,0.8);color:white;padding:0 0.25em;position:absolute;bottom:100%;white-space:nowrap}';
-        $(document.body).append('<style>' + style.replace(/N/g, 'typer-visualizer') + '</style>');
-        container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
-
-        $(window).bind('scroll resize orientationchange focus', function () {
-            windowWidth = $(window).width();
-            windowHeight = $(window).height();
-            redrawSelection();
-        });
-        $(document.body).bind('mousewheel', redrawSelection);
-        $(document.body).bind('mousemove', function (e) {
-            lastClientX = e.clientX;
-            lastClientY = e.clientY;
-            updateHover(lastClientX, lastClientY);
-        });
-    }
-
-    function getElementMarker(element) {
-        var node = activeTyper.getNode(element);
-        var arr = [];
-        do {
-            arr.unshift(node.element.tagName.toLowerCase() + node.element.className.replace(/^(?=.)|\s+/, '.'));
-            node = node.parentNode;
-        } while (Typer.is(node, Typer.NODE_ANY_ALLOWTEXT));
-        return arr.join(' > ');
-    }
-
-    function getParagraphNode(node) {
-        if (Typer.is(node, Typer.NODE_ANY_INLINE)) {
-            for (; !Typer.is(node, Typer.NODE_PARAGRAPH | Typer.NODE_EDITABLE_PARAGRAPH) && node.parentNode; node = node.parentNode);
-        }
-        return node;
-    }
-
-    function computeTextRects(range) {
-        var container = range.commonAncestorContainer;
-        var bRect = Typer.ui.getRect(container.nodeType === 1 ? container : container.parentNode);
-        var rects = $.map(range.getClientRects(), function (v) {
-            return {
-                top: v.top,
-                left: v.left,
-                right: v.right,
-                bottom: v.bottom
-            };
-        });
-        var result = [];
-        rects.sort(function (a, b) {
-            return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
-        });
-        $.each(rects, function (i, v) {
-            var prev = result[0];
-            if (prev) {
-                if (v.left >= prev.right && v.top < prev.bottom) {
-                    result.shift();
-                    v.top = Math.min(v.top, prev.top);
-                    v.left = prev.left;
-                    v.bottom = Math.max(v.bottom, prev.bottom);
-                    prev = result[0];
-                } else if (v.top >= prev.bottom) {
-                    prev.right = bRect.left + bRect.width;
-                }
-            }
-            if (prev) {
-                if (rectCovers(prev, v)) {
-                    return;
-                }
-                if (v.top > prev.top && v.top - prev.bottom < v.bottom - v.top) {
-                    prev.bottom = v.top;
-                }
-                if (result[1] && prev.left === result[1].left && prev.right === result[1].right) {
-                    prev.top = result.splice(1, 1)[0].top;
-                }
-            }
-            result.unshift(v);
-        });
-        return result;
-    }
-
-    function addLayer(layers, element, type) {
-        var found;
-        $.each(layers, function (i, v) {
-            if (v.element === null) {
-                found = v;
-            }
-            if (v.element === element) {
-                v.type = type;
-                found = true;
-                return false;
-            }
-        });
-        if (typeof found === 'object') {
-            found.element = element;
-            found.type = type;
-        } else if (!found) {
-            layers[layers.length] = {
-                element: element,
-                type: type
-            };
-        }
-    }
-
-    function resetLayers(layers) {
-        $.each(layers, function (i, v) {
-            v.type = 'none';
-            if (!$.contains(document, v.element)) {
-                v.element = null;
-            }
-        });
-    }
-
-    function draw(layers) {
-        $.each(layers, function (i, v) {
-            var dom = v.dom = v.dom || [];
-            var domCount = 0;
-
-            function drawLayer(className, rect, extraCSS) {
-                var d = dom[domCount] = dom[domCount] || freeDiv.pop() || $('<div>')[0];
-                d.className = className;
-                d.removeAttribute('style');
-                $(d).css(Typer.ui.cssFromRect(rect)).css(extraCSS || {});
-                domCount++;
-                return d;
-            }
-
-            if (v.type.substr(0, 4) === 'text') {
-                var range = Typer.createRange(v.element);
-                if (v.type === 'text-fill' && window.getSelection().rangeCount) {
-                    range = Typer.createRange(range, window.getSelection().getRangeAt(0));
-                }
-                var rects = computeTextRects(range);
-                var type = v.type;
-                $.each(rects, function (i, v) {
-                    var prev = rects[i - 1] || INVALID;
-                    var next = rects[i + 1] || INVALID;
-                    var dom = drawLayer(type === 'text-fill' ? 'fill' : 'border', v);
-                    dom.className += [
-                        v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
-                        v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
-                        v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
-                        v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
-                });
-                if (v.type === 'text') {
-                    drawLayer('elm', rects[rects.length - 1]).setAttribute('elm', getElementMarker(v.element));
-                }
-            } else if (v.type.substr(0, 5) === 'block') {
-                var bRect = Typer.ui.getRect(v.element);
-                drawLayer('border', bRect);
-                if (v.type === 'block') {
-                    drawLayer('elm', bRect).setAttribute('elm', getElementMarker(v.element));
-                } else if (v.type === 'block-fill') {
-                    drawLayer('fill', bRect);
-                } else if (v.type === 'block-margin') {
-                    var style = window.getComputedStyle(v.element);
-                    var s = {};
-                    s.margin = [
-                        -parseFloat(style.marginTop),
-                        -parseFloat(style.marginRight),
-                        -parseFloat(style.marginBottom),
-                        -parseFloat(style.marginLeft), ''].join('px ');
-                    s.borderWidth = [
-                        style.marginTop,
-                        style.marginRight,
-                        style.marginBottom,
-                        style.marginLeft].join(' ');
-                    drawLayer('fill-margin', bRect, s);
-                    $('br', v.element).each(function (i, v) {
-                        drawLayer('newline', Typer.ui.getRect(v));
-                    });
-                }
-            }
-            if (dom.length > domCount) {
-                freeDiv.push.apply(freeDiv, dom.splice(domCount));
-            }
-            $(dom).appendTo(container);
-        });
-        $(freeDiv).detach();
-    }
-
-    function redrawSelection() {
-        if (activeTyper) {
-            var currentRect = Typer.ui.getRect(activeTyper.element);
-            if (!previousRect || !rectEquals(previousRect, currentRect)) {
-                previousRect = currentRect;
-                draw(selectionLayers);
-            }
-        }
-    }
-
-    function updateHover(x, y) {
-        resetLayers(hoverLayers);
-        if (activeTyper) {
-            var node = activeTyper.nodeFromPoint(x, y);
-            if (node && node.element !== activeTyper.element) {
-                if (Typer.is(node, Typer.NODE_WIDGET)) {
-                    addLayer(hoverLayers, node.widget.element, 'block');
-                } else {
-                    addLayer(hoverLayers, node.element, Typer.is(node, Typer.NODE_ANY_INLINE) ? 'text' : 'block');
-                }
-            }
-        }
-        draw(hoverLayers);
-    }
-
-    function updateSelection(options) {
-        var selection = activeTyper.getSelection();
-        resetLayers(selectionLayers);
-        if (!selection.isCaret) {
-            Typer.iterate(selection.createTreeWalker(-1, function (v) {
-                if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT) || (options.layout && activeWidget && v.element === activeWidget.element)) {
-                    addLayer(selectionLayers, v.element, v.nodeType & Typer.NODE_ANY_ALLOWTEXT ? 'text-fill' : 'block-fill');
-                    return 2;
-                }
-            }));
-        } else if (options.layout && selection.startNode && Typer.is(selection.startNode, Typer.NODE_ANY_ALLOWTEXT)) {
-            addLayer(selectionLayers, getParagraphNode(selection.startNode).element, 'block-margin');
-        }
-        draw(selectionLayers);
-    }
-
-    Typer.widgets.visualizer = {
-        options: {
-            layout: true
-        },
-        init: function (e) {
-            $(e.typer.element).addClass('has-typer-visualizer');
-            if (supported && !init.init) {
-                init();
-                init.init = true;
-            }
-        },
-        focusin: function (e) {
-            activeTyper = e.typer;
-            Typer.ui.setZIndex(container, activeTyper.element);
-        },
-        focusout: function (e) {
-            activeTyper = null;
-            $(container).children().detach();
-        },
-        widgetFocusin: function (e) {
-            if (e.targetWidget.typer === activeTyper) {
-                activeWidget = e.targetWidget;
-                if (supported) {
-                    updateSelection(e.widget.options);
-                }
-            }
-        },
-        widgetFocusout: function (e) {
-            activeWidget = null;
-        },
-        stateChange: function (e) {
-            if (supported && e.typer === activeTyper) {
-                updateSelection(e.widget.options);
-                updateHover(lastClientX, lastClientY);
-            }
-        }
-    };
-
-    Typer.defaultOptions.visualizer = supported;
-
-})(jQuery, window.Typer, window, document);
-
+// source: src/presets/datepicker.js
 (function ($, Typer, Date) {
-    'use strict';
-
     var MS_PER_DAY = 86400000;
     var monthstr = 'January February March April May June July August September October November December'.split(' ');
     var shortWeekday = 'Su Mo Tu We Th Fr Sa'.split(' ');
@@ -6348,7 +6580,7 @@
             $table.find('th').text(function (i) {
                 return shortWeekday[i];
             });
-            $table.bind('mousewheel', function (e) {
+            $table.on('mousewheel', function (e) {
                 ui.trigger(self, 'showMonth', Typer.ui.getWheelDelta(e));
                 e.preventDefault();
             });
@@ -6446,9 +6678,9 @@
             $(repeat('<i></i>', 12)).appendTo($face).each(function (i, v) {
                 $(v).css('transform', 'rotate(' + (i * 30) + 'deg)');
             });
-            $('s', self.element).bind('mousedown touchstart', function (e) {
+            $('s', self.element).on('mousedown touchstart', function (e) {
                 var elm = e.target;
-                var center = Typer.ui.getRect(elm.parentNode);
+                var center = Typer.getRect(elm.parentNode);
                 center = {
                     top: (center.top + center.bottom) / 2,
                     left: (center.left + center.right) / 2
@@ -6481,11 +6713,11 @@
                     ui.execute(self);
                 };
                 if (e.which === 1 || (e.originalEvent.touches || '').length === 1) {
-                    $(document.body).bind(handlers);
+                    $(document.body).on(handlers);
                 }
             });
             var mousewheelTimeout;
-            $(self.element).bind('mousewheel', function (e) {
+            $(self.element).on('mousewheel', function (e) {
                 self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
                 clearImmediate(mousewheelTimeout);
@@ -6711,7 +6943,7 @@
             }
         },
         contentChange: function (e) {
-            if (e.typer === activeTyper && e.data !== 'script') {
+            if (e.typer === activeTyper && e.source !== 'script') {
                 var date = new Date(e.typer.extractText());
                 if (!isNaN(+date)) {
                     callout.setValue(normalizeDate(e.widget.options, date));
@@ -6771,11 +7003,10 @@
         }
     };
 
-}(jQuery, window.Typer, Date));
+}(jQuery, Typer, Date));
 
+// source: src/presets/keyword.js
 (function ($, Typer) {
-    'use strict';
-
     function encode(v) {
         var a = document.createTextNode(v.replace(/\s/g, '\u00a0')),
             b = document.createElement('div');
@@ -7041,17 +7272,16 @@
             }
         },
         contentChange: function (e) {
-            if (e.data === 'textInput' || e.data === 'keystroke') {
+            if (e.source !== 'script') {
                 showSuggestions(e.widget);
             }
         }
     };
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/presets/number.js
 (function ($, Typer) {
-    'use strict';
-
     Typer.presets.number = {
         validation: {
             allowChars: '0-9'
@@ -7097,34 +7327,29 @@
             }
         },
         focusout: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value);
+            e.typer.setValue(e.typer.getValue() || 0);
         },
         mousewheel: function (e) {
-            e.typer.setValue(e.typer.getValue() - e.data * e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) - e.data * e.widget.options.step);
             e.preventDefault();
         },
         upArrow: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value + e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) + e.widget.options.step);
         },
         downArrow: function (e) {
-            var value = parseInt(e.typer.extractText()) || 0;
-            e.typer.setValue(value - e.widget.options.step);
+            e.typer.setValue((e.typer.getValue() || 0) - e.widget.options.step);
         },
         contentChange: function (e) {
-            if (e.data !== 'keystroke') {
-                var value = parseInt(e.typer.extractText()) || 0;
-                e.typer.setValue(value);
+            if (e.source !== 'keyboard') {
+                e.typer.setValue(e.typer.getValue() || 0);
             }
         }
     };
 
-} (jQuery, window.Typer));
+}(jQuery, Typer));
 
+// source: src/presets/textbox.js
 (function ($, Typer) {
-    'use strict';
-
     Typer.presets.textbox = {
         options: {
             required: false
@@ -7153,26 +7378,25 @@
         }
     };
 
-} (jQuery, window.Typer));
+}(jQuery, Typer));
 
-(function ($, Typer, window, document) {
-    'use strict';
-
+// source: src/themes/material.js
+(function ($, Typer) {
     var ANIMATION_END = 'animationend oanimationend webkitAnimationEnd';
     var TRANSITION_END = 'transitionend otransitionend webkitTransitionEnd';
 
     function setMenuPosition(thisMenu) {
         var callout = $('.typer-ui-float', thisMenu)[0];
-        var rect = Typer.ui.getRect(callout);
+        var rect = Typer.getRect(callout);
         if (rect.bottom > $(window).height()) {
-            $(callout).removeClass('float-top float-bottom').addClass('float-top');
+            $(callout).addClass('float-top');
         } else if (rect.top < 0) {
-            $(callout).removeClass('float-top float-bottom').addClass('float-bottom');
+            $(callout).removeClass('float-top');
         }
         if (rect.right > $(window).width()) {
-            $(callout).removeClass('float-left float-right').addClass('float-left');
+            $(callout).addClass('float-left');
         } else if (rect.left < 0) {
-            $(callout).removeClass('float-left float-right').addClass('float-right');
+            $(callout).removeClass('float-left');
         }
     }
 
@@ -7190,19 +7414,19 @@
     }
 
     function runCSSTransition(element, className, callback) {
-        if (!$(element).hasClass(className)) {
+        var arr = $(element).not('.' + className).map(function (i, v) {
             var deferred = $.Deferred();
             var handler = function (e) {
-                if ($(element).hasClass(className)) {
-                    $(element).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
-                    $(element).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
-                    deferred.resolveWith(e.target);
+                if ($(v).hasClass(className) && e.target === v) {
+                    $(v).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
+                    $(v).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+                    deferred.resolveWith(v);
                 }
             };
-            $(element).addClass(className).one(TRANSITION_END + ' ' + ANIMATION_END, handler);
+            $(element).addClass(className).on(TRANSITION_END + ' ' + ANIMATION_END, handler);
             return deferred.promise().done(callback);
-        }
-        return $.when();
+        });
+        return $.when.apply(null, arr.get());
     }
 
     function detachCallout(control) {
@@ -7267,7 +7491,7 @@
                 detachCallout(control);
             }
         },
-        dropdown: '<button class="typer-ui-dropdown" x:bind="(title:label)"><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span><br x:t="menupane"/></button>',
+        dropdown: '<label class="typer-ui-dropdown" x:bind="(title:label)"><button><span class="typer-ui-label"><br x:t="labelIcon"/><span x:bind="(_:selectedText)"></span></span></button><br x:t="menupane"/></button>',
         dropdownInit: function (ui, control) {
             if (!control.contextualParent.is('callout contextmenu')) {
                 detachCallout(control);
@@ -7333,8 +7557,8 @@
             });
         },
         executed: function (ui, control) {
-            if (control.is('button') && control.contextualParent.is('callout dropdown contextmenu') && control.contextualParent.hideCalloutOnExecute !== false) {
-                ui.hide(control.contextualParent);
+            if (!control.is('textbox') && (ui.is('contextmenu') || (control.contextualParent.is('callout dropdown') && control.contextualParent.hideCalloutOnExecute !== false))) {
+                ui.hide(ui.is('contextmenu') ? null : control.contextualParent);
             }
         },
         init: function (ui, control) {
@@ -7345,7 +7569,7 @@
     $(function () {
         var SELECT_EFFECT = '.typer-ui-material button:not(.typer-ui-checkbox), .typer-ui-material .has-clickeffect';
         $(document.body).on('mousedown', SELECT_EFFECT, function (e) {
-            var pos = Typer.ui.getRect(e.currentTarget);
+            var pos = Typer.getRect(e.currentTarget);
             var $overlay = $('<div class="typer-ui-clickeffect"><i></i></div>').appendTo(e.currentTarget);
             var $anim = $overlay.children().css({
                 top: e.clientY - pos.top,
@@ -7363,11 +7587,11 @@
         });
         $(document.body).on('mouseup mouseleave', SELECT_EFFECT, function (e) {
             var $overlay = $('.typer-ui-clickeffect', e.currentTarget);
-            runCSSTransition($overlay.children(':not(.animate-out)'), 'animate-out', function () {
-                $overlay.remove();
+            runCSSTransition($overlay.children(), 'animate-out', function () {
+                $(this).parent().remove();
             });
         });
-        $(document.body).on('mouseover', '.typer-ui-callout:has(>.typer-ui-float)', function (e) {
+        $(document.body).on('mouseover', 'label:has(>.typer-ui-float)', function (e) {
             setMenuPosition(e.currentTarget);
         });
         $(document.body).on('click', '.typer-ui-dialog-wrapper', function (e) {
@@ -7375,8 +7599,113 @@
         });
     });
 
-}(jQuery, window.Typer, window, document));
+}(jQuery, Typer));
 
+}(jQuery, window, document, Object, String, Array, Math, Node, Range, DocumentFragment, RegExp, new (function () {
+
+// source: src/shim/MutationObserver.js
+this.MutationObserver = window.MutationObserver || (function () {
+    function MutationObserver(handler) {
+        this.records = [];
+        this.handler = handler;
+    }
+    MutationObserver.prototype = {
+        observe: function (element, init) {
+            var self = this;
+            $(element).on('DOMNodeInserted DOMNodeRemoved DOMAttrModified', function (e) {
+                var type = e.type.charAt(7);
+                var record = {};
+                record.addedNodes = [];
+                record.removedNodes = [];
+                if (type === 'M') {
+                    if (!init.attributes) {
+                        return;
+                    }
+                    record.target = e.target;
+                    record.attributeName = e.originalEvent.attrName;
+                } else {
+                    if (!init.childList) {
+                        return;
+                    }
+                    record.target = e.target.parentNode;
+                    record[type === 'I' ? 'addedNodes' : 'removedNodes'][0] = e.target;
+                }
+                if (init.subtree || record.target === element) {
+                    self.records[self.records.length] = record;
+                    clearTimeout(self.timeout);
+                    self.timeout = setTimeout(function () {
+                        self.handler(self.takeRecords());
+                    });
+                }
+            });
+        },
+        takeRecords: function () {
+            return this.records.splice(0);
+        }
+    };
+    return MutationObserver;
+}());
+
+// source: src/shim/Set.js
+this.Set = window.Set || (function () {
+    function Set() {
+        this.items = [];
+    }
+    Set.prototype = {
+        get size() {
+            return this.items.length;
+        },
+        add: function (v) {
+            var items = this.items;
+            if (items.indexOf(v) < 0) {
+                items.push(v);
+            }
+            return this;
+        },
+        delete: function (v) {
+            var index = this.items.indexOf(v);
+            if (index >= 0) {
+                this.items.splice(index, 1);
+            }
+            return index >= 0;
+        },
+        forEach: function (callback, thisArg) {
+            var self = this;
+            self.items.forEach(function (v) {
+                callback.call(thisArg, v, v, self);
+            });
+        },
+        clear: function () {
+            this.items.splice(0);
+        }
+    };
+    return Set;
+}());
+
+// source: src/shim/WeakMap.js
+this.WeakMap = window.WeakMap || (function () {
+    var num = 0;
+    function WeakMap() {
+        this.key = '__WeakMap' + (++num);
+    }
+    WeakMap.prototype = {
+        get: function (key) {
+            return key && key[this.key];
+        },
+        set: function (key, value) {
+            key[this.key] = value;
+        },
+        has: function (key) {
+            return key && this.key in key;
+        },
+        delete: function (key) {
+            delete key[this.key];
+        }
+    };
+    return WeakMap;
+}());
+
+// source: node_modules/setimmediate/setimmediate.js
 (function (global, undefined) {
     "use strict";
 
@@ -7563,3 +7892,5 @@
     attachTo.setImmediate = setImmediate;
     attachTo.clearImmediate = clearImmediate;
 }(typeof self === "undefined" ? typeof global === "undefined" ? this : global : self));
+
+})));

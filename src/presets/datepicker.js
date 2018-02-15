@@ -136,7 +136,7 @@
             $table.find('th').text(function (i) {
                 return shortWeekday[i];
             });
-            $table.bind('mousewheel', function (e) {
+            $table.on('mousewheel', function (e) {
                 ui.trigger(self, 'showMonth', Typer.ui.getWheelDelta(e));
                 e.preventDefault();
             });
@@ -234,7 +234,7 @@
             $(repeat('<i></i>', 12)).appendTo($face).each(function (i, v) {
                 $(v).css('transform', 'rotate(' + (i * 30) + 'deg)');
             });
-            $('s', self.element).bind('mousedown touchstart', function (e) {
+            $('s', self.element).on('mousedown touchstart', function (e) {
                 var elm = e.target;
                 var center = Typer.getRect(elm.parentNode);
                 center = {
@@ -269,11 +269,11 @@
                     ui.execute(self);
                 };
                 if (e.which === 1 || (e.originalEvent.touches || '').length === 1) {
-                    $(document.body).bind(handlers);
+                    $(document.body).on(handlers);
                 }
             });
             var mousewheelTimeout;
-            $(self.element).bind('mousewheel', function (e) {
+            $(self.element).on('mousewheel', function (e) {
                 self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
                 clearImmediate(mousewheelTimeout);
@@ -559,4 +559,4 @@
         }
     };
 
-}(jQuery, window.Typer, Date));
+}(jQuery, Typer, Date));

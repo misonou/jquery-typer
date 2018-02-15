@@ -2,7 +2,7 @@
     'use strict';
 
     function toggleClass(widget, className, value) {
-        $(widget.typer.element).parents(widget.options.target).andSelf().eq(0).toggleClass(widget.options[className], value);
+        $(widget.typer.element).parents(widget.options.target).addBack().eq(0).toggleClass(widget.options[className], value);
     }
 
     Typer.widgets.stateclass = {
@@ -25,4 +25,4 @@
         }
     };
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));

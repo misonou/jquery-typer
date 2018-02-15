@@ -87,4 +87,4 @@
         'media:altText': '\ue0b9'  // comment
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));

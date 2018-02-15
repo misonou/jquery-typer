@@ -1,4 +1,4 @@
-(function ($, window, document, root, String, Math, Node, Range, DocumentFragment, WeakMap, Set, array, RegExp) {
+(function ($, root, array) {
     'use strict';
 
     var KEYNAMES = JSON.parse('{"8":"backspace","9":"tab","13":"enter","16":"shift","17":"ctrl","18":"alt","19":"pause","20":"capsLock","27":"escape","32":"space","33":"pageUp","34":"pageDown","35":"end","36":"home","37":"leftArrow","38":"upArrow","39":"rightArrow","40":"downArrow","45":"insert","46":"delete","48":"0","49":"1","50":"2","51":"3","52":"4","53":"5","54":"6","55":"7","56":"8","57":"9","65":"a","66":"b","67":"c","68":"d","69":"e","70":"f","71":"g","72":"h","73":"i","74":"j","75":"k","76":"l","77":"m","78":"n","79":"o","80":"p","81":"q","82":"r","83":"s","84":"t","85":"u","86":"v","87":"w","88":"x","89":"y","90":"z","91":"leftWindow","92":"rightWindowKey","93":"select","96":"numpad0","97":"numpad1","98":"numpad2","99":"numpad3","100":"numpad4","101":"numpad5","102":"numpad6","103":"numpad7","104":"numpad8","105":"numpad9","106":"multiply","107":"add","109":"subtract","110":"decimalPoint","111":"divide","112":"f1","113":"f2","114":"f3","115":"f4","116":"f5","117":"f6","118":"f7","119":"f8","120":"f9","121":"f10","122":"f11","123":"f12","144":"numLock","145":"scrollLock","186":"semiColon","187":"equalSign","188":"comma","189":"dash","190":"period","191":"forwardSlash","192":"backtick","219":"openBracket","220":"backSlash","221":"closeBracket","222":"singleQuote"}');
@@ -40,11 +40,17 @@
     var isFunction = $.isFunction;
     var extend = $.extend;
     var selection = window.getSelection();
+    var setImmediate = window.setImmediate;
+    var clearImmediate = window.clearImmediate;
+    var MutationObserver = shim.MutationObserver;
+    var WeakMap = shim.WeakMap;
+    var Set = shim.Set;
+
     var clipboard = {};
-    var userFocus;
-    var detachedElements;
-    var selectionCache;
-    var dirtySelections;
+    var userFocus = new WeakMap();
+    var selectionCache = new WeakMap();
+    var detachedElements = new WeakMap();
+    var dirtySelections = new Set();
     var windowFocusedOut;
     var permitFocusEvent;
     var supportTextInputEvent;
@@ -124,9 +130,9 @@
         };
     }
 
-    function defineProperty(obj, name, value, freeze) {
+    function defineProperty(obj, name, value) {
         Object.defineProperty(obj, name, {
-            configurable: !freeze,
+            configurable: true,
             writable: true,
             value: value
         });
@@ -194,7 +200,7 @@
         return String(v || '').replace(/^[\s\u200b]+|[\s\u200b]+$/g, '');
     }
 
-    function collapse(v) {
+    function collapseWS(v) {
         return String(v || '').replace(/[^\S\u00a0]+/g, ' ');
     }
 
@@ -249,25 +255,12 @@
         return is(node, NODE_WIDGET) ? node.typer.getNode(node.widget.element) : node;
     }
 
-    function attrs(element) {
-        var value = {};
-        $.each($.makeArray(element && element.attributes), function (i, v) {
-            value[v.nodeName] = v.value;
-        });
-        return value;
-    }
-
     function compareAttrs(a, b) {
-        var thisAttr = attrs(a);
-        var prevAttr = attrs(b);
-        var count = 0;
-        for (var i in thisAttr) {
-            if (thisAttr[i] !== prevAttr[i]) {
-                return false;
-            }
-            count++;
-        }
-        return count === Object.keys(prevAttr).length;
+        var thisAttr = a.attributes;
+        var prevAttr = b.attributes;
+        return thisAttr.length === prevAttr.length && !any(thisAttr, function (v) {
+            return !prevAttr[v.nodeName] || v.value !== prevAttr[v.nodeName].value;
+        });
     }
 
     function sameElementSpec(a, b) {
@@ -505,7 +498,7 @@
 
     function scrollByAmount(element, scrollAmount) {
         for (var cur = element.offsetParent; cur !== root; cur = cur.parentNode) {
-            var style = window.getComputedStyle(cur, null);
+            var style = window.getComputedStyle(cur);
             if (style.overflow === 'scroll' || style.overflowY === 'scroll') {
                 cur.scrollTop += scrollAmount;
                 return;
@@ -518,7 +511,7 @@
         // IE fires input and text-input event on the innermost element where the caret positions at
         // the event does not bubble up so need to trigger manually on the top element
         // also IE use all lowercase letter in the event name
-        $(element).bind('input textinput', function (e) {
+        $(element).on('input textinput', function (e) {
             e.stopPropagation();
             if (e.type === 'textinput' || topElement) {
                 var event = document.createEvent('Event');
@@ -549,7 +542,7 @@
     }
 
     function trackEventSource(element, typer) {
-        $(element).bind('mousedown mouseup mousewheel keydown keyup keypress touchstart touchend', function (e) {
+        $(element).on('mousedown mouseup mousewheel keydown keyup keypress touchstart touchend', function (e) {
             var ch = e.type.charAt(0);
             setEventSource(ch === 'k' ? 'keyboard' : ch === 't' ? 'touch' : 'mouse', typer);
 
@@ -675,11 +668,11 @@
         }
 
         function createTyperDocument(rootElement, fireEvent) {
-            var nodeMap = new WeakMap();
-            var dirtyElements = new Set();
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
-            var observer;
+            var nodeMap = new WeakMap();
+            var dirtyElements = new Set();
+            var observer = new MutationObserver(handleMutations);
 
             function triggerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
@@ -806,24 +799,8 @@
                 });
             }
 
-            function handleMutationLegacy(e) {
-                var record = {};
-                record.addedNodes = [];
-                record.removedNodes = [];
-                if (e.type !== 'DOMAttrModified') {
-                    record.target = e.target.parentNode;
-                    record[e.type.indexOf('I') > 0 ? 'addedNodes' : 'removedNodes'][0] = e.target;
-                } else {
-                    record.target = e.target;
-                    record.attributeName = e.attrName;
-                }
-                handleMutations([record]);
-            }
-
             function ensureState() {
-                if (observer) {
-                    handleMutations(observer.takeRecords());
-                }
+                handleMutations(observer.takeRecords());
                 if (dirtyElements.size) {
                     var arr = consume(dirtyElements);
                     arr.sort(function (a, b) {
@@ -857,18 +834,11 @@
                 rootElement = is(rootElement, DocumentFragment) || createDocumentFragment(rootElement);
             }
             if (fireEvent) {
-                if (window.MutationObserver) {
-                    observer = new MutationObserver(handleMutations);
-                    observer.observe(rootElement, {
-                        subtree: true,
-                        childList: true,
-                        attributes: true
-                    });
-                } else {
-                    $(rootElement).bind('DOMNodeInserted DOMNodeRemoved DOMAttrModified', function (e) {
-                        handleMutationLegacy(e.originalEvent);
-                    });
-                }
+                observer.observe(rootElement, {
+                    subtree: true,
+                    childList: true,
+                    attributes: true
+                });
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
             nodeMap.set(rootElement, rootNode);
@@ -938,9 +908,9 @@
                     }
                     if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
-                            v.data = collapse(v.data);
+                            v.data = collapseWS(v.data);
                             if (isText(v.nextSibling)) {
-                                v.nextSibling.data = collapse(v.data + v.nextSibling.data);
+                                v.nextSibling.data = collapseWS(v.data + v.nextSibling.data);
                                 removeNode(v);
                             }
                         });
@@ -997,7 +967,7 @@
                                 shift();
                             }
                             if (handler && (!isWidgetHead || !rangeCovers(range, element))) {
-                                (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).andSelf()).each(function (i, v) {
+                                (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).addBack()).each(function (i, v) {
                                     stack.unshift([v, v.cloneNode(false), node.widget]);
                                     stack[1][1].appendChild(stack[0][1]);
                                 });
@@ -1111,7 +1081,7 @@
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
                         if (!widgetAllowed(node.widget.id, caretNode)) {
-                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapse(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
+                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
                             node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
                         }
                         if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
@@ -1507,13 +1477,13 @@
                 if (e.which === 1) {
                     (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                     currentSelection.focus();
-                    $(document.body).bind(handlers);
+                    $(document.body).on(handlers);
                     mousedown = true;
                 }
                 e.preventDefault();
             });
 
-            $self.bind('compositionstart compositionupdate compositionend', function (e) {
+            $self.on('compositionstart compositionupdate compositionend', function (e) {
                 e.stopPropagation();
                 composition = e.type.slice(-1) !== 'd';
                 if (!composition) {
@@ -1526,7 +1496,7 @@
                 }
             });
 
-            $self.bind('keydown keypress keyup', function (e) {
+            $self.on('keydown keypress keyup', function (e) {
                 if (composition) {
                     e.stopImmediatePropagation();
                     return;
@@ -1573,7 +1543,7 @@
                 }
             });
 
-            $self.bind('keypress input textInput', function (e) {
+            $self.on('keypress input textInput', function (e) {
                 if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
@@ -1581,7 +1551,7 @@
                 }
             });
 
-            $self.bind('cut copy', function (e) {
+            $self.on('cut copy', function (e) {
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
                 setEventSource('cut', typer);
                 clipboard.content = extractContents(currentSelection, e.type);
@@ -1596,7 +1566,7 @@
                 e.preventDefault();
             });
 
-            $self.bind('paste', function (e) {
+            $self.on('paste', function (e) {
                 setEventSource('paste', typer);
                 handleDataTransfer(e.originalEvent.clipboardData || window.clipboardData);
                 e.preventDefault();
@@ -1610,7 +1580,7 @@
                 }
             });
 
-            $self.bind('drop', function (e) {
+            $self.on('drop', function (e) {
                 setEventSource('drop', typer);
                 if (currentSelection.moveToPoint(e.originalEvent.clientX, e.originalEvent.clientY)) {
                     handleDataTransfer(e.originalEvent.dataTransfer);
@@ -1619,7 +1589,7 @@
                 e.preventDefault();
             });
 
-            $self.bind('touchstart touchmove touchend', function (e) {
+            $self.on('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
                     currentSelection.focus();
@@ -1630,32 +1600,32 @@
                 touchObj = e.type === 'touchstart' && !touches[1] && touches[0];
             });
 
-            $self.bind('contextmenu', function (e) {
+            $self.on('contextmenu', function (e) {
                 var range = caretRangeFromPoint(e.clientX, e.clientY, topElement);
                 if (currentSelection.isCaret || !rangeIntersects(currentSelection, range)) {
                     currentSelection.select(range);
                 }
             });
 
-            $self.bind('click', function (e) {
+            $self.on('click', function (e) {
                 triggerClick(e);
                 e.preventDefault();
             });
 
-            $self.bind('dblclick', function (e) {
+            $self.on('dblclick', function (e) {
                 if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
                     currentSelection.select('word');
                 }
                 e.preventDefault();
             });
 
-            $self.bind('mousewheel', function (e) {
+            $self.on('mousewheel', function (e) {
                 if (typerFocused && triggerDefaultPreventableEvent(EVENT_HANDLER, 'mousewheel', Typer.ui.getWheelDelta(e))) {
                     e.preventDefault();
                 }
             });
 
-            $self.bind('focusin', function (e) {
+            $self.on('focusin', function (e) {
                 userFocus.delete(typer);
                 // prevent focus event triggered due to content updates through code
                 // when current editor is not focused
@@ -1674,7 +1644,7 @@
                 }
             });
 
-            $self.bind('focusout', function (e) {
+            $self.on('focusout', function (e) {
                 if (document.activeElement !== topElement && typerFocused) {
                     if (e.relatedTarget === undefined) {
                         // Chrome triggers focusout event with relatedTarget equals undefined
@@ -1835,7 +1805,7 @@
             retainFocus: function (element) {
                 if (!relatedElements.has(element)) {
                     relatedElements.set(element, true);
-                    $(element).bind('focusout', retainFocusHandler);
+                    $(element).on('focusout', retainFocusHandler);
                 }
             },
             releaseFocus: function (element) {
@@ -1926,6 +1896,7 @@
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
+        setImmediateOnce: setImmediateOnce,
         closest: closest,
         getCommonAncestor: getCommonAncestor,
         sameElementSpec: sameElementSpec,
@@ -2000,7 +1971,8 @@
             return this.childNodes[0] || null;
         },
         get lastChild() {
-            return this.childNodes.slice(-1)[0] || null;
+            var arr = this.childNodes;
+            return arr[arr.length - 1] || null;
         }
     });
 
@@ -2695,7 +2667,7 @@
         }
     }, 100);
 
-    $(window).bind('focusin focusout', function (e) {
+    $(window).on('focusin focusout', function (e) {
         // IE raise event on the current active element instead of window object when browser loses focus
         // need to check if there is related target instead
         if (IS_IE ? !e.relatedTarget : e.target === window) {
@@ -2707,72 +2679,14 @@
         trackEventSource(document.body);
     });
 
-    // polyfill for WeakMap
-    // simple and good enough as we only need to associate data to a DOM object
-    if (typeof WeakMap === 'undefined') {
-        WeakMap = function () {
-            defineProperty(this, '__dataKey__', 'typer' + Math.random().toString(36).substr(2, 8), true);
-        };
-        definePrototype(WeakMap, {
-            get: function (key) {
-                return key && key[this.__dataKey__];
-            },
-            set: function (key, value) {
-                key[this.__dataKey__] = value;
-            },
-            has: function (key) {
-                return key && this.__dataKey__ in key;
-            },
-            delete: function (key) {
-                delete key[this.__dataKey__];
-            }
-        });
-    }
-    userFocus = new WeakMap();
-    selectionCache = new WeakMap();
-    detachedElements = new WeakMap();
-
-    // polyfill for Set
-    if (typeof Set === 'undefined') {
-        Set = function () { };
-        definePrototype(Set, {
-            get size() {
-                return this.length;
-            },
-            add: function (v) {
-                if (array.indexOf.call(this, v) < 0) {
-                    array.push.call(this, v);
-                }
-                return this;
-            },
-            delete: function (v) {
-                var index = array.indexOf.call(this, v);
-                if (index >= 0) {
-                    array.splice.call(this, index, 1);
-                }
-                return index >= 0;
-            },
-            forEach: function (callback, thisArg) {
-                var self = this;
-                array.forEach.call(this, function (v) {
-                    callback.call(thisArg, v, v, self);
-                });
-            },
-            clear: function () {
-                array.splice.call(this, 0);
-            }
-        });
-    }
-    dirtySelections = new Set();
-
     // polyfill for document.elementFromPoint and especially for IE
-    if (typeof elementFromPoint_ === 'undefined') {
+    if (!elementFromPoint_) {
         elementFromPoint_ = function (x, y) {
             function hitTestChildElements(node) {
                 var currentZIndex;
                 var target;
                 $(node).children().each(function (i, v) {
-                    var style = window.getComputedStyle(v, null);
+                    var style = window.getComputedStyle(v);
                     var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
                     if (style.pointerEvents !== 'none' && (currentZIndex === undefined || zIndex >= currentZIndex)) {
                         var containsPoint = any(style.display === 'inline' ? v.getClientRects() : [getRect(v)], function (v) {
@@ -2799,7 +2713,7 @@
     }
 
     // polyfill for document.caretRangeFromPoint
-    if (typeof caretRangeFromPoint_ === 'undefined') {
+    if (!caretRangeFromPoint_) {
         caretRangeFromPoint_ = function () {
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
@@ -2877,7 +2791,7 @@
     }
 
     // polyfill for element.scrollIntoViewIfNeeded
-    if (typeof scrollIntoViewIfNeeded_ === 'undefined') {
+    if (!scrollIntoViewIfNeeded_) {
         scrollIntoViewIfNeeded_ = function () {
             var winRect = getRect(root);
             var elmRect = getRect(this);
@@ -2906,4 +2820,4 @@
     document.addEventListener('keypress', detectTextInputEvent, true);
     document.addEventListener('textInput', detectTextInputEvent, true);
 
-}(jQuery, window, document, document.documentElement, String, Math, Node, Range, DocumentFragment, window.WeakMap, window.Set, Array.prototype, RegExp));
+}(jQuery, document.documentElement, Array.prototype));

@@ -65,4 +65,4 @@
         }
     };
 
-} (jQuery, window.Typer));
+}(jQuery, Typer));

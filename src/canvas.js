@@ -1,4 +1,4 @@
-(function ($, Typer, window, document, parseFloat) {
+(function ($, Typer) {
     'use strict';
 
     var INVALID = {
@@ -6,6 +6,7 @@
         right: -10000
     };
     var root = document.documentElement;
+    var parseFloat = window.parseFloat;
     var allLayers = {};
     var pointerRegions = [];
     var freeDiv = [];
@@ -70,8 +71,8 @@
         }) + '</style>');
         container = $('<div class="typer-ui typer-visualizer">').appendTo(document.body)[0];
 
-        $(window).bind('scroll resize orientationchange focus', refresh);
-        $(document.body).bind('mousewheel mousedown mouseup keyup', refresh);
+        $(window).on('scroll resize orientationchange focus', refresh);
+        $(document.body).on('mousewheel mousedown mouseup keyup', refresh);
 
         $(document.body).mousedown(function (e) {
             $.each(pointerRegions, function (i, v) {
@@ -161,7 +162,7 @@
             deferred.resolve(hasMoved);
         };
         if (e.which === 1) {
-            $(document.body).bind(handlers);
+            $(document.body).on(handlers);
         } else {
             deferred.reject();
         }
@@ -362,4 +363,4 @@
         addLayer: addLayer
     };
 
-})(jQuery, window.Typer, window, document, parseFloat);
+})(jQuery, Typer);

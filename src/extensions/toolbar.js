@@ -116,7 +116,7 @@
             });
         }
         if (type === 'contextmenu') {
-            $(typer.element).bind('contextmenu', function (e) {
+            $(typer.element).on('contextmenu', function (e) {
                 e.preventDefault();
                 toolbar.update();
                 toolbar.show({
@@ -129,8 +129,8 @@
                     toolbar.element.focus();
                 });
             });
-            $(typer.element).bind('click', function (e) {
-                if (e.which === 1)  {
+            $(typer.element).on('click', function (e) {
+                if (e.which === 1) {
                     toolbar.hide();
                 }
             });
@@ -310,4 +310,4 @@
         'widget:delete': '\ue872'        // delete
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));

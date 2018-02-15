@@ -1,5 +1,7 @@
 type NodeFilterResult = 1 | 2 | 3;
-type Rangeable = Range | Node | TyperRangeable;
+type Rangeish = Range | Node | TyperRangeish;
+type Rectish = Rect | ClientRect | TyperRectish;
+type Pointish = Point | Offset | MouseEvent | Touch;
 type CaretPoint = 'base' | 'extend' | 'start' | 'end';
 type SelectMode = 'word';
 
@@ -7,12 +9,11 @@ declare enum TyperNodeType {
     NODE_WIDGET = 1,
     NODE_EDITABLE = 2,
     NODE_PARAGRAPH = 4,
-    NODE_OUTER_PARAGRAPH = 8,
     NODE_INLINE = 16,
     NODE_EDITABLE_PARAGRAPH = 32,
     NODE_INLINE_WIDGET = 64,
     NODE_INLINE_EDITABLE = 128,
-    NODE_SHOW_EDITABLE = 4096,
+    NODE_SHOW_HIDDEN = 8192,
 }
 
 interface Dictionary<T> {
@@ -32,6 +33,33 @@ interface TyperEventHandler<T extends TyperEvent> {
     (event: T): any;
 }
 
+interface Rect {
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+}
+
+interface Point {
+    x: number;
+    y: number
+}
+
+interface Offset {
+    left: number;
+    top: number;
+}
+
+interface TyperRangeish {
+    getRange(): Range;
+}
+
+interface TyperRectish {
+    getRect(): Rect;
+}
+
 interface TyperCommand {
     (tx: TyperTransaction, value?: any): any;
 }
@@ -39,6 +67,7 @@ interface TyperCommand {
 interface TyperEvent {
     readonly typer: Typer;
     readonly eventName: string;
+    readonly timestamp: number;
     readonly widget: TyperWidget;
     readonly data: any;
 }
@@ -52,9 +81,20 @@ interface TyperDefaultPreventableEvent extends TyperEvent {
     isDefaultPrevented(): boolean;
 }
 
+interface TyperWidgetExtractEvent extends TyperEvent {
+    readonly extractedNode: Element;
+}
+
+interface TyperWidgetReceiveEvent extends TyperDefaultPreventableEvent {
+    readonly receivedNode: Element;
+    readonly caret: TyperCaret;
+}
+
 interface TyperEventReceiver extends Dictionary<TyperEventHandler<TyperEvent>> {
     init?: TyperEventHandler<TyperEvent>;
     destroy?: TyperEventHandler<TyperEvent>;
+    extract?: TyperEventHandler<TyperWidgetExtractEvent>;
+    receive?: TyperEventHandler<TyperWidgetReceiveEvent>;
     beforeStateChange?: TyperEventHandler<TyperEvent>;
     stateChange?: TyperEventHandler<TyperEvent>;
     contentChange?: TyperEventHandler<TyperEvent>;
@@ -67,13 +107,10 @@ interface TyperEventReceiver extends Dictionary<TyperEventHandler<TyperEvent>> {
     mousewheel?: TyperEventHandler<TyperDefaultPreventableEvent>;
     widgetInit?: TyperEventHandler<TyperWidgetEvent>;
     widgetDestroy?: TyperEventHandler<TyperWidgetEvent>;
-    widgetFocusin?: TyperEventHandler<TyperWidgetEvent>;
-    widgetFocusout?: TyperEventHandler<TyperWidgetEvent>;
 }
 
 interface TyperDocument {
     getNode(node: Node): TyperNode;
-    getEditableNode(node: Node): TyperNode;
 }
 
 interface TyperUndoable {
@@ -91,14 +128,24 @@ interface Typer extends TyperDocument, TyperUndoable {
     hasCommand(commandName: string): boolean;
     focused(): boolean;
     widgetEnabled(widgetName: string): boolean;
+    widgetAllowed(widgetName: string, node: TyperNode): boolean;
     getStaticWidget(id: string): TyperWidget | null;
     getStaticWidgets(): TyperWidget[];
     getSelection(): TyperSelection;
-    extractText(selection: Rangeable): string;
-    nodeFromPoint(x: number, y: number): TyperNode;
+    extractText(selection: Rangeish): string;
+    nodeFromPoint(x: number, y: number, whatToShow?: TyperNodeType): TyperNode;
     retainFocus(element: Element): void;
     releaseFocus(element: Element): void;
     invoke(command: string | TyperCommand, value?: any): void;
+
+    createCaret(): TyperCaret;
+    createCaret(node: Node, offset: number): TyperCaret;
+
+    createSelection(range: TyperRangeish): TyperSelection;
+    createSelection(startNode: Node, collapse?: boolean): TyperSelection;
+    createSelection(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): TyperSelection;
+    createSelection(range: Range, collapse?: boolean): TyperSelection;
+    createSelection(start: Range, end: Range): TyperSelection;
 }
 
 interface TyperOptions extends Dictionary<any>, TyperEventReceiver {
@@ -116,8 +163,9 @@ interface TyperTransaction {
     insertText(text: string): void;
     insertHtml(content: string | Node): void;
     insertWidget(name: string, options: Dictionary<any>): void;
+    removeElement(element: Element): void;
     removeWidget(widget: TyperWidget): void;
-    execCommand(commandName: string, ...args): void;
+    trackChange(node: Node | TyperNode | TyperWidget): void;
 }
 
 interface TyperWidget {
@@ -132,22 +180,17 @@ interface TyperWidget {
 interface TyperWidgetDefinition extends Dictionary<any>, TyperEventReceiver {
     element?: string | Element;
     editable?: string;
-    inline?: boolean;
-    allowedWidgets?: string;
+    allow?: string;
+    allowedIn?: string;
     textFlow?: boolean;
     options?: Dictionary<any>;
-    accept?: 'text' | 'html';
     commands?: Dictionary<TyperCommand>;
     text?: (widget: TyperWidget) => string;
     insert?: (tx: TyperTransaction, options: Dictionary<any>) => void;
     remove?: 'keepText' | ((tx: TyperTransaction, widget: TyperWidget) => void);
 }
 
-interface TyperRangeable {
-    getRange(): Range;
-}
-
-interface TyperCaret extends TyperRangeable {
+interface TyperCaret extends TyperRangeish, TyperRectish {
     readonly typer: Typer;
     readonly node: TyperNode;
     readonly element: Element;
@@ -155,17 +198,19 @@ interface TyperCaret extends TyperRangeable {
     readonly offset: number;
 
     getRange(): Range;
+    getRect(): Rect;
     clone(): TyperCaret;
-    moveTo(direction: number): boolean;
-    moveToPoint(direction: number): boolean;
-    moveToText(direction: number): boolean;
+    moveTo(range: Rangeish): boolean;
+    moveTo(node: Node, offset: number): boolean;
+    moveToPoint(x: number, y: number): boolean;
+    moveToText(node: Node, offset: number): boolean;
     moveToLineEnd(direction: number): boolean;
     moveByLine(direction: number): boolean;
     moveByWord(direction: number): boolean;
     moveByCharacter(direction: number): boolean;
 }
 
-interface TyperSelection extends TyperRangeable {
+interface TyperSelection extends TyperRangeish {
     readonly typer: Typer;
     readonly baseCaret: TyperCaret;
     readonly extendCaret: TyperCaret;
@@ -173,6 +218,7 @@ interface TyperSelection extends TyperRangeable {
     readonly direction: number;
     readonly isCaret: boolean;
     readonly isSingleEditable: boolean;
+    readonly timestamp: number;
 
     readonly startNode: TyperNode;
     readonly startElement: Element;
@@ -185,25 +231,27 @@ interface TyperSelection extends TyperRangeable {
     readonly endOffset: number;
 
     getCaret(point?: CaretPoint): TyperCaret;
-    getEditableRanges(): Range[];
     getParagraphElements(): Element[];
     getRange(collapse?: boolean): Range;
     getSelectedElements(): Element[];
     getSelectedText(): string;
     getSelectedTextNodes(): Text[];
     getWidgets(): TyperWidget[];
+    widgetAllowed(widgetName: string): boolean;
 
     createTreeWalker(whatToShow: number, filter?: (node: TyperNode) => NodeFilterResult): TyperTreeWalker;
 
     select(mode: SelectMode): boolean;
-    select(range: TyperRangeable): boolean;
+    select(range: TyperRangeish): boolean;
     select(startNode: Node, collapse?: boolean): boolean;
     select(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): boolean;
     select(range: Range, collapse?: boolean): boolean;
     select(start: Range, end: Range): boolean;
 
-    moveToPoint(direction: number): boolean;
-    moveToText(direction: number): boolean;
+    moveTo(range: Rangeish): boolean;
+    moveTo(node: Node, offset: number): boolean;
+    moveToPoint(x: number, y: number): boolean;
+    moveToText(node: Node, offset: number): boolean;
     moveToLineEnd(direction: number): boolean;
     moveByLine(direction: number): boolean;
     moveByWord(direction: number): boolean;
@@ -216,6 +264,7 @@ interface TyperSelection extends TyperRangeable {
 }
 
 interface TyperNode {
+    readonly typer: Typer;
     readonly element: Element;
     readonly widget: TyperWidget;
     readonly childNodes: TyperNode[];
@@ -256,7 +305,6 @@ interface TyperStatic {
     readonly NODE_INLINE: TyperNodeType;
     readonly NODE_INLINE_WIDGET: TyperNodeType;
     readonly NODE_INLINE_EDITABLE: TyperNodeType;
-    readonly NODE_SHOW_EDITABLE: TyperNodeType;
     readonly NODE_ANY_ALLOWTEXT: TyperNodeType,
     readonly NODE_ANY_BLOCK_EDITABLE: TyperNodeType,
     readonly NODE_ANY_INLINE: TyperNodeType,
@@ -275,40 +323,40 @@ interface TyperStatic {
     iterateToArray<T>(iterator: Iterator<T>, callback: Callback<T>, from?: T): any[];
     compareAttrs(a: Node, b: Node): boolean;
     comparePosition(a: Node, b: Node): number;
-    compareRangePosition(a: Rangeable, b: Rangeable): number;
+    compareRangePosition(a: Rangeish, b: Rangeish): number;
     containsOrEquals(a: Node, b: Node): boolean;
-    rangeIntersects(a: Rangeable, b: Rangeable): boolean;
-    rangeCovers(a: Rangeable, b: Rangeable): boolean;
-    rangeEquals(a: Rangeable, b: Rangeable): boolean;
+    rangeIntersects(a: Rangeish, b: Rangeish): boolean;
+    rangeCovers(a: Rangeish, b: Rangeish): boolean;
+    rangeEquals(a: Rangeish, b: Rangeish): boolean;
     rectEquals(a: ClientRect, b: ClientRect): boolean;
     rectCovers(a: ClientRect, b: ClientRect): boolean;
     pointInRect(x: number, y: number, b: ClientRect): boolean;
+    elementFromPoint(x: number, y: number): Element;
     caretRangeFromPoint(x: number, y: number, within?: Element): Range;
     createElement(tagName: string): Element;
     createTextNode(nodeValue?: string): Text;
     createDocumentFragment(content: Node | string): DocumentFragment
     trim(str: string): string;
+    closest(node: TyperNode, nodeType: TyperNodeType): TyperNode;
     is(a: Object, b: Function): Object | false;
     is(a: TyperNode, b: TyperNodeType): TyperNode | false;
     is(a: Element, b: string): Element | false;
 
-    createRange(range: TyperRangeable): Range;
+    createRange(range: TyperRangeish): Range;
     createRange(startNode: Node, collapse?: boolean): Range;
     createRange(startNode: Node, startOffset: number, endNode?: Node, endOffset?: number): Range;
     createRange(range: Range, collapse?: boolean): Range;
     createRange(start: Range, end: Range): Range;
 
+    getRect(): Rect;
+    getRect(element: Element): Rect;
+    toPlainRect(rect: DOMRect | ClientRect): Rect;
+    toPlainRect(left: number, top: number, right: number, bottom: number): Rect;
+
     preset(element: Element, name: string, options: TyperOptions): Typer;
 }
 
 type Direction = 'left' | 'top' | 'right' | 'bottom';
-
-interface Origin {
-    readonly percentX: number;
-    readonly percentY: number;
-    readonly offsetX: number;
-    readonly offsetY: number;
-}
 
 type TyperControlEventHandler = (ui: TyperUI, control: TyperControl, data: any) => void;
 type TyperControlStateHandler = (ui: TyperUI, control: TyperControl) => boolean;
@@ -327,6 +375,8 @@ interface TyperControl {
     set(value: any): void;
     getValue(): any;
     setValue(value: any): void;
+    getState(name: string): boolean | string[];
+    setState(name: string, state: boolean | string[]): void;
 }
 
 interface TyperControlDefinition {
@@ -373,6 +423,7 @@ interface TyperUI {
     hide(control: string | TyperControl): void;
     enabled(control: string | TyperControl): boolean;
     active(control: string | TyperControl): boolean;
+    visible(control: string | TyperControl): boolean;
     getIcon(control: TyperControl): string;
     getLabel(control: TyperControl): string;
     validate(): boolean;
@@ -423,18 +474,22 @@ interface TyperUIStatic {
     (options?: TyperUIOptions): TyperUI;
     (controls: string, options?: TyperUIOptions): TyperUI;
 
+    readonly isTouchDevice: bool;
+
     readonly controls: Dictionary<TyperControlDefinition>;
     readonly themes: Dictionary<TyperTheme>;
     readonly controlExtensions: Dictionary<any>;
 
     matchWSDelim(needle: string, haystack: string): string | false;
     getWheelDelta(e: MouseWheelEvent): number;
-    parseOrigin(value: string): Origin;
     listen(obj: object, prop: string, callback: (obj: object, prop: string, value: any) => void): void;
 
     getZIndex(element: Element, pseudo?: string): number;
     getZIndexOver(element: Element): number;
     setZIndex(element: Element, over: Element): void;
+    cssFromPoint(x: number, y: number, origin?: Element, parent?: Element): object;
+    cssFromPoint(point: Pointish, origin?: Element, parent?: Element): object;
+    cssFromRect(rect: Rect, parent?: Element): object;
 
     define(name: string, base?: object, ctor?: Function): Function;
 
@@ -449,8 +504,8 @@ interface TyperUIStatic {
     addIcons(iconSet: string, values: Dictionary<string>): void;
     addIcons(iconSet: string, ns: string, values: Dictionary<string>): void;
 
-    pin(control: TyperControl, element: Element, ref: Element, dir: Direction): void;
-    unpin(control: TyperControl): void;
+    snap(element: Element, to: Element, dir: string): void;
+    unsnap(element: Element): void;
     focus(element: Element, inputOnly?: boolean): void;
 
     alert(message): Promise<any>;

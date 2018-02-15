@@ -95,9 +95,9 @@
         } else {
             var textNodes = selection.getSelectedTextNodes();
             paragraphs.forEach(function (v) {
-                if (!styleCheck || !Typer.ui.matchWSDelim(getComputedStyle(v, null)[styleCheck[0]], styleCheck[1])) {
+                if (!styleCheck || !Typer.ui.matchWSDelim(window.getComputedStyle(v)[styleCheck[0]], styleCheck[1])) {
                     if (!currentState) {
-                        $(textNodes, v).wrap(wrapElm);
+                        $(v).find(textNodes).wrap(wrapElm);
                     } else {
                         var $unwrapNodes = $(textNodes, v).parentsUntil(v).filter(unwrapSpec);
                         var $rewrapNodes = $unwrapNodes.contents().filter(function (i, v) {
@@ -573,4 +573,4 @@
         }
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));

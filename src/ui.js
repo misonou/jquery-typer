@@ -1,4 +1,4 @@
-(function ($, Typer, Object, RegExp, Node, window, document) {
+(function ($, Typer) {
     'use strict';
 
     var SELECTOR_INPUT = ':text, :password, :checkbox, :radio, textarea, [contenteditable]';
@@ -83,11 +83,6 @@
     function lowfirst(v) {
         v = String(v || '');
         return v.charAt(0).toLowerCase() + v.slice(1);
-    }
-
-    function setImmediateOnce(fn) {
-        clearImmediate(fn._timeout);
-        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
     }
 
     function exclude(haystack, needle) {
@@ -544,7 +539,7 @@
         }
 
         function bindPlaceholder(element) {
-            $(element).find('*').andSelf().filter('[x\\:bind]').each(function (i, v) {
+            $(element).find('*').addBack().filter('[x\\:bind]').each(function (i, v) {
                 var t = parseCompactSyntax($(v).attr('x:bind'));
                 $.each(t.params, function (i, w) {
                     if (!bindedProperties[w]) {
@@ -1112,7 +1107,7 @@
         },
         focus: function (element, inputOnly) {
             if (!$.contains(element, document.activeElement) || (inputOnly && !$(document.activeElement).is(SELECTOR_INPUT))) {
-                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').andSelf()[0].focus();
+                $(inputOnly ? SELECTOR_INPUT : SELECTOR_FOCUSABLE, element).not(':disabled, :hidden').addBack()[0].focus();
             }
         },
         alert: function (message) {
@@ -1518,17 +1513,17 @@
                 setImmediate(typerUI.focus, currentDialog.control.element);
             }
         });
-        $(window).bind('resize scroll orientationchange', function () {
-            setImmediateOnce(updateSnaps);
+        $(window).on('resize scroll orientationchange', function () {
+            Typer.setImmediateOnce(updateSnaps);
         });
-        $(document.body).bind('mousemove mousewheel keyup touchend', function () {
-            setImmediateOnce(updateSnaps);
+        $(document.body).on('mousemove mousewheel keyup touchend', function () {
+            Typer.setImmediateOnce(updateSnaps);
         });
         $(document.body).on('click', 'label', function (e) {
             // IE does not focus on focusable element when clicking containing LABEL element
             $(SELECTOR_FOCUSABLE, e.currentTarget).not(':disabled, :hidden').eq(0).focus();
         });
-        $(document.body).bind(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
+        $(document.body).on(IS_TOUCH ? 'touchstart' : 'mousedown', function (e) {
             if (currentDialog && currentDialog.clickReject && !elementOfControl(currentDialog.control, e.target)) {
                 currentDialog.clickReject();
             }
@@ -1543,10 +1538,10 @@
             // focusout event is not fired immediately after the element loses focus when user touches other element
             // manually blur and trigger focusout event to notify Typer and other component
             var lastActiveElement;
-            $(document.body).bind('focusin focusout', function (e) {
+            $(document.body).on('focusin focusout', function (e) {
                 lastActiveElement = e.type === 'focusin' ? e.target : null;
             });
-            $(document.body).bind('touchend', function (e) {
+            $(document.body).on('touchend', function (e) {
                 if (lastActiveElement && !containsOrEquals(lastActiveElement, e.target)) {
                     lastActiveElement.blur();
                     $(lastActiveElement).trigger($.Event('focusout', {
@@ -1557,11 +1552,11 @@
         }
 
         function handlePointerEventNone(e) {
-            if (getComputedStyle(e.target).pointerEvents === 'none') {
+            if (window.getComputedStyle(e.target).pointerEvents === 'none') {
                 e.stopPropagation();
                 var event = document.createEvent('MouseEvent');
                 event.initMouseEvent(e.type, e.bubbles, e.cancelable, e.view, e.detail, e.screenX, e.screenY, e.clientX, e.clientY, e.ctrlKey, e.altKey, e.shiftKey, e.metaKey, e.button, e.relatedTarget);
-                (Typer.elementFromPoint(e.clientX, e.clientY) || document.body).dispatchEvent(event);
+                Typer.elementFromPoint(e.clientX, e.clientY).dispatchEvent(event);
             }
         }
 
@@ -1575,4 +1570,4 @@
         originDiv = $('<div style="position:fixed;top:0;left:0;">').appendTo(document.body)[0];
     });
 
-}(jQuery, window.Typer, Object, RegExp, Node, window, document));
+}(jQuery, Typer));

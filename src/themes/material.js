@@ -1,4 +1,4 @@
-(function ($, Typer, window, document) {
+(function ($, Typer) {
     'use strict';
 
     var ANIMATION_END = 'animationend oanimationend webkitAnimationEnd';
@@ -42,7 +42,7 @@
                     deferred.resolveWith(v);
                 }
             };
-            $(element).addClass(className).bind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+            $(element).addClass(className).on(TRANSITION_END + ' ' + ANIMATION_END, handler);
             return deferred.promise().done(callback);
         });
         return $.when.apply(null, arr.get());
@@ -218,4 +218,4 @@
         });
     });
 
-}(jQuery, window.Typer, window, document));
+}(jQuery, Typer));

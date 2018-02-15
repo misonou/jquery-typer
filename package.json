@@ -1,11 +1,12 @@
 {
   "name": "jquery-typer",
-  "version": "0.10.7",
+  "version": "0.11.0",
   "devDependencies": {
     "grunt": "^1.0.1",
+    "grunt-contrib-clean": "^1.1.0",
     "grunt-contrib-concat": "^1.0.1",
     "grunt-contrib-uglify": "^2.0.0",
-    "showdown": "^1.7.1"
+    "setimmediate": "^1.0.5"
   },
   "author": "misonou",
   "license": "MIT",
@@ -14,9 +15,6 @@
     "url": "git+https://github.com/misonou/jquery-typer.git"
   },
   "homepage": "https://github.com/misonou/jquery-typer",
-  "dependencies": {
-    "setimmediate": "^1.0.5"
-  },
   "scripts": {
     "build": "grunt"
   }

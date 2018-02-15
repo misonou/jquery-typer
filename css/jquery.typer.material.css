@@ -1,5 +1,5 @@
 .typer-ui {
-    font-family: 'Roboto', 'San Francisco', 'Helvetica Neue', 'Segoe UI', 'Arial';
+    font-family: 'Roboto', system-ui, -apple-system, 'Helvetica Neue', 'Segoe UI', 'Arial';
     font-size: 14px;
     color: #333;
     line-height: 1.2;
@@ -430,6 +430,10 @@ label.typer-ui-dropdown.error .typer-ui-label:after {
     position: relative;
     vertical-align: top;
     width: auto;
+}
+
+.typer-ui-buttonset .typer-ui-group > .typer-ui-group {
+    display: inline;
 }
 
 .typer-ui-buttonset .typer-ui-label span:first-child {

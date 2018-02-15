@@ -1,3 +1,50 @@
+## 0.11.0 / 2018-02-14
+
+- Add `Typer.createCaret`, `Typer.createSelection`, `TyperCaret.getRect` and `TyperNode.typer`
+- Add `TyperUI.visible`
+- Add high-res timestamp for `TyperEvent` and `TyperSelection`
+- Add `allow` and `allowedIn` options
+- Replace visualizer extension with `Typer.canvas` and add `dragwidget` extension
+- Improved handling on extracting and inserting widgets (added `extract` and `receive` event)
+- `moveByCharacter` and `moveByLine` now step on block widget
+- `nodeFromPoint` now returns nearest block
+- `TyperTreeWalker` now always shows widget content (remove need of `NODE_SHOW_EDITABLE`)
+- Keep formatting when inserting or combining paragraphs
+- Merge inline elements when combining paragraphs
+- Caters `strong` and `em` tags
+- Scroll caret into view when selection is changed
+- (Breaking) `e.data` is removed from `contentChange` event
+- (Breaking) removed `widgetFocusin` and `widgetFocusout` event
+- (Breaking) removed `TyperTransaction.execCommand` and `TyperSelection.getEditableRanges`
+- (Breaking) removed `accept` and `disallowedWidget` options
+- (Breaking) `compareAttr` replaced by `sameElementSpec`
+- Fix: `drop` event not handled
+- Fix: `init` and `destroy` event fired while inserting content
+- Fix: `init` and `destroy` event fired multiple times when element is re-inserted within event loop
+- Fix: `destroy` event not called for nested widget
+- Fix: widget re-created after associated element is re-inserted
+- Fix: incorrect widget and parent node of `TyperNode` for element which its ancestor are re-inserted
+- Fix: incorrect order of nodes when element is moved
+- Fix: incorrect node type under inline widget
+- Fix: multiple `stateChange` event fired and snapshot created after an update cycle
+- Fix: handle consecutive and dangling space character correctly
+- Fix: extra snapshot created before normalization
+- Fix: history snapshot triggered by `getValue()`
+- Fix: history redo stack flushed by selection change
+- Fix: failed to extract text from detached nodes (when inserting content)
+- Fix: `getRect` returns incorrect position for root element
+- Fix: `getRect` exception in IE 10 for detached element
+- Fix: issue on inserting new line before widget by `Ctrl+Enter` key combination
+- Fix: incorrect caret position when moved to non-editable text node
+- Fix: clipboard issue on Edge browser
+- Fix: CSS transition/animation end detection in Material theme
+- Fix: empty paragraph not normalized
+- Fix: `Ctrl`/`Alt` key combination issue in Firefox
+- Fix: `TyperCaret` issue when pointed to inexist node
+- Fix: selection not updated after native action (e.g. select all from browsers' native menu)
+- Fix: UI control state checking
+- Minor fix and update to keyword preset, toolbar, media and link widget
+
 ## 0.10.7 / 2018-01-04
 
 - Add event source

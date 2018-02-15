@@ -164,7 +164,7 @@
                 self.value.columns = $(this).index() + 1;
                 self.label = self.value.rows + ' \u00d7 ' + self.value.columns;
                 $self.find('.typer-ui-grid-cell').removeClass('active');
-                $self.find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().andSelf().addClass('active');
+                $self.find('.typer-ui-grid-row:lt(' + self.value.rows + ')').find('.typer-ui-grid-cell:nth-child(' + self.value.columns + ')').prevAll().addBack().addClass('active');
             });
             self.label = '0 \u00d7 0';
             self.value = {};
@@ -291,4 +291,4 @@
         'table:tableWidth:fullWidth': 'Full width'
     });
 
-}(jQuery, window.Typer));
+}(jQuery, Typer));

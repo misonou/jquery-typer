@@ -1,4 +1,4 @@
-(function ($, Typer, window, document) {
+(function ($, Typer) {
     'use strict';
 
     var activeNode;
@@ -46,7 +46,7 @@
                         var rectB = Typer.getRect(nextNode.element);
                         y = (rectA.bottom <= rectB.top ? rectA.bottom + rectB.top : rectB.bottom + rectA.top) / 2;
                     } else {
-                        y = rectA[before ? 'top' : 'bottom'] + (Math.max(0, parseFloat(getComputedStyle(node.element, null)[before ? 'marginTop' : 'marginBottom'])) / 2) * (before ? -1 : 1);
+                        y = rectA[before ? 'top' : 'bottom'] + (Math.max(0, parseFloat(window.getComputedStyle(node.element)[before ? 'marginTop' : 'marginBottom'])) / 2) * (before ? -1 : 1);
                     }
                     canvas.drawLine(rectC.left, y, rectC.right, y, 1, 'red', 'dashed');
                     insertPoint = canvas.typer.createCaret(node.element, before);
@@ -57,4 +57,4 @@
         }
     });
 
-})(jQuery, window.Typer, window, document);
+})(jQuery, Typer);
