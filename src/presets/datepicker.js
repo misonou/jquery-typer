@@ -265,7 +265,7 @@
                     }
                 };
                 handlers[isTouch ? 'touchend' : 'mouseup'] = function () {
-                    $(document.body).unbind(handlers);
+                    $(document.body).off(handlers);
                     ui.execute(self);
                 };
                 if (e.which === 1 || (e.originalEvent.touches || '').length === 1) {

@@ -20,7 +20,7 @@
             };
             $(document).one('paste', handler);
             setTimeout(function () {
-                $(document).unbind('paste', handler);
+                $(document).off('paste', handler);
                 if (!detectClipboardInaccessible.value) {
                     detectClipboardInaccessible.value = false;
                     callback();
@@ -110,7 +110,7 @@
                     };
                     $(document.body).mousemove(handler);
                     $(document.body).mouseup(function () {
-                        $(document.body).unbind('mousemove', handler);
+                        $(document.body).off('mousemove', handler);
                     });
                 }
             });

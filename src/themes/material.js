@@ -38,7 +38,7 @@
             var handler = function (e) {
                 if ($(v).hasClass(className) && e.target === v) {
                     $(v).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
-                    $(v).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+                    $(v).off(TRANSITION_END + ' ' + ANIMATION_END, handler);
                     deferred.resolveWith(v);
                 }
             };

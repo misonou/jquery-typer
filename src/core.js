@@ -1485,7 +1485,7 @@
                     mouseup: function (e2) {
                         mousedown = false;
                         clearInterval(scrollTimeout);
-                        $(document.body).unbind(handlers);
+                        $(document.body).off(handlers);
                         if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
                             var node = typer.getNode(e2.target);
                             if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
@@ -1831,7 +1831,7 @@
             },
             releaseFocus: function (element) {
                 relatedElements.delete(element);
-                $(element).unbind('focusout', retainFocusHandler);
+                $(element).off('focusout', retainFocusHandler);
             },
             invoke: function (command, value) {
                 var tx = new TyperTransaction();

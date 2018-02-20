@@ -158,7 +158,7 @@
             }
         };
         handlers.mouseup = function () {
-            $(document.body).unbind(handlers);
+            $(document.body).off(handlers);
             deferred.resolve(hasMoved);
         };
         if (e.which === 1) {
