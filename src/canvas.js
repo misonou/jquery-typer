@@ -23,8 +23,8 @@
         state.rect = translate(Typer.getRect(activeTyper.element), root.scrollLeft, root.scrollTop);
         $.extend(this, {
             typer: activeTyper,
-            pointerX: state.x,
-            pointerY: state.y,
+            pointerX: state.x || 0,
+            pointerY: state.y || 0,
             mousedown: state.mousedown,
             editorReflow: !lastState.rect || !Typer.rectEquals(lastState.rect, state.rect),
             pointerMoved: lastState.x != state.x || lastState.y != state.y,
