@@ -200,7 +200,7 @@
     }
 
     function collapseWS(v) {
-        return String(v || '').replace(/[^\S\u00a0]+/g, ' ');
+        return String(v || '').replace(/[^\S\u00a0]+/g, ' ').replace(/\u200b/g, '');
     }
 
     function capfirst(v) {
@@ -458,6 +458,12 @@
 
     function createNodeIterator(root, whatToShow) {
         return document.createNodeIterator(root, whatToShow, null, false);
+    }
+
+    function updateTextNodeData(node, text) {
+        if (node.data !== text) {
+            node.data = text;
+        }
     }
 
     function removeNode(node) {
@@ -867,10 +873,7 @@
             });
             wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
             $.each(textNodes, function (i, v) {
-                var text = wholeText.slice(index[i - 1] || 0, index[i]);
-                if (v.data !== text) {
-                    v.data = text;
-                }
+                updateTextNodeData(v, wholeText.slice(index[i - 1] || 0, index[i]));
             });
         }
 
@@ -915,7 +918,7 @@
                     }
                     if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
-                            v.data = collapseWS(v.data);
+                            updateTextNodeData(v, collapseWS(v.data) || ZWSP);
                             if (isText(v.nextSibling)) {
                                 v.nextSibling.data = collapseWS(v.data + v.nextSibling.data);
                                 removeNode(v);
