@@ -196,7 +196,7 @@
     }
 
     function trim(v) {
-        return String(v || '').replace(/^[\s\u200b]+|[\s\u200b]+$/g, '');
+        return String(v || '').replace(/^(?:\u200b|[^\S\u00a0])+|(?:\u200b|[^\S\u00a0])+$/g, '');
     }
 
     function collapseWS(v) {
@@ -458,6 +458,20 @@
 
     function createNodeIterator(root, whatToShow) {
         return document.createNodeIterator(root, whatToShow, null, false);
+    }
+
+    function transformText(text, transform) {
+        switch (transform) {
+            case 'uppercase':
+                return text.toUpperCase();
+            case 'lowercase':
+                return text.toLowerCase();
+            case 'capitalize':
+                return text.replace(/\b(.)/g, function (v) {
+                    return v.toUpperCase();
+                });
+        }
+        return text;
     }
 
     function updateTextNodeData(node, text) {
@@ -863,17 +877,28 @@
             });
         }
 
-        function normalizeWhitespace(node) {
+        function updateWholeText(node, reduce, transform) {
             var textNodes = iterateToArray(createNodeIterator(node, 4));
             var wholeText = '';
             var index = [];
+            reduce = reduce || function (v, a) {
+                return v + a;
+            };
             $.each(textNodes, function (i, v) {
-                wholeText = (wholeText + v.data).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+                wholeText = reduce(wholeText, v.data);
                 index[i] = wholeText.length;
             });
-            wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
+            wholeText = transform(wholeText);
             $.each(textNodes, function (i, v) {
                 updateTextNodeData(v, wholeText.slice(index[i - 1] || 0, index[i]));
+            });
+        }
+
+        function normalizeWhitespace(node) {
+            updateWholeText(node, function (v, a) {
+                return (v + a).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+            }, function (v) {
+                return v.replace(/[^\S\u00a0]$/, '\u00a0');
             });
         }
 
@@ -1003,10 +1028,18 @@
                             var content = createRange(element, range)[method]();
                             if (cloneNode && content) {
                                 var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
+                                var fixTextTransform;
                                 if (!hasThisElement) {
                                     content = wrapNode(content, [is(node, NODE_EDITABLE_PARAGRAPH) ? createElement('p') : element]);
+                                    fixTextTransform = true;
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
-                                    content = content.firstChild.childNodes;
+                                    content = createDocumentFragment(content.firstChild.childNodes);
+                                    fixTextTransform = true;
+                                }
+                                if (fixTextTransform) {
+                                    updateWholeText(content, null, function (v) {
+                                        return transformText(v, $.css(element, 'text-transform'));
+                                    });
                                 }
                                 $(stack[0][1]).append(content);
                             }
@@ -1236,21 +1269,25 @@
                 });
             }
 
-            var lastNode, lastWidget, text = '';
+            var lastNode, textTransform, text = '', innerText = '';
             iterate(iterator, function (v) {
                 var node = (doc || typer).getNode(v);
-                var widgetOption = widgetOptions[node.widget.id];
+                var handler = widgetOptions[node.widget.id].text;
                 if (node !== lastNode) {
-                    if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
-                        text += '\n\n';
-                    }
-                    if (node.widget !== lastWidget && isFunction(widgetOption.text)) {
-                        text += widgetOption.text(node.widget);
+                    if (lastNode) {
+                        text += transformText(innerText, textTransform);
+                        innerText = '';
+                        if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
+                            text += '\n\n';
+                        }
+                        if (node.widget !== lastNode.widget && handler) {
+                            text += handler(node.widget);
+                        }
                     }
                     lastNode = node;
-                    lastWidget = node.widget;
+                    textTransform = $.css(node.element, 'text-transform');
                 }
-                if (is(node, NODE_ANY_ALLOWTEXT) && !isFunction(widgetOption.text)) {
+                if (is(node, NODE_ANY_ALLOWTEXT) && !handler) {
                     if (isText(v)) {
                         var value = v.data;
                         if (v === range.endContainer) {
@@ -1259,13 +1296,14 @@
                         if (v === range.startContainer) {
                             value = value.slice(range.startOffset);
                         }
-                        text += value;
+                        innerText += value.replace(' ', '\u00a0');
                     } else if (isBR(v)) {
-                        text += '\n';
+                        innerText += '\n';
                     }
                 }
             });
-            return trim(text).replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
+            text += transformText(innerText, textTransform);
+            return trim(text).replace(/\u00a0/g, ' ');
         }
 
         function initUndoable() {
