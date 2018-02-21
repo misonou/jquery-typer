@@ -399,8 +399,9 @@
         return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
-    function pointInRect(x, y, rect) {
-        return rect.width && rect.height && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    function pointInRect(x, y, rect, within) {
+        within = within || 0;
+        return rect.width && rect.height && x - rect.left >= -within && x - rect.right <= within && y - rect.top >= -within && y - rect.bottom <= within;
     }
 
     function computeTextRects(node) {

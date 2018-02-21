@@ -12,7 +12,7 @@
         }
         if (activeNode && activeNode.typer === canvas.typer) {
             var rect = Typer.getRect(activeNode.element);
-            if (Typer.pointInRect(canvas.pointerX, canvas.pointerY, Typer.toPlainRect(rect.left - 10, rect.top - 10, rect.right + 10, rect.bottom + 10))) {
+            if (Typer.pointInRect(canvas.pointerX, canvas.pointerY, rect, 10)) {
                 canvas.addControlPoint(activeNode.element, 'move', function (d) {
                     d.progress(function () {
                         isDragging = true;
