@@ -56,6 +56,7 @@
     var currentSource = [];
     var lastTouchedElement;
     var checkNativeUpdate;
+    var scrollbarWidth;
 
     function TyperSelection(typer, range) {
         var self = this;
@@ -516,23 +517,27 @@
         }
     }
 
+    function getScrollParent(element) {
+        for (; element !== root && $.css(element, 'overflow') === 'visible'; element = element.parentNode);
+        return element;
+    }
+
     function scrollRectIntoView(element, rect) {
-        for (; element !== root && window.getComputedStyle(element).overflow === 'visible'; element = element.offsetParent || element.parentNode);
-        var elmRect = getRect(element);
-        var deltaX = Math.max(0, rect.right - elmRect.right) || Math.min(rect.left - elmRect.left, 0);
-        var deltaY = Math.max(0, rect.bottom - elmRect.bottom) || Math.min(rect.top - elmRect.top, 0);
+        var parent = getScrollParent(element);
+        var parentRect = getRect(parent);
+        var winOrElm = parent === root ? window : parent;
+        var origX = winOrElm.scrollX || winOrElm.scrollLeft || 0;
+        var origY = winOrElm.scrollY || winOrElm.scrollTop || 0;
+        var deltaX = Math.max(0, rect.right - (parentRect.right - (parent.scrollWidth > parent.offsetWidth ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
+        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (parent.scrollHeight > parent.offsetHeight ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
         if (deltaX || deltaY) {
-            if (element !== root) {
-                element.scrollLeft += deltaX;
-                element.scrollTop += deltaY;
-            } else {
-                window.scrollTo(root.scrollLeft + deltaX, root.scrollTop + deltaY);
-            }
+            winOrElm.scrollTo(origX + deltaX, origY + deltaY);
         }
-        return {
-            x: deltaX,
-            y: deltaY
+        var result = {
+            x: (winOrElm.scrollX || winOrElm.scrollLeft || 0) - origX,
+            y: (winOrElm.scrollY || winOrElm.scrollTop || 0) - origY
         };
+        return (result.x || result.y) ? result : false;
     }
 
     function fixIEInputEvent(element, topElement) {
@@ -1499,24 +1504,37 @@
 
             $self.mousedown(function (e) {
                 var extendCaret = currentSelection.extendCaret;
+                var scrollParent = getScrollParent(e.target);
                 var scrollTimeout;
-                var handlers = {
+
+                var scrollParentHandlers = {
                     mouseout: function (e) {
-                        var lastX = e.clientX;
-                        var lastY = e.clientY;
-                        scrollTimeout = setInterval(function () {
-                            scrollRectIntoView(topElement, toPlainRect(lastX - 50, lastY - 50, lastX + 50, lastY + 50));
-                            if (!extendCaret.moveToPoint(lastX, lastY)) {
-                                clearInterval(scrollTimeout);
-                            }
-                        }, 20);
+                        if (!scrollTimeout && (!containsOrEquals(scrollParent, e.relatedTarget) || (scrollParent === root && e.relatedTarget === root))) {
+                            var lastX = e.clientX;
+                            var lastY = e.clientY;
+                            scrollTimeout = setInterval(function () {
+                                if (scrollRectIntoView(topElement, toPlainRect(lastX - 50, lastY - 50, lastX + 50, lastY + 50))) {
+                                    extendCaret.moveToPoint(lastX, lastY);
+                                } else {
+                                    clearInterval(scrollTimeout);
+                                    scrollTimeout = null;
+                                }
+                            }, 20);
+                        }
                     },
+                    mouseover: function (e) {
+                        if (e.target !== root) {
+                            clearInterval(scrollTimeout);
+                            scrollTimeout = null;
+                        }
+                    }
+                };
+                var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
                             handlers.mouseup();
                             return;
                         }
-                        clearInterval(scrollTimeout);
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
@@ -1528,6 +1546,7 @@
                         mousedown = false;
                         clearInterval(scrollTimeout);
                         $(document.body).off(handlers);
+                        $(scrollParent).off(scrollParentHandlers);
                         if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
                             var node = typer.getNode(e2.target);
                             if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
@@ -1541,6 +1560,7 @@
                     (e.shiftKey ? extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                     currentSelection.focus();
                     $(document.body).on(handlers);
+                    $(scrollParent).on(scrollParentHandlers);
                     mousedown = true;
                 }
                 e.preventDefault();
@@ -2735,6 +2755,11 @@
 
     $(function () {
         trackEventSource(document.body);
+
+        // detect native scrollbar size
+        var $d = $('<div style="overflow:scroll;height:10px"><div style="height:100px"></div></div>').appendTo(document.body);
+        scrollbarWidth = $d.width() - $d.children().width();
+        $d.remove();
     });
 
     // polyfill for document.elementFromPoint and especially for IE
@@ -2776,7 +2801,7 @@
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
                     var pos = document.caretPositionFromPoint(x, y);
-                    return createRange(pos.offsetNode, pos.offset);
+                    return pos && createRange(pos.offsetNode, pos.offset);
                 };
             }
             return function (x, y) {
