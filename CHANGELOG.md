@@ -1,4 +1,4 @@
-## 0.11.0 / 2018-02-14
+## 0.11.0 / 2018-02-23
 
 - Add `Typer.createCaret`, `Typer.createSelection`, `TyperCaret.getRect` and `TyperNode.typer`
 - Add `TyperUI.visible`
@@ -6,6 +6,7 @@
 - Add `allow` and `allowedIn` options
 - Replace visualizer extension with `Typer.canvas` and add `dragwidget` extension
 - Improved handling on extracting and inserting widgets (added `extract` and `receive` event)
+- Handles text transform by CSS when extracting content
 - `moveByCharacter` and `moveByLine` now step on block widget
 - `nodeFromPoint` now returns nearest block
 - `TyperTreeWalker` now always shows widget content (remove need of `NODE_SHOW_EDITABLE`)

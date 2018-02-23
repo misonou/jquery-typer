@@ -2644,7 +2644,7 @@
 
             if (newRect) {
                 var delta = scrollRectIntoView(self.typer.element, newRect);
-                return self.moveToPoint(rect.left + deltaX - delta.x, (newRect.top + newRect.bottom) / 2 - delta.y);
+                return self.moveToPoint(rect.left + deltaX - (delta.x || 0), (newRect.top + newRect.bottom) / 2 - (delta.y || 0));
             }
             if (nextBlock) {
                 return self.moveTo(nextBlock, true);

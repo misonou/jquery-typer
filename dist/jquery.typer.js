@@ -63,7 +63,6 @@
     var elementFromPoint_ = IS_IE ? undefined : document.elementFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
-    var scrollIntoViewIfNeeded_ = root.scrollIntoViewIfNeeded;
 
     var isFunction = $.isFunction;
     var extend = $.extend;
@@ -85,6 +84,7 @@
     var currentSource = [];
     var lastTouchedElement;
     var checkNativeUpdate;
+    var scrollbarWidth;
 
     function TyperSelection(typer, range) {
         var self = this;
@@ -225,11 +225,11 @@
     }
 
     function trim(v) {
-        return String(v || '').replace(/^[\s\u200b]+|[\s\u200b]+$/g, '');
+        return String(v || '').replace(/^(?:\u200b|[^\S\u00a0])+|(?:\u200b|[^\S\u00a0])+$/g, '');
     }
 
     function collapseWS(v) {
-        return String(v || '').replace(/[^\S\u00a0]+/g, ' ');
+        return String(v || '').replace(/[^\S\u00a0]+/g, ' ').replace(/\u200b/g, '');
     }
 
     function capfirst(v) {
@@ -428,8 +428,9 @@
         return b.left >= a.left && b.right <= a.right && b.top >= a.top && b.bottom <= a.bottom;
     }
 
-    function pointInRect(x, y, rect) {
-        return rect.width && rect.height && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    function pointInRect(x, y, rect, within) {
+        within = within || 0;
+        return rect.width && rect.height && x - rect.left >= -within && x - rect.right <= within && y - rect.top >= -within && y - rect.bottom <= within;
     }
 
     function computeTextRects(node) {
@@ -489,6 +490,26 @@
         return document.createNodeIterator(root, whatToShow, null, false);
     }
 
+    function transformText(text, transform) {
+        switch (transform) {
+            case 'uppercase':
+                return text.toUpperCase();
+            case 'lowercase':
+                return text.toLowerCase();
+            case 'capitalize':
+                return text.replace(/\b(.)/g, function (v) {
+                    return v.toUpperCase();
+                });
+        }
+        return text;
+    }
+
+    function updateTextNodeData(node, text) {
+        if (node.data !== text) {
+            node.data = text;
+        }
+    }
+
     function removeNode(node) {
         $(node).remove();
     }
@@ -524,15 +545,27 @@
         }
     }
 
-    function scrollByAmount(element, scrollAmount) {
-        for (var cur = element.offsetParent; cur !== root; cur = cur.parentNode) {
-            var style = window.getComputedStyle(cur);
-            if (style.overflow === 'scroll' || style.overflowY === 'scroll') {
-                cur.scrollTop += scrollAmount;
-                return;
-            }
+    function getScrollParent(element) {
+        for (; element !== root && $.css(element, 'overflow') === 'visible'; element = element.parentNode);
+        return element;
+    }
+
+    function scrollRectIntoView(element, rect) {
+        var parent = getScrollParent(element);
+        var parentRect = getRect(parent);
+        var winOrElm = parent === root ? window : parent;
+        var origX = winOrElm.scrollX || winOrElm.scrollLeft || 0;
+        var origY = winOrElm.scrollY || winOrElm.scrollTop || 0;
+        var deltaX = Math.max(0, rect.right - (parentRect.right - (parent.scrollWidth > parent.offsetWidth ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
+        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (parent.scrollHeight > parent.offsetHeight ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
+        if (deltaX || deltaY) {
+            winOrElm.scrollTo(origX + deltaX, origY + deltaY);
         }
-        window.scrollTo(root.scrollLeft, root.scrollTop + scrollAmount);
+        var result = {
+            x: (winOrElm.scrollX || winOrElm.scrollLeft || 0) - origX,
+            y: (winOrElm.scrollY || winOrElm.scrollTop || 0) - origY
+        };
+        return (result.x || result.y) ? result : false;
     }
 
     function fixIEInputEvent(element, topElement) {
@@ -878,20 +911,28 @@
             });
         }
 
-        function normalizeWhitespace(node) {
+        function updateWholeText(node, reduce, transform) {
             var textNodes = iterateToArray(createNodeIterator(node, 4));
             var wholeText = '';
             var index = [];
+            reduce = reduce || function (v, a) {
+                return v + a;
+            };
             $.each(textNodes, function (i, v) {
-                wholeText = (wholeText + v.data).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+                wholeText = reduce(wholeText, v.data);
                 index[i] = wholeText.length;
             });
-            wholeText = wholeText.replace(/[^\S\u00a0]$/, '\u00a0');
+            wholeText = transform(wholeText);
             $.each(textNodes, function (i, v) {
-                var text = wholeText.slice(index[i - 1] || 0, index[i]);
-                if (v.data !== text) {
-                    v.data = text;
-                }
+                updateTextNodeData(v, wholeText.slice(index[i - 1] || 0, index[i]));
+            });
+        }
+
+        function normalizeWhitespace(node) {
+            updateWholeText(node, function (v, a) {
+                return (v + a).replace(/\u00a0{2}(?!\u0020?$)/g, '\u00a0 ').replace(/[^\S\u00a0]{2}/g, ' \u00a0').replace(/\u00a0[^\S\u00a0]\u00a0(\S)/g, '\u00a0\u00a0 $1').replace(/(\S)\u00a0(?!$)/g, '$1 ');
+            }, function (v) {
+                return v.replace(/[^\S\u00a0]$/, '\u00a0');
             });
         }
 
@@ -936,7 +977,7 @@
                     }
                     if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
-                            v.data = collapseWS(v.data);
+                            updateTextNodeData(v, collapseWS(v.data) || ZWSP);
                             if (isText(v.nextSibling)) {
                                 v.nextSibling.data = collapseWS(v.data + v.nextSibling.data);
                                 removeNode(v);
@@ -1021,10 +1062,18 @@
                             var content = createRange(element, range)[method]();
                             if (cloneNode && content) {
                                 var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
+                                var fixTextTransform;
                                 if (!hasThisElement) {
                                     content = wrapNode(content, [is(node, NODE_EDITABLE_PARAGRAPH) ? createElement('p') : element]);
+                                    fixTextTransform = true;
                                 } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
-                                    content = content.firstChild.childNodes;
+                                    content = createDocumentFragment(content.firstChild.childNodes);
+                                    fixTextTransform = true;
+                                }
+                                if (fixTextTransform) {
+                                    updateWholeText(content, null, function (v) {
+                                        return transformText(v, $.css(element, 'text-transform'));
+                                    });
                                 }
                                 $(stack[0][1]).append(content);
                             }
@@ -1254,21 +1303,25 @@
                 });
             }
 
-            var lastNode, lastWidget, text = '';
+            var lastNode, textTransform, text = '', innerText = '';
             iterate(iterator, function (v) {
                 var node = (doc || typer).getNode(v);
-                var widgetOption = widgetOptions[node.widget.id];
+                var handler = widgetOptions[node.widget.id].text;
                 if (node !== lastNode) {
-                    if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
-                        text += '\n\n';
-                    }
-                    if (node.widget !== lastWidget && isFunction(widgetOption.text)) {
-                        text += widgetOption.text(node.widget);
+                    if (lastNode) {
+                        text += transformText(innerText, textTransform);
+                        innerText = '';
+                        if (is(lastNode, NODE_ANY_BLOCK) && is(node, NODE_ANY_BLOCK) && text.slice(-2) !== '\n\n') {
+                            text += '\n\n';
+                        }
+                        if (node.widget !== lastNode.widget && handler) {
+                            text += handler(node.widget);
+                        }
                     }
                     lastNode = node;
-                    lastWidget = node.widget;
+                    textTransform = $.css(node.element, 'text-transform');
                 }
-                if (is(node, NODE_ANY_ALLOWTEXT) && !isFunction(widgetOption.text)) {
+                if (is(node, NODE_ANY_ALLOWTEXT) && !handler) {
                     if (isText(v)) {
                         var value = v.data;
                         if (v === range.endContainer) {
@@ -1277,13 +1330,14 @@
                         if (v === range.startContainer) {
                             value = value.slice(range.startOffset);
                         }
-                        text += value;
+                        innerText += value.replace(' ', '\u00a0');
                     } else if (isBR(v)) {
-                        text += '\n';
+                        innerText += '\n';
                     }
                 }
             });
-            return trim(text).replace(/\u200b/g, '').replace(/[^\S\n\u00a0]+|\u00a0/g, ' ');
+            text += transformText(innerText, textTransform);
+            return trim(text).replace(/\u00a0/g, ' ');
         }
 
         function initUndoable() {
@@ -1477,6 +1531,32 @@
             }
 
             $self.mousedown(function (e) {
+                var extendCaret = currentSelection.extendCaret;
+                var scrollParent = getScrollParent(e.target);
+                var scrollTimeout;
+
+                var scrollParentHandlers = {
+                    mouseout: function (e) {
+                        if (!scrollTimeout && (!containsOrEquals(scrollParent, e.relatedTarget) || (scrollParent === root && e.relatedTarget === root))) {
+                            var lastX = e.clientX;
+                            var lastY = e.clientY;
+                            scrollTimeout = setInterval(function () {
+                                if (scrollRectIntoView(topElement, toPlainRect(lastX - 50, lastY - 50, lastX + 50, lastY + 50))) {
+                                    extendCaret.moveToPoint(lastX, lastY);
+                                } else {
+                                    clearInterval(scrollTimeout);
+                                    scrollTimeout = null;
+                                }
+                            }, 20);
+                        }
+                    },
+                    mouseover: function (e) {
+                        if (e.target !== root) {
+                            clearInterval(scrollTimeout);
+                            scrollTimeout = null;
+                        }
+                    }
+                };
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
@@ -1484,7 +1564,7 @@
                             return;
                         }
                         undoable.snapshot(200);
-                        currentSelection.extendCaret.moveToPoint(e.clientX, e.clientY);
+                        extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
                             currentSelection.focus();
                         });
@@ -1492,7 +1572,9 @@
                     },
                     mouseup: function (e2) {
                         mousedown = false;
-                        $(document.body).unbind(handlers);
+                        clearInterval(scrollTimeout);
+                        $(document.body).off(handlers);
+                        $(scrollParent).off(scrollParentHandlers);
                         if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
                             var node = typer.getNode(e2.target);
                             if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
@@ -1503,9 +1585,10 @@
                     }
                 };
                 if (e.which === 1) {
-                    (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
+                    (e.shiftKey ? extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                     currentSelection.focus();
                     $(document.body).on(handlers);
+                    $(scrollParent).on(scrollParentHandlers);
                     mousedown = true;
                 }
                 e.preventDefault();
@@ -1838,7 +1921,7 @@
             },
             releaseFocus: function (element) {
                 relatedElements.delete(element);
-                $(element).unbind('focusout', retainFocusHandler);
+                $(element).off('focusout', retainFocusHandler);
             },
             invoke: function (command, value) {
                 var tx = new TyperTransaction();
@@ -2322,9 +2405,7 @@
                 if (!IS_IE && document.activeElement !== topElement) {
                     topElement.focus();
                 }
-                if (this.isCaret) {
-                    scrollIntoViewIfNeeded_.apply(this.startElement);
-                }
+                scrollRectIntoView(topElement, this.extendCaret.getRect());
             }
         },
         clone: function () {
@@ -2590,11 +2671,8 @@
             } while (deltaX && (node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
 
             if (newRect) {
-                var scrollAmount = Math.max(0, newRect.bottom - root.offsetHeight) || Math.min(newRect.top, 0);
-                if (scrollAmount) {
-                    scrollByAmount(self.typer.element, scrollAmount);
-                }
-                return self.moveToPoint(rect.left + deltaX, (newRect.top + newRect.bottom) / 2 - scrollAmount);
+                var delta = scrollRectIntoView(self.typer.element, newRect);
+                return self.moveToPoint(rect.left + deltaX - (delta.x || 0), (newRect.top + newRect.bottom) / 2 - (delta.y || 0));
             }
             if (nextBlock) {
                 return self.moveTo(nextBlock, true);
@@ -2705,6 +2783,11 @@
 
     $(function () {
         trackEventSource(document.body);
+
+        // detect native scrollbar size
+        var $d = $('<div style="overflow:scroll;height:10px"><div style="height:100px"></div></div>').appendTo(document.body);
+        scrollbarWidth = $d.width() - $d.children().width();
+        $d.remove();
     });
 
     // polyfill for document.elementFromPoint and especially for IE
@@ -2746,7 +2829,7 @@
             if (document.caretPositionFromPoint) {
                 return function (x, y) {
                     var pos = document.caretPositionFromPoint(x, y);
-                    return createRange(pos.offsetNode, pos.offset);
+                    return pos && createRange(pos.offsetNode, pos.offset);
                 };
             }
             return function (x, y) {
@@ -2816,19 +2899,6 @@
                 return createRange(element, -0);
             };
         }();
-    }
-
-    // polyfill for element.scrollIntoViewIfNeeded
-    if (!scrollIntoViewIfNeeded_) {
-        scrollIntoViewIfNeeded_ = function () {
-            var winRect = getRect(root);
-            var elmRect = getRect(this);
-            if (elmRect.top < winRect.top) {
-                this.scrollIntoView(true);
-            } else if (elmRect.bottom > winRect.bottom) {
-                this.scrollIntoView(false);
-            }
-        };
     }
 
     // detect support for textInput event
@@ -4515,8 +4585,8 @@
         state.rect = translate(Typer.getRect(activeTyper.element), root.scrollLeft, root.scrollTop);
         $.extend(this, {
             typer: activeTyper,
-            pointerX: state.x,
-            pointerY: state.y,
+            pointerX: state.x || 0,
+            pointerY: state.y || 0,
             mousedown: state.mousedown,
             editorReflow: !lastState.rect || !Typer.rectEquals(lastState.rect, state.rect),
             pointerMoved: lastState.x != state.x || lastState.y != state.y,
@@ -4650,7 +4720,7 @@
             }
         };
         handlers.mouseup = function () {
-            $(document.body).unbind(handlers);
+            $(document.body).off(handlers);
             deferred.resolve(hasMoved);
         };
         if (e.which === 1) {
@@ -4870,7 +4940,7 @@
         }
         if (activeNode && activeNode.typer === canvas.typer) {
             var rect = Typer.getRect(activeNode.element);
-            if (Typer.pointInRect(canvas.pointerX, canvas.pointerY, Typer.toPlainRect(rect.left - 10, rect.top - 10, rect.right + 10, rect.bottom + 10))) {
+            if (Typer.pointInRect(canvas.pointerX, canvas.pointerY, rect, 10)) {
                 canvas.addControlPoint(activeNode.element, 'move', function (d) {
                     d.progress(function () {
                         isDragging = true;
@@ -6113,7 +6183,7 @@
             };
             $(document).one('paste', handler);
             setTimeout(function () {
-                $(document).unbind('paste', handler);
+                $(document).off('paste', handler);
                 if (!detectClipboardInaccessible.value) {
                     detectClipboardInaccessible.value = false;
                     callback();
@@ -6203,7 +6273,7 @@
                     };
                     $(document.body).mousemove(handler);
                     $(document.body).mouseup(function () {
-                        $(document.body).unbind('mousemove', handler);
+                        $(document.body).off('mousemove', handler);
                     });
                 }
             });
@@ -6709,7 +6779,7 @@
                     }
                 };
                 handlers[isTouch ? 'touchend' : 'mouseup'] = function () {
-                    $(document.body).unbind(handlers);
+                    $(document.body).off(handlers);
                     ui.execute(self);
                 };
                 if (e.which === 1 || (e.originalEvent.touches || '').length === 1) {
@@ -7419,7 +7489,7 @@
             var handler = function (e) {
                 if ($(v).hasClass(className) && e.target === v) {
                     $(v).toggleClass(className, !Typer.ui.matchWSDelim(e.type, ANIMATION_END));
-                    $(v).unbind(TRANSITION_END + ' ' + ANIMATION_END, handler);
+                    $(v).off(TRANSITION_END + ' ' + ANIMATION_END, handler);
                     deferred.resolveWith(v);
                 }
             };
