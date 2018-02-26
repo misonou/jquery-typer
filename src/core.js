@@ -524,19 +524,32 @@
 
     function scrollRectIntoView(element, rect) {
         var parent = getScrollParent(element);
-        var parentRect = getRect(parent);
-        var winOrElm = parent === root ? window : parent;
-        var origX = winOrElm.scrollX || winOrElm.scrollLeft || 0;
-        var origY = winOrElm.scrollY || winOrElm.scrollTop || 0;
-        var deltaX = Math.max(0, rect.right - (parentRect.right - (parent.scrollWidth > parent.offsetWidth ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
-        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (parent.scrollHeight > parent.offsetHeight ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
+        var parentRect = getRect(parent === document.body ? root : parent);
+        var style = window.getComputedStyle(parent);
+        var winOrElm = parent === root || parent === document.body ? window : parent;
+        var origX = $(winOrElm).scrollLeft();
+        var origY = $(winOrElm).scrollTop();
+        var deltaX = Math.max(0, rect.right - (parentRect.right - (style.overflowY === 'scroll' || (style.overflowY === 'auto' && parent.scrollHeight > parent.offsetHeight) ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
+        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (style.overflowX === 'scroll' || (style.overflowY === 'auto' && parent.scrollWidth > parent.offsetWidth) ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
         if (deltaX || deltaY) {
-            winOrElm.scrollTo(origX + deltaX, origY + deltaY);
+            if (winOrElm.scrollTo) {
+                winOrElm.scrollTo(origX + deltaX, origY + deltaY);
+            } else {
+                winOrElm.scrollLeft = origX + deltaX;
+                winOrElm.scrollTop = origY + deltaY;
+            }
         }
         var result = {
-            x: (winOrElm.scrollX || winOrElm.scrollLeft || 0) - origX,
-            y: (winOrElm.scrollY || winOrElm.scrollTop || 0) - origY
+            x: $(winOrElm).scrollLeft() - origX,
+            y: $(winOrElm).scrollTop() - origY
         };
+        if (winOrElm !== window) {
+            var parentResult = scrollRectIntoView(parent.parentNode, toPlainRect(rect.left + result.x, rect.top + result.y, rect.right + result.x, rect.bottom + result.y));
+            if (parentResult) {
+                result.x += parentResult.x;
+                result.y += parentResult.y;
+            }
+        }
         return (result.x || result.y) ? result : false;
     }
 
