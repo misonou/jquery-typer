@@ -1233,16 +1233,22 @@
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (!widgetAllowed(node.widget.id, caretNode)) {
-                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
-                            node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
-                        }
-                        if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
-                            if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
-                                receivedNode: nodeToInsert,
-                                caret: caretPoint.clone()
-                            })) {
-                                return;
+                        if (node.widget !== caretNode.widget) {
+                            for (var widgetNode = caretNode; !is(widgetNode, NODE_ANY_BLOCK_EDITABLE); widgetNode = widgetNode.parentNode) {
+                                if (!widgetAllowed(node.widget.id, widgetNode)) {
+                                    nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
+                                    node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
+                                    break;
+                                }
+                                if (content.length === 1 && node.widget.id === widgetNode.widget.id) {
+                                    var prop = {
+                                        receivedNode: nodeToInsert,
+                                        caret: caretPoint.clone()
+                                    };
+                                    if (triggerDefaultPreventableEvent(widgetNode.widget, 'receive', null, prop)) {
+                                        return;
+                                    }
+                                }
                             }
                         }
                     }
