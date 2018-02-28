@@ -29,6 +29,47 @@
     var IS_IE10 = !!window.ActiveXObject;
     var IS_IE = IS_IE10 || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
 
+    var FLIP_POS = {
+        top: 'bottom',
+        left: 'right',
+        right: 'left',
+        bottom: 'top'
+    };
+    var WRITING_MODES = {
+        'horizontal-tb': 0,
+        'vertical-rl': 5,
+        'vertical-lr': 1,
+        'sideways-rl': 5,
+        'sideways-lr': 11,
+        'lr': 0,
+        'rl': 0,
+        'tb': 5,
+        'lr-tb': 0,
+        'lr-bt': 4,
+        'rl-tb': 0,
+        'rl-bt': 4,
+        'tb-rl': 5,
+        'bt-rl': 5,
+        'tb-lr': 1,
+        'bt-lr': 1
+    };
+
+    // each element represent two masks for each abstract box side pair
+    // the upper 12 bits indicate writing modes that maps to y-coordinate (top or bottom)
+    // the lower 12 bits incicate writing modes that the abstract start side maps to side with larger coordinate (right or bottom)
+    var RECT_COLLAPSE_MASK = [0x5550f0, 0xaaaccc, 0xf0ff00, 0x0f0f00];
+    var RECT_SIDE = 'block-start block-end inline-start inline-end over under line-left line-right'.split(' ');
+
+    var CHARSET_RTL = '\u0590-\u07ff\u200f\u202b\u202e\ufb1d-\ufdfd\ufe70-\ufefc';
+    var RE_RTL = new RegExp('([' + CHARSET_RTL + '])');
+    var RE_LTR = new RegExp('([^\\s' + CHARSET_RTL + '])');
+    var RE_N_RTL = new RegExp('\\s([' + CHARSET_RTL + '])');
+    var RE_N_LTR = new RegExp('\\s([^\\s' + CHARSET_RTL + '])');
+
+    // unicode codepoints that caret position should not anchored on
+    // ZWSP, lower surrogates, diacritical and half marks, and combining marks (Arabic, Hebrew and Japanese)
+    var RE_SKIP = /[\u200b\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f\udc00-\udcff\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06dc\u06df-\u06e4\u06e7\u06e8\u06ea-\u06ed\u08d4-\u08e1\u08e3-\u08ff\u0900-\u0903\u093a-\u093c\u093e-\u094f\u0951-\u0957\u0962\u0963\u3099\u309a]/;
+
     // document.caretRangeFromPoint is still broken even in Edge browser
     // it does not return correct range for the points x or y larger than window's width or height
     var caretRangeFromPoint_ = IS_IE ? undefined : document.caretRangeFromPoint;
@@ -116,6 +157,14 @@
         this.selection = selection || null;
     }
 
+    function TyperRect(l, t, r, b) {
+        var self = this;
+        self.left = l;
+        self.top = t;
+        self.right = r;
+        self.bottom = b;
+    }
+
     function transaction(finalize) {
         var count = 0;
         return function run(callback, args, thisArg) {
@@ -180,6 +229,10 @@
         var result = [];
         iterate(iterator, array.push.bind(result), from, until);
         return callback ? $.map(result, callback) : result;
+    }
+
+    function next(iterator, direction) {
+        return iterator[direction < 0 ? 'previousNode' : 'nextNode']();
     }
 
     function consume(set) {
@@ -248,6 +301,15 @@
     function isTextNodeEnd(v, offset, dir) {
         var str = v.data;
         return (dir >= 0 && (offset === v.length || str.slice(offset) === ZWSP)) ? 1 : (dir <= 0 && (!offset || str.slice(0, offset) === ZWSP)) ? -1 : 0;
+    }
+
+    function isRTL(ch, baseRTL) {
+        return RE_RTL.test(ch) ? true : /[^\s!-\/:-@\[\]^_`{|}~]/.test(ch) ? false : baseRTL;
+    }
+
+    function getWritingMode(elm) {
+        var style = window.getComputedStyle(isElm(elm) || elm.parentNode);
+        return WRITING_MODES[style.getPropertyValue('writing-mode')] ^ (style.direction === 'rtl' ? 2 : 0);
     }
 
     function closest(node, type) {
@@ -367,26 +429,26 @@
     }
 
     function getRect(elm) {
+        var rect;
         elm = elm || root;
-        if (!containsOrEquals(root, elm)) {
+        if (elm.getRect) {
+            rect = elm.getRect();
+        } else if (elm === root) {
+            rect = toPlainRect(0, 0, root.offsetWidth, root.offsetHeight);
+        } else if (!containsOrEquals(root, elm)) {
             // IE10 throws Unspecified Error for detached elements
-            return toPlainRect(0, 0, 0, 0);
+            rect = toPlainRect(0, 0, 0, 0);
+        } else {
+            rect = toPlainRect(elm.getBoundingClientRect());
         }
-        return elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
+        return rect;
     }
 
     function toPlainRect(l, t, r, b) {
         if (l.top !== undefined) {
             return toPlainRect(l.left, l.top, l.right, l.bottom);
         }
-        return {
-            top: t,
-            left: l,
-            right: r,
-            bottom: b,
-            width: r - l,
-            height: b - t
-        };
+        return new TyperRect(l, t, r, b);
     }
 
     function rectEquals(a, b) {
@@ -405,16 +467,36 @@
         return rect.width && rect.height && x - rect.left >= -within && x - rect.right <= within && y - rect.top >= -within && y - rect.bottom <= within;
     }
 
-    function computeTextRects(node) {
-        return $.map((is(node, Range) || createRange(node, 'contents')).getClientRects(), toPlainRect);
+    function getRects(range) {
+        return $.map((is(range, Range) || createRange(range, 'contents')).getClientRects(), toPlainRect);
     }
 
-    function rectFromPosition(node, offset) {
-        if (offset && offset === node.length) {
-            var rect = computeTextRects(createRange(node, offset - 1, node, offset))[0];
-            return rect && toPlainRect(rect.right, rect.top, rect.right, rect.bottom);
+    function getAbstractRect(rect, mode) {
+        var sign = mode / Math.abs(mode);
+        rect = is(rect, TyperRect) || getRect(rect);
+        mode /= sign;
+        var signX = mode & 2 ? -1 : 1;
+        var signY = mode & 4 ? -1 : 1;
+        if (sign > 0 && (mode & 1)) {
+            signX ^= signY;
+            signY ^= signX;
+            signX ^= signY;
         }
-        return computeTextRects(createRange(node, offset))[0];
+        var propX = signX < 0 ? 'right' : 'left';
+        var propY = signY < 0 ? 'bottom' : 'top';
+        if (mode & 1) {
+            rect = toPlainRect(rect[propY] * signY, rect[propX] * signX, rect[FLIP_POS[propY]] * signY, rect[FLIP_POS[propX]] * signX);
+        } else {
+            rect = toPlainRect(rect[propX] * signX, rect[propY] * signY, rect[FLIP_POS[propX]] * signX, rect[FLIP_POS[propY]] * signY);
+        }
+        return rect;
+    }
+
+    function getAbstractSide(side, mode) {
+        mode = (1 << (+mode === mode ? mode : getWritingMode(mode)));
+        side = +side === side ? side : RECT_SIDE.indexOf(side);
+        var prop = (RECT_COLLAPSE_MASK[side >> 1] & (mode << 12)) ? 'top' : 'left';
+        return !!(RECT_COLLAPSE_MASK[side >> 1] & mode) ^ (side & 1) ? FLIP_POS[prop] : prop;
     }
 
     function getActiveRange(container) {
@@ -544,7 +626,7 @@
             y: $(winOrElm).scrollTop() - origY
         };
         if (winOrElm !== window) {
-            var parentResult = scrollRectIntoView(parent.parentNode, toPlainRect(rect.left + result.x, rect.top + result.y, rect.right + result.x, rect.bottom + result.y));
+            var parentResult = scrollRectIntoView(parent.parentNode, rect.translate(result.x, result.y));
             if (parentResult) {
                 result.x += parentResult.x;
                 result.y += parentResult.y;
@@ -1076,7 +1158,7 @@
                         var start = closest(state.baseCaret.node, NODE_ANY_BLOCK_EDITABLE);
                         var until = closest(state.extendCaret.node, NODE_ANY_BLOCK_EDITABLE);
                         iterator.currentNode = start;
-                        while (iterator[state.direction > 0 ? 'nextNode' : 'previousNode']());
+                        while (next(iterator, state.direction));
                         if (iterator.currentNode !== until) {
                             if (iterator.currentNode !== start) {
                                 state.extendCaret.moveTo(iterator.currentNode.element, 0 * -state.direction);
@@ -2010,6 +2092,8 @@
         pointInRect: pointInRect,
         toPlainRect: toPlainRect,
         getRect: getRect,
+        getRects: getRects,
+        getAbstractSide: getAbstractSide,
         caretRangeFromPoint: caretRangeFromPoint,
         elementFromPoint: function (x, y) {
             return elementFromPoint_.call(document, x, y);
@@ -2519,25 +2603,94 @@
         return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end);
     }
 
+    function caretRectFromPosition(node, offset) {
+        var mode = getWritingMode(node);
+        var invert = offset === node.length;
+
+        if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
+            var baseRTL = !!(mode & 2);
+            var root = node.parentNode;
+            var ch = node.data.charAt(offset - invert);
+
+            // bidi paragraph are isolated by block boundaries or boxes styled with isolate or isolate-override
+            for (; $.css(root, 'display') === 'inline' && $.css(root, 'unicode-bidi').slice(0, 7) !== 'isolate'; root = root.parentNode);
+
+            // only check adjacent directionality if there is strongly trans-directioned character
+            if (isRTL(ch) !== baseRTL && (baseRTL ? RE_LTR : RE_RTL).test(root.textContent)) {
+                var checkAdjacent = function (node, offset, direction) {
+                    var iterator = document.createTreeWalker(root, 5, function (v) {
+                        if (isElm(v) && !isBR(v)) {
+                            // any non-inline and replaced elements are considered neutral
+                            if ($.css(v, 'display') !== 'inline' || is(v, 'audio,canvas,embed,iframe,img,input,object,video')) {
+                                return 2;
+                            }
+                            switch ($.css(v, 'unicode-bidi')) {
+                                case 'normal':
+                                case 'plaintext':
+                                    return 3;
+                                case 'isolate':
+                                case 'isolate-override':
+                                    // isolated bidi sequences are considered neutral
+                                    return 2;
+                            }
+                        }
+                        return 1;
+                    }, false);
+                    iterator.currentNode = node;
+                    while (isText(node)) {
+                        while (offset !== getOffset(node, 0 * -direction)) {
+                            offset += direction;
+                            if (/(\S)/.test(node.data.charAt(offset))) {
+                                return isRTL(RegExp.$1, baseRTL);
+                            }
+                        }
+                        node = next(iterator, direction);
+                        offset = direction > 0 ? -1 : (node || '').length;
+                    }
+                    return !node || isBR(node) ? baseRTL : $.css(node, 'direction') === 'rtl';
+                };
+                var prevRTL = checkAdjacent(node, offset - invert, -1);
+                var nextRTL = checkAdjacent(node, offset - invert, 1);
+                var curRTL = prevRTL === nextRTL && /\s/.test(ch) ? prevRTL : isRTL(ch, baseRTL);
+                if (!invert && curRTL !== baseRTL && prevRTL === baseRTL) {
+                    // sticks at the end of cis-directioned text sequence at cis/trans boundary
+                    invert = true;
+                    curRTL = prevRTL;
+                }
+                mode = (mode & ~2) | (curRTL ? 2 : 0);
+            }
+        }
+        var rect = getRects(createRange(node, offset - invert, node, offset + !invert))[0];
+        return rect && rect.collapse(getAbstractSide(2 | invert, mode));
+    }
+
+    function caretMoveToRect(inst, rect) {
+        var delta = scrollRectIntoView(inst.typer.element, rect);
+        return inst.moveToPoint(rect.centerX - (delta.x || 0), rect.centerY - (delta.y || 0));
+    }
+
     definePrototype(TyperCaret, {
         getRect: function () {
             var self = caretEnsureState(this);
+            var mode = getWritingMode(self.element);
             if (!self.textNode) {
-                var prop = self.offset ? 'left' : 'right';
                 var elmRect = getRect(self.element);
-                return toPlainRect(elmRect[prop], elmRect.top, elmRect[prop], elmRect.bottom);
+                return elmRect.collapse(getAbstractSide(2 | !self.offset, mode));
             }
-            var rect = rectFromPosition(self.textNode, self.offset);
-            if (!rect || !rect.height) {
+            var rect = caretRectFromPosition(self.textNode, self.offset);
+            if (!rect || (!rect.width && !rect.height)) {
                 // Mozilla returns a zero height rect and IE returns no rects for range collapsed at whitespace characters
                 // infer the position by getting rect for preceding non-whitespace character
                 var iterator = caretTextNodeIterator(self, self.node);
+                var rectH = rect && getAbstractRect(rect, mode);
+                var node = iterator.currentNode;
                 do {
-                    var r = rectFromPosition(iterator.currentNode, /(\s)$/.test(iterator.currentNode.data) ? -RegExp.$1.length : -0);
-                    if (r && r.height) {
-                        return rect ? toPlainRect(rect.left, r.top, rect.left, r.bottom) : r;
+                    var r = caretRectFromPosition(node, getOffset(node, /(\s)$/.test(node.data) ? -RegExp.$1.length : -0));
+                    var rH = r && getAbstractRect(r, mode);
+                    if (r && rH.height) {
+                        return rect ? getAbstractRect(toPlainRect(rectH.left, rH.top, rectH.left, rH.bottom), -mode) : r;
                     }
-                } while (iterator.previousNode());
+                } while ((node = iterator.previousNode()));
             }
             return rect || toPlainRect(0, 0, 0, 0);
         },
@@ -2560,8 +2713,9 @@
             return createRange(node, self.offset);
         },
         clone: function () {
-            var clone = new TyperCaret(this.typer);
-            clone.moveTo(this);
+            var self = this;
+            var clone = new TyperCaret(self.typer);
+            caretSetPositionRaw(clone, self.node, self.element, self.textNode, self.offset);
             return clone;
         },
         moveTo: function (node, offset) {
@@ -2600,25 +2754,28 @@
         },
         moveToLineEnd: function (direction) {
             var self = caretEnsureState(this);
+            var mode = getWritingMode(self.element) ^ (direction < 0 ? 2 : 0);
             var iterator = caretTextNodeIterator(self, self.node);
-            var rect = self.getRect();
-            var minx = rect.left;
+            var rect = getAbstractRect(self, mode);
+            var newX = rect.left;
             do {
-                $.each(computeTextRects(iterator.currentNode), function (i, v) {
+                $.each(getRects(iterator.currentNode), function (i, v) {
+                    v = getAbstractRect(v, mode);
                     if (v.top <= rect.bottom && v.bottom >= rect.top) {
-                        minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.right);
+                        newX = Math.max(newX, v.right);
                     }
                 });
-            } while (iterator[direction < 0 ? 'previousNode' : 'nextNode']());
-            return self.moveToPoint(minx, rect.top + rect.height / 2);
+            } while (next(iterator, direction));
+            return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, rect.top, newX, rect.bottom), -mode));
         },
         moveByLine: function (direction) {
             var self = this;
+            var mode = getWritingMode(self.element) ^ (direction < 0 ? 4 : 0);
             var iterator = new TyperTreeWalker(self.typer.rootNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET);
-            var rect = self.getRect();
+            var rect = getAbstractRect(self, mode);
             var node = self.node;
             var deltaX = Infinity;
-            var untilY = Infinity * direction;
+            var untilY = Infinity;
             var nextBlock;
             var newRect;
 
@@ -2629,35 +2786,38 @@
                         nextBlock = nextBlock || node.element;
                     }
                 } else {
-                    var elmRect = getRect(node.element);
-                    if (direction > 0 ? elmRect.top > untilY : elmRect.bottom < untilY) {
+                    var elmRect = getAbstractRect(node.element, mode);
+                    if (elmRect.top > untilY) {
                         break;
                     }
-                    var rects = computeTextRects(node.element);
+                    var rects = getRects(node.element);
                     $.each(direction < 0 ? slice(rects).reverse() : rects, function (i, v) {
-                        if (direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom) {
-                            if ((v.top + v.bottom) / 2 * direction > untilY * direction) {
+                        v = getAbstractRect(v, mode);
+                        if (v.top >= rect.bottom) {
+                            if (v.centerY > untilY) {
                                 return false;
                             }
-                            untilY = direction > 0 ? v.bottom : v.top;
-                            if (v.right >= rect.left && v.left <= rect.left) {
+                            var dx1 = v.right - rect.left;
+                            var dx2 = v.left - rect.left;
+                            untilY = v.bottom;
+                            if (dx1 >= 0 && dx2 <= 0) {
                                 deltaX = 0;
                                 newRect = v;
-                            } else if (Math.abs(v.right - rect.left) < Math.abs(deltaX)) {
-                                deltaX = v.right - rect.left;
+                            } else if (Math.abs(dx1) < Math.abs(deltaX)) {
+                                deltaX = dx1;
                                 newRect = v;
-                            } else if (Math.abs(v.left - rect.left) < Math.abs(deltaX)) {
-                                deltaX = v.left - rect.left;
+                            } else if (Math.abs(dx2) < Math.abs(deltaX)) {
+                                deltaX = dx2;
                                 newRect = v;
                             }
                         }
                     });
                 }
-            } while (deltaX && (node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
+            } while (deltaX && (node = next(iterator, direction)) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
 
             if (newRect) {
-                var delta = scrollRectIntoView(self.typer.element, newRect);
-                return self.moveToPoint(rect.left + deltaX - (delta.x || 0), (newRect.top + newRect.bottom) / 2 - (delta.y || 0));
+                var newX = rect.left + deltaX;
+                return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, newRect.top, newX, newRect.bottom), -mode));
             }
             if (nextBlock) {
                 return self.moveTo(nextBlock, true);
@@ -2679,7 +2839,7 @@
             var iterator = caretTextNodeIterator(self, self.node);
             var lastNode = iterator.currentNode;
             var lastLength = matched && RegExp.$1.length;
-            while ((node = iterator[direction < 0 ? 'previousNode' : 'nextNode']())) {
+            while ((node = next(iterator, direction))) {
                 str = direction < 0 ? node.data + str : str + node.data;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
                     // avoid unnecessarily expanding selection over multiple text nodes or elements
@@ -2702,7 +2862,7 @@
             var overBr = false;
             while (true) {
                 if (!node || offset === getOffset(node, 0 * -direction)) {
-                    while (!(node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) || !node.length) {
+                    while (!(node = next(iterator, direction)) || !node.length) {
                         if (!node) {
                             return false;
                         }
@@ -2714,7 +2874,7 @@
                     offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
                 offset += direction;
-                var newRect = node.data.charAt(offset) !== ZWSP && rectFromPosition(node, offset);
+                var newRect = !RE_SKIP.test(node.data.charAt(offset)) && caretRectFromPosition(node, offset);
                 if (newRect && !rectEquals(rect, newRect)) {
                     return self.moveToText(node, offset);
                 }
@@ -2731,6 +2891,29 @@
                 return !direction || step !== direction;
             });
         };
+    });
+
+    definePrototype(TyperRect, {
+        get width() {
+            return this.right - this.left;
+        },
+        get height() {
+            return this.bottom - this.top;
+        },
+        get centerX() {
+            return (this.left + this.right) / 2;
+        },
+        get centerY() {
+            return (this.top + this.bottom) / 2;
+        },
+        collapse: function (side) {
+            var rect = this;
+            return side === 'left' || side === 'right' ? toPlainRect(rect[side], rect.top, rect[side], rect.bottom) : toPlainRect(rect.left, rect[side], rect.right, rect[side]);
+        },
+        translate: function (x, y) {
+            var self = this;
+            return toPlainRect(self.left + x, self.top + y, self.right + x, self.bottom + y);
+        }
     });
 
     definePrototype(TyperWidget, {
@@ -2770,7 +2953,8 @@
         trackEventSource(document.body);
 
         // detect native scrollbar size
-        var $d = $('<div style="overflow:scroll;height:10px"><div style="height:100px"></div></div>').appendTo(document.body);
+        // height being picked because scrollbar may not be shown if container is too short
+        var $d = $('<div style="overflow:scroll;height:80px"><div style="height:100px"></div></div>').appendTo(document.body);
         scrollbarWidth = $d.width() - $d.children().width();
         $d.remove();
     });
@@ -2785,7 +2969,7 @@
                     var style = window.getComputedStyle(v);
                     var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
                     if (style.pointerEvents !== 'none' && (currentZIndex === undefined || zIndex >= currentZIndex)) {
-                        var containsPoint = any(style.display === 'inline' ? v.getClientRects() : [getRect(v)], function (v) {
+                        var containsPoint = any(style.display === 'inline' ? getRects(v) : [getRect(v)], function (v) {
                             return pointInRect(x, y, v);
                         });
                         if (containsPoint) {
@@ -2818,68 +3002,99 @@
                 };
             }
             return function (x, y) {
-                function distanceToRect(rect) {
-                    var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
-                    var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
-                    return distX && distY ? Infinity : Math.abs(distX || distY);
+                var stack = [elementFromPoint_.call(document, x, y)];
+                var minDist = Infinity;
+                var element = stack[0];
+                var textNode;
+                var textPoint;
+
+                function getBidiBoundaries(node, mode) {
+                    var bidiPoints = [];
+                    if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
+                        var pos = 0;
+                        var re = mode & 2 ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
+                        while (re[bidiPoints.length & 1].test(node.data.slice(pos))) {
+                            pos = node.data.indexOf(RegExp.$1, pos);
+                            bidiPoints.push(pos);
+                        }
+                    }
+                    bidiPoints.push(node.length);
+                    return bidiPoints;
                 }
 
-                function distanceFromCharacter(node, index) {
+                function distanceFromCharacter(node, index, mode, point) {
                     // IE11 (update version 11.0.38) crashes with memory access violation when
                     // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
                     // https://jsfiddle.net/b6q4p664/
                     while (/[^\S\u00a0]/.test(node.data.charAt(index)) && --index);
-                    var rect = rectFromPosition(node, index);
+                    var rect = getRects(createRange(node, index))[0];
                     if (rect) {
-                        var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
-                        var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
-                        return !distY ? distX : distY > 0 ? Infinity : -Infinity;
+                        rect = getAbstractRect(rect, mode);
+                        return rect.top > point.top ? Infinity : rect.bottom < point.top ? -Infinity : rect.left - point.left;
                     }
                 }
 
-                function findOffset(node) {
-                    var b0 = 0;
-                    var b1 = node.length;
-                    while (b1 - b0 > 1) {
-                        var mid = (b1 + b0) >> 1;
-                        var p = distanceFromCharacter(node, mid) < 0;
-                        b0 = p ? mid : b0;
-                        b1 = p ? b1 : mid;
-                    }
-                    return Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1;
-                }
-
-                var newY = y;
-                var element = elementFromPoint_.call(document, x, y);
-                for (var target = element, distY, lastDistY; isElm(target); element = target || element) {
-                    distY = Infinity;
-                    target = null;
-                    $(element).contents().each(function (i, v) {
-                        var rects;
-                        if (isText(v)) {
-                            rects = computeTextRects(v);
-                        } else if (isElm(v) && $(v).css('pointer-events') !== 'none') {
-                            rects = [getRect(v)];
+                while (stack[0]) {
+                    var node = stack.pop();
+                    var mode = getWritingMode(node);
+                    var point = getAbstractRect(toPlainRect(x, y, x, y), mode);
+                    var rects, dist;
+                    if (isElm(node)) {
+                        if ($.css(node, 'pointer-events') === 'none') {
+                            continue;
                         }
-                        for (var j = 0, length = (rects || '').length; j < length; j++) {
-                            if (rects[j].top <= y && rects[j].bottom >= y) {
-                                target = v;
-                                newY = y;
-                                distY = 0;
-                                return isElm(v) || distanceFromCharacter(v, v.length - 1) < 0;
-                            }
-                            lastDistY = distY;
-                            distY = Math.min(distY, distanceToRect(rects[j]));
-                            if (distY < lastDistY) {
-                                target = v;
-                                newY = isElm(v) ? y : rects[j].top + rects[j].height / 2;
-                            }
+                        rects = [getRect(node)];
+                    } else {
+                        rects = getRects(node);
+                    }
+                    rects.forEach(function (v) {
+                        v = getAbstractRect(v, mode);
+                        var distX = Math.max(0, v.left - point.left) || Math.min(0, v.right - point.left);
+                        var distY = Math.max(0, v.top - point.top) || Math.min(0, v.bottom - point.top);
+                        var newPoint;
+                        if (!distX) {
+                            newPoint = point.translate(0, distY);
+                            dist = distY * v.width;
+                        } else if (!distY) {
+                            newPoint = point.translate(distX, 0);
+                            dist = distX;
+                        } else {
+                            dist = Infinity;
+                        }
+                        if (isText(node) && Math.abs(dist) < minDist) {
+                            minDist = Math.abs(dist);
+                            textNode = node;
+                            textPoint = getAbstractRect(newPoint || point, -mode);
                         }
                     });
+                    if (isElm(node) && dist !== Infinity) {
+                        element = node;
+                        stack.push.apply(stack, node.childNodes);
+                    }
                 }
-                if (isText(element)) {
-                    y = newY;
-                    return createRange(element, findOffset(element));
+                if (textNode) {
+                    var bidiMode = getWritingMode(textNode);
+                    var bidiPoints = getBidiBoundaries(textNode, bidiMode);
+                    for (var i = 0; i < bidiPoints.length; i++) {
+                        var b0 = bidiPoints[i - 1] || 0;
+                        var b1 = bidiPoints[i];
+                        var containsPoint = any(getRects(createRange(textNode, b0, textNode, b1)), function (v) {
+                            return pointInRect(textPoint.left, textPoint.top, v);
+                        });
+                        if (containsPoint) {
+                            var myMode = bidiMode ^ (i & 1 ? 2 : 0);
+                            var myPoint = getAbstractRect(textPoint, myMode);
+                            while (b1 - b0 > 1) {
+                                var mid = (b1 + b0) >> 1;
+                                var p = distanceFromCharacter(textNode, mid, myMode, myPoint) < 0;
+                                b0 = p ? mid : b0;
+                                b1 = p ? b1 : mid;
+                            }
+                            var d1 = distanceFromCharacter(textNode, b0, myMode, myPoint);
+                            var d2 = distanceFromCharacter(textNode, b1, myMode, myPoint);
+                            return createRange(textNode, Math.abs(d1) < Math.abs(d2) ? b0 : b1);
+                        }
+                    }
                 }
                 return createRange(element, -0);
             };

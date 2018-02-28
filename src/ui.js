@@ -254,8 +254,8 @@
 
     function cssFromRect(rect, parent) {
         var style = cssFromPoint(rect, null, parent);
-        style.width = ((rect.width || rect.right - rect.left) | 0) + 'px';
-        style.height = ((rect.height || rect.bottom - rect.top) | 0) + 'px';
+        style.width = (rect.width | 0) + 'px';
+        style.height = (rect.height | 0) + 'px';
         return style;
     }
 

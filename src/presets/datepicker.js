@@ -236,11 +236,7 @@
             });
             $('s', self.element).on('mousedown touchstart', function (e) {
                 var elm = e.target;
-                var center = Typer.getRect(elm.parentNode);
-                center = {
-                    top: (center.top + center.bottom) / 2,
-                    left: (center.left + center.right) / 2
-                };
+                var rect = Typer.getRect(elm.parentNode);
                 var isTouch = e.type === 'touchstart';
                 var handlers = {};
                 handlers[isTouch ? 'touchmove' : 'mousemove'] = function (e) {
@@ -248,7 +244,7 @@
                         return handlers.mouseup();
                     }
                     var point = isTouch ? e.originalEvent.touches[0] : e;
-                    var rad = Math.atan2(point.clientY - center.top, point.clientX - center.left) / Math.PI;
+                    var rad = Math.atan2(point.clientY - rect.centerY, point.clientX - rect.centerX) / Math.PI;
                     var curM = getMinutes(self.value);
                     var curH = getHours(self.value);
                     if (elm.getAttribute('hand') === 'm') {

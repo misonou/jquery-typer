@@ -46,12 +46,9 @@
             };
         }
         if (position) {
-            var range = toolbar.typer.getSelection().getRange();
-            if (range) {
-                var r = range.getClientRects()[0] || Typer.getRect(range);
-                if (r.top >= position.top && r.top <= position.top + height) {
-                    position.top = r.bottom + 10;
-                }
+            var r = toolbar.typer.getSelection().extendCaret.getRect();
+            if (r.top >= position.top && r.top <= position.top + height) {
+                position.top = r.bottom + 10;
             }
             $(toolbar.element).css(position);
         }

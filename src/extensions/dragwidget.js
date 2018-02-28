@@ -38,7 +38,7 @@
             if (node && !Typer.containsOrEquals(activeNode.element, node.element)) {
                 var rectA = Typer.getRect(node.element);
                 var rectC = Typer.getRect(Typer.closest(node, Typer.NODE_EDITABLE).element);
-                var before = canvas.pointerY < (rectA.top + rectA.bottom) / 2;
+                var before = canvas.pointerY < rectA.centerY;
                 var nextNode = before ? node.previousSibling : node.nextSibling;
                 if (nextNode !== activeNode && canvas.typer.widgetAllowed(activeNode.widget.id, node)) {
                     var y;

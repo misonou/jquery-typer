@@ -1,11 +1,8 @@
 (function ($, Typer) {
     'use strict';
 
-    var INVALID = {
-        left: 10000,
-        right: -10000
-    };
     var root = document.documentElement;
+    var getRect = Typer.getRect;
     var parseFloat = window.parseFloat;
     var allLayers = {};
     var pointerRegions = [];
@@ -20,7 +17,7 @@
 
     function TyperCanvas() {
         state.timestamp = activeTyper.getSelection().timestamp;
-        state.rect = translate(Typer.getRect(activeTyper.element), root.scrollLeft, root.scrollTop);
+        state.rect = toAbsolute(getRect(activeTyper.element));
         $.extend(this, {
             typer: activeTyper,
             pointerX: state.x || 0,
@@ -39,33 +36,22 @@
             E: 'before',
             F: 'after',
             G: 'background',
-            L: 'left',
-            R: 'right',
-            T: 'top',
-            B: 'bottom',
-            U: 'radius',
-            P: 'polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%)',
-            X: 'transform'
+            S: 'selection',
+            X: 'transparent'
         };
         var style =
+            '.has-N{caret-color:X;}' +
             '.has-N:focus{outline:none;}' +
-            '.has-N::selection,.has-N ::selection{G:transparent;}' +
-            '.has-N::-moz-selection,.has-N ::-moz-selection{G:transparent;}' +
+            '.has-N::S,.has-N ::S{G:X;}' +
+            '.has-N::-moz-S,.has-N ::-moz-S{G:X;}' +
             '.N{position:absolute;T:0;L:0;font-family:serif;font-size:12px;}' +
             '.N>div{position:absolute;pointer-events:none;}' +
+            '.N>.k{animation:caret 0.5s infinite alternate ease-in;outline:1px solid rgba(0,31,81,0.8);}' +
             '.N>.c{pointer-events:all;border:1px solid black;G:white;}' +
             '.N>.f{G:rgba(0,31,81,0.2);}' +
             '.N>.m:E{content:"\\0000b6";position:absolute;top:50%;margin-top:-0.5em;left:4px;color:rgba(0,0,0,0.5);line-height:1;text-shadow:0 0 1px white,0 0 2px white;}' +
             '.N>.m-br:E{content:"\\0021a9";}' +
-            '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:E,.N>.tl-r:E,.N>.br-r:F,.N>.tr-r:F{content:"";display:block;position:absolute;G:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:P;clip-path:P;}}' +
-            '.N>.bl{border-B-L-U:4px;}' +
-            '.N>.tl{border-T-L-U:4px;}' +
-            '.N>.br{border-B-R-U:4px;}' +
-            '.N>.tr{border-T-R-U:4px;}' +
-            '.N>.bl-r:E{R:100%;B:0;}' +
-            '.N>.tl-r:E{R:100%;T:0;-webkit-X:flipY();X:flipY();}' +
-            '.N>.br-r:F{L:100%;B:0;-webkit-X:flipX();X:flipX();}' +
-            '.N>.tr-r:F{L:100%;T:0;-webkit-X:rotate(180deg);X:rotate(180deg);}';
+            '@keyframes caret{0%{opacity:1;}100%{opacity:0;}}';
         $(document.body).append('<style>' + style.replace(/\b[A-Z]/g, function (v) {
             return repl[v] || v;
         }) + '</style>');
@@ -76,7 +62,7 @@
 
         $(document.body).mousedown(function (e) {
             $.each(pointerRegions, function (i, v) {
-                if (Typer.pointInRect(e.clientX, e.clientY, translate(v.rect, -root.scrollLeft, -root.scrollTop))) {
+                if (Typer.pointInRect(e.clientX, e.clientY, toFixed(v.rect))) {
                     var promise = handlePointer(e);
                     v.handler(promise);
                     promise.always(function () {
@@ -99,47 +85,31 @@
         });
     }
 
-    function translate(rect, x, y) {
-        return Typer.toPlainRect(rect.left + x, rect.top + y, rect.right + x, rect.bottom + y);
+    function toAbsolute(rect) {
+        return rect.translate(root.scrollLeft, root.scrollTop);
+    }
+
+    function toFixed(rect) {
+        return rect.translate(-root.scrollLeft, -root.scrollTop);
     }
 
     function computeFillRects(range) {
-        var container = range.commonAncestorContainer;
-        var bRect = Typer.getRect(container.nodeType === 1 ? container : container.parentNode);
-        var rects = $.map(range.getClientRects(), Typer.toPlainRect);
+        var start = Typer.getAbstractSide('inline-start', range.startContainer);
+        var end = Typer.getAbstractSide('inline-end', range.startContainer);
         var result = [];
-        rects.sort(function (a, b) {
-            return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
-        });
-        $.each(rects, function (i, v) {
-            var prev = result[0];
-            if (v.width <= 1) {
-                v.right += 5;
+        $.each(Typer.getRects(range), function (i, v) {
+            if (Math.abs(v[start] - v[end]) <= 1) {
+                v[end] += 5;
             }
-            if (prev) {
-                if (v.left >= prev.right && v.top < prev.bottom) {
-                    result.shift();
-                    v.top = Math.min(v.top, prev.top);
-                    v.left = prev.left;
-                    v.bottom = Math.max(v.bottom, prev.bottom);
-                    prev = result[0];
-                } else if (v.top >= prev.bottom) {
-                    prev.left = result[1] ? bRect.left : prev.left;
-                    prev.right = bRect.right;
+            result.forEach(function (prev) {
+                if (Math.abs(v.left - prev.right) <= 1) {
+                    prev.right = v.left;
                 }
-            }
-            if (prev) {
-                if (Typer.rectCovers(prev, v)) {
-                    return;
-                }
-                if (v.top > prev.top) {
+                if (Math.abs(v.top - prev.bottom) <= 1) {
                     prev.bottom = v.top;
                 }
-                if (result[1] && prev.left === result[1].left && prev.right === result[1].right) {
-                    prev.top = result.splice(1, 1)[0].top;
-                }
-            }
-            result.unshift((delete v.width, delete v.height, v));
+            });
+            result.unshift(v);
         });
         return result;
     }
@@ -190,7 +160,7 @@
     function paint(className, rect, extraCSS, handler) {
         newLayers[newLayers.length] = {
             className: className,
-            rect: translate('top' in rect ? rect : rect.getRect ? rect.getRect() : Typer.getRect(rect), root.scrollLeft, root.scrollTop),
+            rect: toAbsolute('top' in rect ? rect : getRect(rect)),
             css: extraCSS,
             handler: handler
         };
@@ -224,7 +194,7 @@
                             newLayers.forEach(function (v, i) {
                                 var dom = arr[i] || (arr[i] = $(freeDiv.pop() || document.createElement('div')).appendTo(container)[0]);
                                 dom.className = v.className;
-                                $(dom).css($.extend(Typer.ui.cssFromRect(translate(v.rect, -root.scrollLeft, -root.scrollTop), container), v.css));
+                                $(dom).css($.extend(Typer.ui.cssFromRect(toFixed(v.rect), container), v.css));
                             });
                         }
                         v.layers.forEach(function (w) {
@@ -247,36 +217,27 @@
         },
         fill: function (range) {
             if (range instanceof Node) {
-                addObject('f tl tr bl br', range);
+                addObject('f', range);
             } else {
                 var arr = [];
                 Typer.iterate(activeTyper.createSelection(range).createTreeWalker(-1, function (v) {
-                    if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT) || Typer.rangeCovers(range, v.element)) {
-                        var r = Typer.createRange(range, Typer.createRange(v.element));
-                        if (!arr[0] || arr[0].commonAncestorContainer !== v.element.parentNode) {
-                            arr.unshift(r);
-                        } else {
-                            arr[0] = Typer.createRange(Typer.createRange(arr[0], true), Typer.createRange(r, false));
-                        }
+                    if (Typer.rangeCovers(range, v.element)) {
+                        arr[arr.length] = getRect(v.element);
                         return 2;
                     }
+                    if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT)) {
+                        arr.push.apply(arr, computeFillRects(Typer.createRange(range, Typer.createRange(v.element, 'content'))));
+                        return 2;
+                    }
+                    return 1;
                 }));
                 arr.forEach(function (v) {
-                    addObject('f', v, function (range) {
-                        var rects = computeFillRects(range);
-                        $.each(rects, function (i, v) {
-                            var prev = rects[i - 1] || INVALID;
-                            var next = rects[i + 1] || INVALID;
-                            var className = [
-                                v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
-                                v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
-                                v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
-                                v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
-                            paint('f' + className, v);
-                        });
-                    });
-                }, this);
+                    addObject('f', v);
+                });
             }
+        },
+        drawCaret: function (caret) {
+            addObject('k', caret.clone());
         },
         drawBorder: function (element, mtop, mright, mbottom, mleft, color, inset) {
             var style = {};
@@ -303,7 +264,7 @@
         },
         addControlPoint: function (element, cursor, callback) {
             addObject('c', element, function () {
-                var r = Typer.getRect(element);
+                var r = getRect(element);
                 paint('c', Typer.toPlainRect(r.right, r.top - 8, r.right + 8, r.top), {
                     cursor: cursor || 'pointer'
                 }, callback);
@@ -326,6 +287,9 @@
         var selection = canvas.typer.getSelection();
         var startNode = selection.startNode;
         if (selection.isCaret) {
+            if ('caretColor' in root.style) {
+                canvas.drawCaret(selection.baseCaret);
+            }
             canvas.drawLineBreak(startNode);
         } else if (Typer.is(startNode, Typer.NODE_WIDGET) === selection.focusNode) {
             canvas.fill(startNode.element);
