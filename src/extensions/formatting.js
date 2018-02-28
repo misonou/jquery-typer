@@ -309,8 +309,9 @@
         extract: function (e) {},
         receive: function (e) {
             e.preventDefault();
-            e.typer.invoke('insertLine');
-            $(e.receivedNode).children('li').insertBefore(e.typer.getSelection().startNode.element);
+            e.typer.invoke(function (tx) {
+                tx.insertHtml(e.receivedNode.childNodes);
+            });
         },
         tab: function (e) {
             e.typer.invoke('indent');
