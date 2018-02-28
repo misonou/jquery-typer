@@ -792,7 +792,10 @@
         }
 
         function trackChange(node) {
-            changedWidgets.add(node.widget);
+            // avoid trigger contentChange event before init
+            if (currentSelection) {
+                changedWidgets.add(node.widget);
+            }
         }
 
         function createTyperDocument(rootElement, fireEvent) {
@@ -1042,7 +1045,7 @@
                     if (firstBr && !firstBr.previousSibling) {
                         removeNode(firstBr);
                     }
-                    if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
+                    if (!currentSelection || (currentSelection.startNode !== node && currentSelection.endNode !== node)) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
                             updateTextNodeData(v, collapseWS(v.data) || ZWSP);
                             if (isText(v.nextSibling)) {
@@ -1052,7 +1055,7 @@
                         });
                     }
                 }
-                if (is(node, NODE_INLINE) && currentSelection.startElement !== element && currentSelection.endElement !== element && !trim(element.textContent)) {
+                if (is(node, NODE_INLINE) && (!currentSelection || (currentSelection.startElement !== element && currentSelection.endElement !== element)) && !trim(element.textContent)) {
                     removeNode(element);
                 }
                 $('>br', element).each(function (i, v) {
@@ -2048,8 +2051,8 @@
             }
         });
 
-        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         codeUpdate(normalize);
+        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         triggerEvent(EVENT_STATIC, 'init');
     }
 
