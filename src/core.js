@@ -1097,7 +1097,7 @@
                         var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
                         var isWidgetHead = node.widget.element === element;
 
-                        if (node === state.focusNode && is(node, NODE_EDITABLE)) {
+                        if (node === state.focusNode && !isWidgetHead && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
                         if (!handler && !isWidgetHead && is(node, NODE_WIDGET | NODE_EDITABLE)) {
