@@ -1158,6 +1158,8 @@
                     for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
+                    // explicitly update the selection
+                    state.getRange();
                     if (!isSingleEditable) {
                         var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE, function (v) {
                             return widgetOptions[v.widget.id].textFlow ? 1 : 3;
