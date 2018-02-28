@@ -850,18 +850,22 @@
             }
 
             function removeFromParent(node, destroyWidget) {
-                var parentNode = node.parentNode;
-                var arr = parentNode.childNodes;
-                arr.splice(arr.indexOf(node), 1);
-                (node.previousSibling || {}).nextSibling = node.nextSibling;
-                (node.nextSibling || {}).previousSibling = node.previousSibling;
+                var parent = node.parentNode;
+                var prev = node.previousSibling;
+                var next = node.nextSibling;
+                parent.childNodes.splice(parent.childNodes.indexOf(node), 1);
+                (prev || {}).nextSibling = next;
+                (next || {}).previousSibling = prev;
                 node.parentNode = null;
                 node.nextSibling = null;
                 node.previousSibling = null;
                 if (destroyWidget) {
                     triggerWidgetEventRecursive(node, 'destroy');
                     iterate(new TyperTreeWalker(node, -1), function (v) {
-                        detachedElements.set(v.element, parentNode.element);
+                        detachedElements.set(v.element, {
+                            node: (prev || next || parent).element,
+                            offset: prev ? false : next ? true : 0
+                        });
                     });
                 }
             }
@@ -2535,9 +2539,12 @@
             } else if (containsOrEquals(root, inst.node.element)) {
                 inst.moveToText(inst.node.element, inst.wholeTextOffset);
             } else {
+                var replace = {
+                    node: inst.element
+                };
                 inst.typer.getNode(node);
-                for (var replace = inst.element; detachedElements.has(replace); replace = detachedElements.get(replace));
-                inst.moveTo(replace, false);
+                for (; detachedElements.has(replace.node); replace = detachedElements.get(replace.node));
+                inst.moveTo(replace.node, replace.offset);
             }
         }
         return inst;
