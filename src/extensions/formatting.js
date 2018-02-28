@@ -306,6 +306,12 @@
         insert: listCommand,
         textFlow: true,
         remove: 'keepText',
+        extract: function (e) {},
+        receive: function (e) {
+            e.preventDefault();
+            e.typer.invoke('insertLine');
+            $(e.receivedNode).children('li').insertBefore(e.typer.getSelection().startNode.element);
+        },
         tab: function (e) {
             e.typer.invoke('indent');
         },
