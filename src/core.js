@@ -1541,13 +1541,14 @@
                 }
             }
 
-            function triggerClick(e, point) {
+            function triggerClick(e, point, eventName) {
+                var node = typer.getNode(e.target);
                 var props = {
                     clientX: (point || e).clientX,
                     clientY: (point || e).clientY,
                     target: e.target
                 };
-                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
+                triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
             }
 
             function updateFromNativeInput() {
@@ -1778,7 +1779,7 @@
                 if (e.type === 'touchend' && touchObj) {
                     currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
                     currentSelection.focus();
-                    triggerClick(e, touchObj);
+                    triggerClick(e, touchObj, 'click');
                     e.preventDefault();
                 }
                 var touches = e.originalEvent.touches;
@@ -1792,15 +1793,8 @@
                 }
             });
 
-            $self.on('click', function (e) {
+            $self.on('click dblclick', function (e) {
                 triggerClick(e);
-                e.preventDefault();
-            });
-
-            $self.on('dblclick', function (e) {
-                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
-                    currentSelection.select('word');
-                }
                 e.preventDefault();
             });
 
@@ -1889,12 +1883,17 @@
                     };
                 });
             });
-            widgetOptions.__core__.keystroke = function (e) {
-                if (!e.isDefaultPrevented() && (e.data in defaultKeystroke)) {
-                    e.preventDefault();
-                    defaultKeystroke[e.data](e);
+            extend(widgetOptions[WIDGET_CORE], {
+                dblclick: function (e) {
+                    currentSelection.select('word');
+                },
+                keystroke: function (e) {
+                    if (!e.isDefaultPrevented() && (e.data in defaultKeystroke)) {
+                        e.preventDefault();
+                        defaultKeystroke[e.data](e);
+                    }
                 }
-            };
+            });
             fixIEInputEvent(topElement);
         }
 
