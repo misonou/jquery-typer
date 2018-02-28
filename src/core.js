@@ -2569,7 +2569,7 @@
             textNode = isText(element);
         }
         var node = inst.typer.getNode(element);
-        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET)) {
+        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET | NODE_INLINE_WIDGET)) {
             var child = any(node.childNodes, function (v) {
                 return comparePosition(textNode, v.element) < 0;
             });
