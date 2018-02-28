@@ -1246,6 +1246,8 @@
                                         caret: caretPoint.clone()
                                     };
                                     if (triggerDefaultPreventableEvent(widgetNode.widget, 'receive', null, prop)) {
+                                        caretPoint = currentSelection.extendCaret.clone();
+                                        hasInsertedBlock = true;
                                         return;
                                     }
                                 }
