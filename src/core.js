@@ -1201,8 +1201,8 @@
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = state.getCaret('start').clone();
                 var startPoint = createRange(closest(startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
-                var forcedInline = is(startNode, NODE_EDITABLE_PARAGRAPH);
-                var insertAsInline = is(startNode, NODE_ANY_ALLOWTEXT);
+                var forcedInline = !!is(startNode, NODE_EDITABLE_PARAGRAPH);
+                var insertAsInline = !!is(startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
                 var formattingNodes = [];
@@ -1224,7 +1224,7 @@
                 content.forEach(function (nodeToInsert) {
                     var caretNode = typer.getNode(caretPoint.element);
                     var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
-                    var isLineBreak = isBR(nodeToInsert);
+                    var isLineBreak = !!isBR(nodeToInsert);
                     var needSplit = false;
                     var incompatParagraph = false;
                     var splitEnd;
@@ -1261,7 +1261,7 @@
                             caretNode = closest(caretNode, NODE_PARAGRAPH) || caretNode;
                             splitEnd = createRange(caretNode.element, false);
                             if (is(node, NODE_PARAGRAPH)) {
-                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
+                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && !!trim(nodeToInsert.textContent);
                                 needSplit = incompatParagraph || !paragraphAsInline;
                             } else if (trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)))) {
                                 needSplit = trim(createRange(splitEnd, createRange(caretPoint)));
@@ -1283,11 +1283,8 @@
                             for (var cur1 = typer.getNode(splitFirstNode); cur1 && !trim(cur1.element.textContent); cur1 = cur1.firstChild) {
                                 if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
                                     // avoid empty inline widget at the start of inserted line
-                                    if (cur1.element.firstChild) {
-                                        $(cur1.element).contents().unwrap();
-                                    } else {
-                                        $(cur1.element).remove();
-                                    }
+                                    $(cur1.element.childNodes).insertBefore(cur1.element);
+                                    removeNode(cur1.element);
                                     break;
                                 }
                             }
@@ -1339,14 +1336,14 @@
                         // check for the first block either if there is content or the insert point is a paragraph
                         // to avoid two empty lines inserted before block widget
                         if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
-                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE) && !is(caretNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
                                 createRange(caretNode.element, -0).insertNode(nodeToInsert);
                             } else {
                                 createRange(caretNode.element, true).insertNode(nodeToInsert);
                             }
-                            insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
-                            caretPoint.moveTo(lastNode, insertAsInline ? -0 : false);
-                            paragraphAsInline = forcedInline || !insertAsInline;
+                            insertAsInline = !!is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
+                            paragraphAsInline = incompatParagraph || !insertAsInline;
+                            caretPoint.moveTo(lastNode, paragraphAsInline ? false : -0);
                         }
                         hasInsertedBlock = true;
                     }
