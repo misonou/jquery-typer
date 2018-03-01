@@ -308,10 +308,12 @@
         remove: 'keepText',
         extract: function (e) {},
         receive: function (e) {
-            e.preventDefault();
-            e.typer.invoke(function (tx) {
-                tx.insertHtml(e.receivedNode.childNodes);
-            });
+            if (Typer.sameElementSpec(e.widget.element, e.receivedNode)) {
+                e.preventDefault();
+                e.typer.invoke(function (tx) {
+                    tx.insertHtml(e.receivedNode.childNodes);
+                });
+            }
         },
         tab: function (e) {
             e.typer.invoke('indent');
