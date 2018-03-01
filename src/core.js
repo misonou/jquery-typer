@@ -2894,7 +2894,7 @@
                         if (is(self.typer.getNode(node), NODE_WIDGET) && !containsOrEquals(node, self.element)) {
                             return self.moveToText(node, 0 * direction) || self.moveTo(node, direction < 0);
                         }
-                        overBr |= isBR(node);
+                        overBr |= !!isBR(node);
                     }
                     offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
