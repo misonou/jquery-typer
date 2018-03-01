@@ -1683,7 +1683,13 @@
                 composition = e.type.slice(-1) !== 'd';
                 if (!composition) {
                     var range = getActiveRange(topElement);
-                    createRange(range.startContainer, range.startOffset - e.originalEvent.data.length, range.startContainer, range.startOffset).deleteContents();
+                    var node = range.startContainer;
+                    var offset = range.startOffset;
+                    if (isElm(node)) {
+                        node = node.childNodes[offset - 1];
+                        offset = node.length;
+                    }
+                    createRange(node, offset - e.originalEvent.data.length, node, offset).deleteContents();
                     updateFromNativeInput();
                     handleTextInput(e.originalEvent.data, true);
                 } else {
