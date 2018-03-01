@@ -639,15 +639,17 @@
         // IE fires input and text-input event on the innermost element where the caret positions at
         // the event does not bubble up so need to trigger manually on the top element
         // also IE use all lowercase letter in the event name
-        $(element).on('input textinput', function (e) {
+        element.addEventListener('textinput', function (e) {
             e.stopPropagation();
             if (e.type === 'textinput' || topElement) {
                 var event = document.createEvent('Event');
-                event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
+                event.initEvent('textInput', true, true);
                 event.data = e.data;
-                (topElement || element).dispatchEvent(event);
+                if (!(topElement || element).dispatchEvent(event)) {
+                    e.preventDefault();
+                }
             }
-        });
+        }, true);
     }
 
     function setImmediateOnce(fn) {
