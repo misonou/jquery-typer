@@ -55,9 +55,8 @@
     };
 
     // each element represent two masks for each abstract box side pair
-    // the upper 12 bits indicate writing modes that maps to y-coordinate (top or bottom)
-    // the lower 12 bits incicate writing modes that the abstract start side maps to side with larger coordinate (right or bottom)
-    var RECT_COLLAPSE_MASK = [0x5550f0, 0xaaaccc, 0xf0ff00, 0x0f0f00];
+    // incicate writing modes that the abstract start side maps to side with larger coordinate (right or bottom)
+    var RECT_COLLAPSE_MASK = [0x0f0, 0xccc, 0x5aa, 0xf00];
     var RECT_SIDE = 'block-start block-end inline-start inline-end over under line-left line-right'.split(' ');
 
     var CHARSET_RTL = '\u0590-\u07ff\u200f\u202b\u202e\ufb1d-\ufdfd\ufe70-\ufefc';
@@ -493,10 +492,10 @@
     }
 
     function getAbstractSide(side, mode) {
-        mode = (1 << (+mode === mode ? mode : getWritingMode(mode)));
+        mode = +mode === mode ? mode : getWritingMode(mode);
         side = +side === side ? side : RECT_SIDE.indexOf(side);
-        var prop = (RECT_COLLAPSE_MASK[side >> 1] & (mode << 12)) ? 'top' : 'left';
-        return !!(RECT_COLLAPSE_MASK[side >> 1] & mode) ^ (side & 1) ? FLIP_POS[prop] : prop;
+        var prop = (side >> 1 & 1) ^ (mode & 1) ? 'left' : 'top';
+        return !!(RECT_COLLAPSE_MASK[side >> 1] & (1 << mode)) ^ (side & 1) ? FLIP_POS[prop] : prop;
     }
 
     function getActiveRange(container) {
