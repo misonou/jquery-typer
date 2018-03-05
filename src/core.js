@@ -2564,6 +2564,8 @@
     }
 
     function caretSetPositionRaw(inst, node, element, textNode, offset) {
+        var oldNode = inst.textNode || inst.element;
+        var oldOffset = inst.offset;
         inst.node = node;
         inst.element = element;
         inst.textNode = textNode || null;
@@ -2572,7 +2574,7 @@
         if (inst.selection) {
             selectionUpdate(inst.selection);
         }
-        return true;
+        return oldNode !== (textNode || element) || oldOffset !== offset;
     }
 
     function caretSetPosition(inst, element, offset) {
