@@ -1385,10 +1385,10 @@
                 });
             }
 
-            var lastNode, textTransform, text = '', innerText = '';
+            var lastNode, textTransform, handler, text = '', innerText = '';
             iterate(iterator, function (v) {
                 var node = (doc || typer).getNode(v);
-                var handler = widgetOptions[node.widget.id].text;
+                handler = widgetOptions[node.widget.id].text;
                 if (node !== lastNode) {
                     if (lastNode) {
                         text += transformText(innerText, textTransform);
@@ -1418,7 +1418,7 @@
                     }
                 }
             });
-            text += transformText(innerText, textTransform);
+            text += handler ? handler(lastNode.widget) : transformText(innerText, textTransform);
             return trim(text).replace(/\u00a0/g, ' ');
         }
 
