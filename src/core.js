@@ -25,7 +25,6 @@
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
-    var EVENT_CURRENT = 4;
     var IS_IE10 = !!window.ActiveXObject;
     var IS_IE = IS_IE10 || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
 
@@ -754,8 +753,6 @@
                     return widgets;
                 case EVENT_HANDLER:
                     return currentSelection.getWidgets().reverse().concat(widgets);
-                case EVENT_CURRENT:
-                    return currentSelection.focusNode.widget;
             }
         }
 
@@ -3031,14 +3028,13 @@
                 var stack = [elementFromPoint_.call(document, x, y)];
                 var minDist = Infinity;
                 var element = stack[0];
-                var textNode;
-                var textPoint;
+                var textNode, textPoint, mode, point;
 
-                function getBidiBoundaries(node, mode) {
+                function getBidiBoundaries(node, baseRTL) {
                     var bidiPoints = [];
                     if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
                         var pos = 0;
-                        var re = mode & 2 ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
+                        var re = baseRTL ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
                         while (re[bidiPoints.length & 1].test(node.data.slice(pos))) {
                             pos = node.data.indexOf(RegExp.$1, pos);
                             bidiPoints.push(pos);
@@ -3062,8 +3058,6 @@
 
                 while (stack[0]) {
                     var node = stack.pop();
-                    var mode = getWritingMode(node);
-                    var point = getAbstractRect(toPlainRect(x, y, x, y), mode);
                     var rects, dist;
                     if (isElm(node)) {
                         if ($.css(node, 'pointer-events') === 'none') {
@@ -3073,6 +3067,8 @@
                     } else {
                         rects = getRects(node);
                     }
+                    mode = getWritingMode(node);
+                    point = getAbstractRect(toPlainRect(x, y, x, y), mode);
                     rects.forEach(function (v) {
                         v = getAbstractRect(v, mode);
                         var distX = Math.max(0, v.left - point.left) || Math.min(0, v.right - point.left);
@@ -3099,8 +3095,8 @@
                     }
                 }
                 if (textNode) {
-                    var bidiMode = getWritingMode(textNode);
-                    var bidiPoints = getBidiBoundaries(textNode, bidiMode);
+                    var baseMode = getWritingMode(textNode);
+                    var bidiPoints = getBidiBoundaries(textNode, baseMode & 2);
                     for (var i = 0; i < bidiPoints.length; i++) {
                         var b0 = bidiPoints[i - 1] || 0;
                         var b1 = bidiPoints[i];
@@ -3108,16 +3104,16 @@
                             return pointInRect(textPoint.left, textPoint.top, v);
                         });
                         if (containsPoint) {
-                            var myMode = bidiMode ^ (i & 1 ? 2 : 0);
-                            var myPoint = getAbstractRect(textPoint, myMode);
+                            mode = baseMode ^ (i & 1 ? 2 : 0);
+                            point = getAbstractRect(textPoint, mode);
                             while (b1 - b0 > 1) {
                                 var mid = (b1 + b0) >> 1;
-                                var p = distanceFromCharacter(textNode, mid, myMode, myPoint) < 0;
+                                var p = distanceFromCharacter(textNode, mid, mode, point) < 0;
                                 b0 = p ? mid : b0;
                                 b1 = p ? b1 : mid;
                             }
-                            var d1 = distanceFromCharacter(textNode, b0, myMode, myPoint);
-                            var d2 = distanceFromCharacter(textNode, b1, myMode, myPoint);
+                            var d1 = distanceFromCharacter(textNode, b0, mode, point);
+                            var d2 = distanceFromCharacter(textNode, b1, mode, point);
                             return createRange(textNode, Math.abs(d1) < Math.abs(d2) ? b0 : b1);
                         }
                     }
