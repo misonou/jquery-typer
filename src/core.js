@@ -900,8 +900,11 @@
                     if (!isBR(v.target)) {
                         if (v.addedNodes[0] || v.removedNodes[0]) {
                             dirtyElements.add(v.target);
-                        } else if (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style' && nodeMap.has(v.target)) {
-                            trackChange(nodeMap.get(v.target));
+                        } else if (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style')) {
+                            var elm = isElm(v.target) || v.target.parentNode;
+                            if (nodeMap.has(elm)) {
+                                trackChange(nodeMap.get(elm));
+                            }
                         }
                     }
                 });
@@ -945,7 +948,8 @@
                 observer.observe(rootElement, {
                     subtree: true,
                     childList: true,
-                    attributes: true
+                    attributes: true,
+                    characterData: true
                 });
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
@@ -1554,23 +1558,22 @@
                 }
             }
 
-            function handleTextInput(inputText, compositionend) {
+            function handleTextInput(inputText) {
                 setEventSource('input', typer);
                 if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
-                    return true;
+                    return;
                 }
-                if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
+                if (!currentSelection.startTextNode || !currentSelection.isCaret) {
                     insertContents(currentSelection, inputText);
-                    return true;
+                } else if (inputText) {
+                    codeUpdate(function () {
+                        var curTextNode = currentSelection.startTextNode;
+                        curTextNode.data = curTextNode.data.substr(0, currentSelection.startOffset) + inputText + curTextNode.data.slice(currentSelection.startOffset);
+                        normalizeWhitespace(currentSelection.startNode.element);
+                        currentSelection.moveToText(curTextNode, currentSelection.startOffset + inputText.length);
+                        undoable.snapshot(200);
+                    });
                 }
-                setImmediate(function () {
-                    setEventSource('input', typer);
-                    updateFromNativeInput();
-                    normalizeWhitespace(currentSelection.startElement);
-                    currentSelection.focus();
-                });
-                trackChange(currentSelection.focusNode);
-                codeUpdate($.noop);
             }
 
             function handleDataTransfer(clipboardData) {
@@ -1583,7 +1586,7 @@
                     if (textContent === clipboard.textContent) {
                         insertContents(currentSelection, clipboard.content.cloneNode(true));
                     } else {
-                        handleTextInput(textContent, true);
+                        handleTextInput(textContent);
                     }
                 }
             }
@@ -1664,9 +1667,9 @@
                         offset = node.length;
                     }
                     createRange(node, offset - e.originalEvent.data.length, node, offset).deleteContents();
-                    updateFromNativeInput();
-                    handleTextInput(e.originalEvent.data, true);
+                    handleTextInput(e.originalEvent.data);
                 } else {
+                    updateFromNativeInput();
                     handleTextInput('');
                 }
             });
@@ -1717,9 +1720,8 @@
 
             $self.on('keypress input textInput', function (e) {
                 if (!executing && !composition && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
-                    if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
-                        e.preventDefault();
-                    }
+                    handleTextInput(e.originalEvent.data || (e.charCode ? String.fromCharCode(e.charCode) : ''));
+                    e.preventDefault();
                 }
             });
 
@@ -1853,9 +1855,6 @@
                 ctrlShiftZ: undoable.redo,
                 backspace: deleteNextContent,
                 delete: deleteNextContent,
-                space: function () {
-                    insertContents(currentSelection, ' ');
-                },
                 escape: function () {
                     topElement.blur();
                     if (getActiveRange(topElement)) {

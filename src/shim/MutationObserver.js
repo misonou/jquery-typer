@@ -6,25 +6,24 @@ this.MutationObserver = window.MutationObserver || (function () {
     MutationObserver.prototype = {
         observe: function (element, init) {
             var self = this;
-            $(element).on('DOMNodeInserted DOMNodeRemoved DOMAttrModified', function (e) {
+            $(element).on('DOMNodeInserted DOMNodeRemoved DOMAttrModified DOMCharacterDataModified', function (e) {
                 var type = e.type.charAt(7);
                 var record = {};
                 record.addedNodes = [];
                 record.removedNodes = [];
                 if (type === 'M') {
-                    if (!init.attributes) {
-                        return;
-                    }
+                    record.type = 'attributes';
                     record.target = e.target;
                     record.attributeName = e.originalEvent.attrName;
+                } else if (type === 'a') {
+                    record.type = 'characterData';
+                    record.target = e.originalEvent.target;
                 } else {
-                    if (!init.childList) {
-                        return;
-                    }
+                    record.type = 'childList';
                     record.target = e.target.parentNode;
                     record[type === 'I' ? 'addedNodes' : 'removedNodes'][0] = e.target;
                 }
-                if (init.subtree || record.target === element) {
+                if (init[record.type] && (init.subtree || record.target === element)) {
                     self.records[self.records.length] = record;
                     clearTimeout(self.timeout);
                     self.timeout = setTimeout(function () {
