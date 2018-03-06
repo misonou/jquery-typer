@@ -1458,7 +1458,7 @@
             }
 
             function takeSnapshot() {
-                var value = trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
+                var value = undoable.getValue();
                 if (!snapshots[0] || value !== snapshots[currentIndex].value) {
                     snapshots.splice(0, currentIndex, {
                         value: value
@@ -1483,7 +1483,7 @@
 
             extend(undoable, {
                 getValue: function () {
-                    return snapshots[currentIndex].value;
+                    return trim(topElement.innerHTML.replace(/\s+style(?:="[^"]*")?|\u200b+(?!<\/)|(^|[^>])\u200b+/g, '$1'));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
