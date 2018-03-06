@@ -1428,6 +1428,7 @@
             var snapshots = [];
             var currentIndex = 0;
             var suppressUntil = 0;
+            var timeout;
 
             function triggerStateChange() {
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
@@ -1469,16 +1470,16 @@
                 snapshots[currentIndex].basePos = saveCaret(currentSelection.baseCaret);
                 snapshots[currentIndex].extendPos = saveCaret(currentSelection.extendCaret);
                 snapshots[currentIndex].html = topElement.innerHTML;
-                needSnapshot = false;
-                setImmediateOnce(triggerStateChange);
+                triggerStateChange();
+                clearTimeout(timeout);
             }
 
             function applySnapshot(state) {
                 $self.html(state.html);
                 restoreCaret(currentSelection, state.basePos);
                 restoreCaret(currentSelection.extendCaret, state.extendPos);
-                setImmediateOnce(triggerStateChange);
-                needSnapshot = false;
+                triggerStateChange();
+                clearTimeout(timeout);
             }
 
             extend(undoable, {
@@ -1502,13 +1503,10 @@
                     }
                 },
                 snapshot: function (ms) {
-                    suppressUntil = (+new Date() + ms) || suppressUntil;
-                    if (!executing && suppressUntil < +new Date()) {
-                        takeSnapshot();
-                    } else {
-                        needSnapshot = true;
-                        setImmediateOnce(triggerStateChange);
-                    }
+                    var cur = +new Date();
+                    clearTimeout(timeout);
+                    suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
+                    timeout = setTimeout(takeSnapshot, suppressUntil - cur);
                 }
             });
         }
