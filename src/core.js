@@ -885,7 +885,7 @@
                 if (node.widget && node.widget.destroyed) {
                     delete node.widget;
                 }
-                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT))) {
+                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && is(context, NODE_WIDGET | NODE_INLINE_WIDGET))) {
                     node.widget = context.widget;
                 }
                 var widgetOption = widgetOptions[node.widget.id];
