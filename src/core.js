@@ -748,7 +748,7 @@
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
                 case EVENT_ALL:
-                    return widgets.concat(currentSelection.getWidgets().slice(0, -1));
+                    return widgets.concat(currentSelection.getWidgets());
                 case EVENT_STATIC:
                     return widgets;
                 case EVENT_HANDLER:
@@ -2428,7 +2428,7 @@
         },
         getWidgets: function () {
             var nodes = [];
-            for (var node = this.focusNode; node; node = node.parentNode) {
+            for (var node = this.focusNode; node.widget.id !== WIDGET_ROOT; node = node.parentNode) {
                 nodes.unshift(node.widget);
                 node = this.typer.getNode(node.widget.element);
             }
