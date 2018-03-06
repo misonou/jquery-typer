@@ -1232,7 +1232,7 @@
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
                         if (node.widget !== caretNode.widget) {
-                            for (var widgetNode = caretNode; !is(widgetNode, NODE_ANY_BLOCK_EDITABLE); widgetNode = widgetNode.parentNode) {
+                            for (var widgetNode = caretNode; is(widgetNode, NODE_ANY_INLINE | NODE_PARAGRAPH) || (is(widgetNode, NODE_EDITABLE_PARAGRAPH) && widgetNode === caretNode); widgetNode = widgetNode.parentNode) {
                                 if (!widgetAllowed(node.widget.id, widgetNode)) {
                                     nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
                                     node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
