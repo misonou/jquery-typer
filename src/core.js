@@ -1262,7 +1262,9 @@
                             splitEnd = createRange(caretNode.element, false);
                             if (is(node, NODE_PARAGRAPH)) {
                                 incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && !!trim(nodeToInsert.textContent);
-                                needSplit = incompatParagraph || !paragraphAsInline;
+                                needSplit = !paragraphAsInline || (incompatParagraph && !!trim(createRange(createRange(caretNode.element, true), createRange(caretPoint))));
+                                paragraphAsInline = !incompatParagraph;
+                                insertAsInline = insertAsInline && paragraphAsInline;
                             } else if (trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)))) {
                                 needSplit = trim(createRange(splitEnd, createRange(caretPoint)));
                                 if (!needSplit) {
@@ -1304,8 +1306,6 @@
                             }
                             caretNode = typer.getNode(splitFirstNode);
                             caretPoint.moveTo(splitFirstNode, 0);
-                            paragraphAsInline = !incompatParagraph;
-                            insertAsInline = insertAsInline && paragraphAsInline;
                             hasInsertedBlock = true;
                         }
                     }
