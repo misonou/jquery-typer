@@ -633,23 +633,6 @@
         return (result.x || result.y) ? result : false;
     }
 
-    function fixIEInputEvent(element, topElement) {
-        // IE fires input and text-input event on the innermost element where the caret positions at
-        // the event does not bubble up so need to trigger manually on the top element
-        // also IE use all lowercase letter in the event name
-        element.addEventListener('textinput', function (e) {
-            e.stopPropagation();
-            if (e.type === 'textinput' || topElement) {
-                var event = document.createEvent('Event');
-                event.initEvent('textInput', true, true);
-                event.data = e.data;
-                if (!(topElement || element).dispatchEvent(event)) {
-                    e.preventDefault();
-                }
-            }
-        }, true);
-    }
-
     function setImmediateOnce(fn) {
         clearImmediate(fn._timeout);
         fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
@@ -696,7 +679,6 @@
         var currentSelection;
         var executing;
         var needSnapshot;
-        var suppressTextEvent;
         var typerFocused = false;
         var $self = $(topElement);
 
@@ -710,7 +692,6 @@
                 }
                 var lastChanges = consume(changedWidgets);
                 setImmediate(function () {
-                    suppressTextEvent = false;
                     if (lastChanges[0]) {
                         codeUpdate(function () {
                             $.each(lastChanges, function (i, v) {
@@ -724,9 +705,6 @@
                 });
             });
             return function (callback, args, thisArg) {
-                // IE fires textinput event on the parent element when the text node's value is modified
-                // even if modification is done through JavaScript rather than user action
-                suppressTextEvent = true;
                 executing = true;
                 setEventSource('script', typer);
                 return run(callback, args, thisArg);
@@ -913,9 +891,6 @@
                     nodeMap.set(v, node);
                     if (!parentNode || v.parentNode !== parentNode.element) {
                         visitElement(v);
-                        if (IS_IE) {
-                            fixIEInputEvent(v, topElement);
-                        }
                     }
                 });
             }
@@ -1721,9 +1696,6 @@
                         }
                     }
                     keyDefaultPrevented = e.isDefaultPrevented();
-                    if (!keyDefaultPrevented) {
-                        suppressTextEvent = false;
-                    }
                     setImmediate(function () {
                         if (!composition && !keyDefaultPrevented) {
                             updateFromNativeInput();
@@ -1744,7 +1716,7 @@
             });
 
             $self.on('keypress input textInput', function (e) {
-                if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
+                if (!executing && !composition && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
                     if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
                         e.preventDefault();
                     }
@@ -1863,6 +1835,18 @@
                 }
             });
 
+            // IE textinput event on the element at caret position and is fired after the DOM has changed
+            // instead capture input event which is fired before DOM has changed
+            topElement.addEventListener('input', function (e) {
+                e.stopPropagation();
+                var event = document.createEvent('Event');
+                event.initEvent('textInput', true, true);
+                event.data = e.data;
+                if (topElement.dispatchEvent(event)) {
+                    e.preventDefault();
+                }
+            }, true);
+
             var defaultKeystroke = {
                 ctrlZ: undoable.undo,
                 ctrlY: undoable.redo,
@@ -1908,7 +1892,6 @@
                     }
                 }
             });
-            fixIEInputEvent(topElement);
         }
 
         function activateWidget(name, settings) {
