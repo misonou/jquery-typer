@@ -883,7 +883,7 @@
                         removeFromParent(v, true);
                     }
                 });
-                $(element.children).not('br').each(function (i, v) {
+                $(element).children().not('br').each(function (i, v) {
                     var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
                     var parentNode = node.parentNode;
                     addChild(thisNode, node);
