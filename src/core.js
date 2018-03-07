@@ -2307,35 +2307,24 @@
     }
 
     function selectionIterateTextNodes(inst) {
-        return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4), null, inst.startTextNode || inst.startElement, function (v) {
-            return comparePosition(v, inst.endTextNode || inst.endElement) <= 0;
+        var iterator = new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4);
+        iterator.currentNode = inst.startTextNode || inst.startElement;
+        if (inst.startOffset === (inst.startTextNode || '').length) {
+            iterator.nextNode();
+        }
+        return iterateToArray(iterator, null, null, function (v) {
+            return comparePosition(v, inst.endTextNode || inst.endElement) <= (inst.endOffset !== 0 ? 0 : -1);
         });
     }
 
     function selectionSplitText(inst) {
         var p1 = inst.getCaret('start');
         var p2 = inst.getCaret('end');
-        var sameNode = (p1.textNode === p2.textNode);
         if (p2.textNode && !isTextNodeEnd(p2.textNode, p2.offset, 1)) {
             p2.textNode.splitText(p2.offset);
         }
         if (p1.textNode && !isTextNodeEnd(p1.textNode, p1.offset, -1)) {
-            var offset = p1.offset;
-            selectionAtomic(function () {
-                if (offset === p1.textNode.length) {
-                    var iterator = caretTextNodeIterator(p1);
-                    if (iterator.nextNode()) {
-                        caretSetPosition(p1, iterator.currentNode, 0);
-                    } else {
-                        caretSetPosition(p1, p1.element, false);
-                    }
-                } else {
-                    caretSetPositionRaw(p1, p1.node, p1.element, p1.textNode.splitText(p1.offset), 0);
-                }
-                if (sameNode) {
-                    caretSetPositionRaw(p2, p2.node, p2.element, p1.textNode, p2.offset - offset);
-                }
-            });
+            caretSetPositionRaw(p1, p1.node, p1.element, p1.textNode.splitText(p1.offset), 0);
         }
     }
 
