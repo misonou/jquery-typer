@@ -2728,7 +2728,7 @@
             if (node.nodeType !== 3) {
                 var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT), 4);
                 if (1 / offset > 0) {
-                    for (; offset > 0 && iterator.nextNode(); offset -= iterator.currentNode.length);
+                    for (; offset >= 0 && iterator.nextNode(); offset -= iterator.currentNode.length);
                 } else {
                     while (iterator.nextNode());
                 }
