@@ -1664,8 +1664,10 @@
                         node = node.childNodes[offset - 1];
                         offset = node.length;
                     }
-                    createRange(node, offset - e.originalEvent.data.length, node, offset).deleteContents();
-                    handleTextInput(e.originalEvent.data);
+                    var text = e.originalEvent.data;
+                    createRange(node, offset - text.length, node, offset).deleteContents();
+                    currentSelection.select(node, offset - text.length);
+                    handleTextInput(text);
                 } else {
                     updateFromNativeInput();
                     handleTextInput('');
