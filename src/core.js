@@ -356,7 +356,7 @@
 
     function getOffset(node, offset) {
         var len = node.length || node.childNodes.length;
-        return 1 / offset < 0 ? Math.max(0, len - offset) : Math.min(len, offset);
+        return 1 / offset < 0 ? Math.max(0, len + offset) : Math.min(len, offset);
     }
 
     function getWholeTextOffset(node, textNode) {
@@ -2726,11 +2726,12 @@
             if (node.nodeType !== 3) {
                 var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT), 4);
                 if (1 / offset > 0) {
-                    for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
+                    for (; offset > 0 && iterator.nextNode(); offset -= iterator.currentNode.length);
                 } else {
                     while (iterator.nextNode());
                 }
                 node = iterator.currentNode;
+                offset = node && Math.min(offset + node.length, node.length);
             }
             return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
