@@ -1718,8 +1718,8 @@
                 }
             });
 
-            $self.on('keypress input textInput', function (e) {
-                if (!executing && !composition && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
+            $self.on('keypress textInput', function (e) {
+                if (!executing && !composition && (e.type === 'textInput' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
                     handleTextInput(e.originalEvent.data || (e.charCode ? String.fromCharCode(e.charCode) : ''));
                     e.preventDefault();
                 }
@@ -1836,18 +1836,6 @@
                     }
                 }
             });
-
-            // IE textinput event on the element at caret position and is fired after the DOM has changed
-            // instead capture input event which is fired before DOM has changed
-            topElement.addEventListener('input', function (e) {
-                e.stopPropagation();
-                var event = document.createEvent('Event');
-                event.initEvent('textInput', true, true);
-                event.data = e.data;
-                if (topElement.dispatchEvent(event)) {
-                    e.preventDefault();
-                }
-            }, true);
 
             var defaultKeystroke = {
                 ctrlZ: undoable.undo,
