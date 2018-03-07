@@ -641,10 +641,7 @@
     function setEventSource(source, typer) {
         if (!currentSource[0]) {
             setImmediate(function () {
-                // allow the event source to be accessible in immediate async event in the first round
-                setImmediate(function () {
-                    currentSource = [];
-                });
+                currentSource = [];
             });
         }
         if ((currentSource[1] || typer) === typer && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource[0])) {
@@ -674,35 +671,17 @@
         var widgets = [];
         var widgetOptions = {};
         var relatedElements = new WeakMap();
-        var changedWidgets = new Set();
         var undoable = {};
         var currentSelection;
         var executing;
-        var needSnapshot;
+        var muteChanges;
         var typerFocused = false;
         var $self = $(topElement);
 
         var codeUpdate = (function () {
             var run = transaction(function () {
+                normalize();
                 executing = false;
-                typer.getNode(topElement);
-                if (needSnapshot || changedWidgets.size) {
-                    normalize(topElement);
-                    undoable.snapshot();
-                }
-                var lastChanges = consume(changedWidgets);
-                setImmediate(function () {
-                    if (lastChanges[0]) {
-                        codeUpdate(function () {
-                            $.each(lastChanges, function (i, v) {
-                                if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(v, 'contentChange');
-                                }
-                            });
-                            triggerEvent(EVENT_STATIC, 'contentChange');
-                        });
-                    }
-                });
             });
             return function (callback, args, thisArg) {
                 executing = true;
@@ -767,19 +746,26 @@
             return eventObj.isDefaultPrevented();
         }
 
-        function trackChange(node) {
-            // avoid trigger contentChange event before init
-            if (currentSelection) {
-                changedWidgets.add(node.widget);
-            }
-        }
-
         function createTyperDocument(rootElement, fireEvent) {
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
             var nodeMap = new WeakMap();
             var dirtyElements = new Set();
+            var changedWidgets = new Set();
             var observer = new MutationObserver(handleMutations);
+
+            function triggerContentChange(source) {
+                setEventSource.apply(null, source);
+                codeUpdate(function () {
+                    $.each(consume(changedWidgets), function (i, v) {
+                        if (v.id !== WIDGET_ROOT) {
+                            triggerEvent(v, 'contentChange');
+                        }
+                    });
+                    triggerEvent(EVENT_STATIC, 'contentChange');
+                });
+                undoable.snapshot();
+            }
 
             function triggerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
@@ -895,6 +881,14 @@
                 });
             }
 
+            function trackChange(node) {
+                // avoid trigger contentChange event before init
+                if (currentSelection && !muteChanges) {
+                    changedWidgets.add(node.widget);
+                    setImmediateOnce(triggerContentChange, currentSource.slice(0));
+                }
+            }
+
             function handleMutations(mutations) {
                 $.each(mutations, function (i, v) {
                     if (!isBR(v.target)) {
@@ -987,8 +981,9 @@
             });
         }
 
-        function normalize(element) {
-            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
+        function normalize() {
+            muteChanges = true;
+            iterate(new TyperTreeWalker(typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
                 if (is(node, NODE_EDITABLE)) {
                     if (!node.firstChild) {
@@ -1047,6 +1042,9 @@
             });
             // Mozilla adds <br type="_moz"> when a container is empty
             $('br[type="_moz"]', topElement).remove();
+            // explicitly refresh document state and trigger contentChange or stateChange if appropriate
+            typer.getNode(topElement);
+            muteChanges = false;
         }
 
         function extractContents(range, mode, callback) {
