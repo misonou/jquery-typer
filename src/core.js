@@ -2522,10 +2522,7 @@
 
     function caretSetPosition(inst, element, offset) {
         var textNode, end;
-        if (isBR(element)) {
-            textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
-            offset = 0;
-        } else {
+        if (!isBR(element)) {
             if (element.firstChild) {
                 end = offset === element.childNodes.length;
                 element = element.childNodes[offset] || element.lastChild;
@@ -2534,6 +2531,10 @@
             textNode = isText(element);
         }
         var node = inst.typer.getNode(element);
+        if (node.element !== (isText(element) || isBR(element) ? element.parentNode : element)) {
+            element = node.element;
+            textNode = null;
+        }
         if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET | NODE_INLINE_WIDGET)) {
             var child = any(node.childNodes, function (v) {
                 return comparePosition(textNode, v.element) < 0;
