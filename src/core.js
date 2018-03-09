@@ -2458,7 +2458,7 @@
         TyperSelection.prototype[v] = function () {
             var self = this;
             return selectionAtomic(function () {
-                return TyperCaret.prototype[v].apply(self.extendCaret, arguments) + self.collapse('extend') > 0;
+                return TyperCaret.prototype[v].apply(self.baseCaret, arguments) + self.collapse('base') > 0;
             }, slice(arguments));
         };
     });
