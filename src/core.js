@@ -25,6 +25,7 @@
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
+    var IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     var IS_IE10 = !!window.ActiveXObject;
     var IS_IE = IS_IE10 || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
 
@@ -91,7 +92,7 @@
     var dirtySelections = new Set();
     var windowFocusedOut;
     var permitFocusEvent;
-    var supportTextInputEvent;
+    var supportTextInputEvent = true;
     var currentSource = [];
     var lastTouchedElement;
     var checkNativeUpdate;
@@ -1502,8 +1503,6 @@
             var composition;
             var modifierCount;
             var modifiedKeyCode;
-            var keyDefaultPrevented;
-            var hasKeyEvent;
             var touchObj;
             var activeWidget;
 
@@ -1526,16 +1525,6 @@
                 }
             }
 
-            function triggerClick(e, point, eventName) {
-                var node = typer.getNode(e.target);
-                var props = {
-                    clientX: (point || e).clientX,
-                    clientY: (point || e).clientY,
-                    target: e.target
-                };
-                triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
-            }
-
             function updateFromNativeInput() {
                 var activeRange = getActiveRange(topElement);
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
@@ -1554,6 +1543,23 @@
                         insertContents(selection, '');
                     }
                 }
+            }
+
+            function handleClick(e, point, eventName) {
+                var node = typer.getNode(e.target);
+                var props = {
+                    clientX: (point || e).clientX,
+                    clientY: (point || e).clientY,
+                    target: e.target
+                };
+                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                    currentSelection.select(node.widget.element);
+                } else {
+                    currentSelection.moveToPoint(props.clientX, props.clientY);
+                }
+                currentSelection.focus();
+                updateWidgetFocus();
+                triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
             }
 
             function handleTextInput(inputText) {
@@ -1593,6 +1599,7 @@
                 var extendCaret = currentSelection.extendCaret;
                 var scrollParent = getScrollParent(e.target);
                 var scrollTimeout;
+                var mousemoved;
 
                 var scrollParentHandlers = {
                     mouseout: function (e) {
@@ -1619,9 +1626,10 @@
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
-                            handlers.mouseup();
+                            handlers.mouseup(e);
                             return;
                         }
+                        mousemoved = true;
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
                         setImmediate(function () {
@@ -1629,18 +1637,15 @@
                         });
                         e.preventDefault();
                     },
-                    mouseup: function (e2) {
+                    mouseup: function (e) {
                         mousedown = false;
                         clearInterval(scrollTimeout);
                         $(document.body).off(handlers);
                         $(scrollParent).off(scrollParentHandlers);
-                        if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
-                            var node = typer.getNode(e2.target);
-                            if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                                currentSelection.select(node.widget.element);
-                            }
-                        }
                         updateWidgetFocus();
+                        if (!mousemoved) {
+                            handleClick(e, null, 'click');
+                        }
                     }
                 };
                 if (e.which === 1) {
@@ -1654,7 +1659,6 @@
             });
 
             $self.on('compositionstart compositionupdate compositionend', function (e) {
-                e.stopPropagation();
                 composition = e.type.slice(-1) !== 'd';
                 if (!composition) {
                     var range = getActiveRange(topElement);
@@ -1674,53 +1678,32 @@
                 }
             });
 
-            $self.on('keydown keypress keyup', function (e) {
-                if (composition) {
-                    e.stopImmediatePropagation();
-                    return;
-                }
-                hasKeyEvent = true;
-                setImmediate(function () {
-                    hasKeyEvent = false;
-                });
-                var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
-                var isSpecialKey = !isModifierKey && KEYNAMES[e.keyCode] !== String.fromCharCode(e.keyCode).toLowerCase();
-                if (e.type === 'keydown') {
-                    modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
-                    modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
-                    modifiedKeyCode = e.keyCode;
-                    if (modifierCount) {
-                        var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
-                            e.preventDefault();
+            $self.on('keydown keyup', function (e) {
+                if (!composition) {
+                    var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
+                    if (e.type === 'keydown') {
+                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.key || '').charAt(0) && (KEYNAMES[e.keyCode] || '').length > 1;
+                        modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
+                        modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
+                        modifiedKeyCode = e.keyCode;
+                        if (modifierCount) {
+                            var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || e.key);
+                            if (triggerEvent(EVENT_HANDLER, keyEventName)) {
+                                e.preventDefault();
+                            }
+                            if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                                e.preventDefault();
+                            }
                         }
-                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
-                            e.preventDefault();
-                        }
-                    }
-                    keyDefaultPrevented = e.isDefaultPrevented();
-                    setImmediate(function () {
-                        if (!composition && !keyDefaultPrevented) {
-                            updateFromNativeInput();
-                        }
-                    });
-                } else if (e.type === 'keypress') {
-                    if (!e.charCode) {
-                        e.stopImmediatePropagation();
-                    }
-                } else {
-                    if ((e.keyCode === modifiedKeyCode || isModifierKey) && modifierCount--) {
-                        e.stopImmediatePropagation();
-                    }
-                    if (!keyDefaultPrevented && !isModifierKey && !composition) {
-                        updateFromNativeInput();
+                    } else if (e.keyCode === modifiedKeyCode || isModifierKey) {
+                        modifierCount--;
                     }
                 }
             });
 
             $self.on('keypress textInput', function (e) {
-                if (!executing && !composition && (e.type === 'textInput' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
-                    handleTextInput(e.originalEvent.data || (e.charCode ? String.fromCharCode(e.charCode) : ''));
+                if (!composition && !modifierCount && (e.type === 'textInput' || e.originalEvent.synthetic || !supportTextInputEvent)) {
+                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.keyCode));
                     e.preventDefault();
                 }
             });
@@ -1765,12 +1748,9 @@
 
             $self.on('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
-                    currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
-                    currentSelection.focus();
-                    triggerClick(e, touchObj, 'click');
-                    e.preventDefault();
+                    handleClick(e, touchObj, 'click');
                 }
-                var touches = e.originalEvent.touches;
+                var touches = e.originalEvent.touches || e;
                 touchObj = e.type === 'touchstart' && !touches[1] && touches[0];
             });
 
@@ -1781,8 +1761,8 @@
                 }
             });
 
-            $self.on('click dblclick', function (e) {
-                triggerClick(e);
+            $self.on('dblclick', function (e) {
+                handleClick(e);
                 e.preventDefault();
             });
 
@@ -1937,6 +1917,10 @@
         initWidgets();
         normalizeInputEvent();
         $self.attr('contenteditable', 'true');
+        if (IS_IOS) {
+            // remove formatting options from iOS popout
+            $self.css('-webkit-user-modify', 'read-write-plaintext-only');
+        }
 
         extend(typer, undoable, createTyperDocument(topElement, true), {
             element: topElement,
@@ -3087,14 +3071,22 @@
 
     // detect support for textInput event
     function detectTextInputEvent(e) {
-        var self = detectTextInputEvent;
-        self.keypressed = e.type === 'keypress';
-        self.data = e.data;
-        if (self.keypressed) {
+        detectTextInputEvent.lastEvent = e;
+        if (e.type === 'keypress' && !e.synthetic) {
             setImmediate(function () {
-                supportTextInputEvent = !self.keypressed && self.data !== null;
+                var lastEvent = detectTextInputEvent.lastEvent;
                 document.removeEventListener('keypress', detectTextInputEvent, true);
                 document.removeEventListener('textInput', detectTextInputEvent, true);
+                if (lastEvent.type === 'keypress') {
+                    supportTextInputEvent = false;
+                    var ch = String.fromCharCode(lastEvent.charCode);
+                    var range = getActiveRange(document.body);
+                    range.setStart(range.startContainer, range.startOffset - (lastEvent.key || ch).length);
+                    range.deleteContents();
+                    var e = document.createEvent('KeyboardEvent');
+                    e.initKeyboardEvent('keypress', true, true, lastEvent.view, ch, lastEvent.key, lastEvent.location, '', lastEvent.repeat);
+                    lastEvent.target.dispatchEvent(e);
+                }
             });
         }
     }
