@@ -1705,7 +1705,7 @@
 
             $self.on('keypress textInput', function (e) {
                 if (!composition && !modifierCount && (e.type === 'textInput' || e.originalEvent.synthetic || !supportTextInputEvent)) {
-                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.keyCode));
+                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.charCode || e.keyCode));
                     e.preventDefault();
                 }
             });
@@ -1741,7 +1741,7 @@
 
             $self.on('drop', function (e) {
                 setEventSource('drop', typer);
-                if (currentSelection.moveToPoint(e.originalEvent.clientX, e.originalEvent.clientY)) {
+                if (currentSelection.moveToPoint(e.clientX, e.clientY)) {
                     handleDataTransfer(e.originalEvent.dataTransfer);
                 }
                 currentSelection.focus();
