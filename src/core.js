@@ -983,6 +983,8 @@
         }
 
         function normalize() {
+            // flush any previous changes so that they would not be muted away
+            typer.getNode(topElement);
             muteChanges = true;
             iterate(new TyperTreeWalker(typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
