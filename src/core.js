@@ -79,8 +79,8 @@
     var isFunction = $.isFunction;
     var extend = $.extend;
     var selection = window.getSelection();
-    var setImmediate = window.setImmediate;
-    var clearImmediate = window.clearImmediate;
+    var setTimeout = window.setTimeout;
+    var clearTimeout = window.clearTimeout;
     var MutationObserver = shim.MutationObserver;
     var WeakMap = shim.WeakMap;
     var Set = shim.Set;
@@ -634,14 +634,14 @@
         return (result.x || result.y) ? result : false;
     }
 
-    function setImmediateOnce(fn) {
-        clearImmediate(fn._timeout);
-        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
+    function setTimeoutOnce(fn) {
+        clearTimeout(fn._timeout);
+        fn._timeout = setTimeout.apply(null, arguments);
     }
 
     function setEventSource(source, typer) {
         if (!currentSource[0]) {
-            setImmediate(function () {
+            setTimeout(function () {
                 currentSource = [];
             });
         }
@@ -771,10 +771,10 @@
             function triggerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
                     if (widget.timeout) {
-                        clearImmediate(widget.timeout);
+                        clearTimeout(widget.timeout);
                         delete widget.timeout;
                     } else {
-                        widget.timeout = setImmediate(function () {
+                        widget.timeout = setTimeout(function () {
                             triggerEvent(widget, event);
                             triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
                                 targetWidget: widget
@@ -886,7 +886,7 @@
                 // avoid trigger contentChange event before init
                 if (currentSelection && !muteChanges) {
                     changedWidgets.add(node.widget);
-                    setImmediateOnce(triggerContentChange, currentSource.slice(0));
+                    setTimeoutOnce(triggerContentChange, 0, currentSource.slice(0));
                 }
             }
 
@@ -1632,7 +1632,7 @@
                         mousemoved = true;
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
-                        setImmediate(function () {
+                        setTimeout(function () {
                             currentSelection.focus();
                         });
                         e.preventDefault();
@@ -1731,7 +1731,7 @@
                     // IE put the caret in the wrong position after user code
                     // need to reposition the caret
                     var selection = currentSelection.clone();
-                    setImmediate(function () {
+                    setTimeout(function () {
                         currentSelection.select(selection);
                     });
                 }
@@ -2048,7 +2048,7 @@
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
-        setImmediateOnce: setImmediateOnce,
+        setTimeoutOnce: setTimeoutOnce,
         closest: closest,
         getCommonAncestor: getCommonAncestor,
         sameElementSpec: sameElementSpec,
@@ -3074,7 +3074,7 @@
     function detectTextInputEvent(e) {
         detectTextInputEvent.lastEvent = e;
         if (e.type === 'keypress' && !e.synthetic) {
-            setImmediate(function () {
+            setTimeout(function () {
                 var lastEvent = detectTextInputEvent.lastEvent;
                 document.removeEventListener('keypress', detectTextInputEvent, true);
                 document.removeEventListener('textInput', detectTextInputEvent, true);

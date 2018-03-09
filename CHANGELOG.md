@@ -1,3 +1,38 @@
+## 0.11.1 / 2018-03-09
+
+- Handle unicode bidirectionality, surrogates, combining marks and vertical writing modes
+- Improve behavior for extracting and inserting list
+- Avoid selection being changed while calling `getSelectedTextNodes` or `getSelectedElements`
+- `TyperCaret.moveTo` now returns `false` if the given position is same as current position
+- Drop `setImmediate` as no significant effect
+- Fix: issue in scrolling caret into view
+- Fix: caret anchored on invalid nodes inside inline widgets
+- Fix: `click` and `dblclick` events fired on focused widget by text cursor instead of clicked widget
+- Fix: invalid state caused by `extractContent` when inserting content
+- Fix: `extract` event not fired for widget that has no internal structure (i.e. no node with type `NODE_WIDGET`)
+- Fix: widget check for disallowed widget and `receive` handler issue when caret is inside an editable paragraph or nested widgets
+- Fix: remove empty lines when inserting incompatible paragraph
+- Fix: IE character input not properly default-prevented
+- Fix: caret position not preserved after `receive` event
+- Fix: extra text removed during composition event
+- Fix: `moveToText` moves to incorrect position for offset larger than node
+- Fix: `moveByCharacter` does not step on character right after `BR` element
+- Fix: `getAbstractSide` incorrect value for `over`, `underline`, `line-left` and `line-right`
+- Fix: `extractText` not returning text for last widget
+- Fix: `getWidgets` should not return root node
+- Fix: `Typer.getValue` not returning current content and unnecessary ZSWP not removed
+- Fix: snapshot not delayed when argument given
+- Fix: unknown widget incorrectly recognized as part of parent widget
+- Fix: IE `extractText` issue due to lack of `DocumentFragment.children`
+- Fix: `contentChange` event fired during init and normalization
+- Fix: incorrect source value of `contentChange`length
+- Fix: `NULL` character inserted if `e.charCode` is not available in input event
+- Fix: incorrect caret position after text is composed during `compositionend` event
+- Fix: click and text input event in iOS/Andriod device
+- Fix: hide native formatting options in iOS
+- Fix: ineditable node can be selected by `TyperCaret.moveTo`
+- Fix: inconsistent caret position when selecting start/end of a widget
+
 ## 0.11.0 / 2018-02-23
 
 - Add `Typer.createCaret`, `Typer.createSelection`, `TyperCaret.getRect` and `TyperNode.typer`

@@ -85,7 +85,7 @@
         contextmenu: '<div class="typer-ui-float is-contextmenu anim-target"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
-            setImmediate(function () {
+            setTimeout(function () {
                 control.setState('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
                 control.setState('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
             });
@@ -96,7 +96,7 @@
         fileInit: function (ui, control) {
             $(control.element).find(':file').change(function (e) {
                 ui.execute(control, e.target.files);
-                setImmediate(function () {
+                setTimeout(function () {
                     var form = document.createElement('form');
                     form.appendChild(e.target);
                     form.reset();
@@ -199,7 +199,7 @@
             var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
             var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
             var scalePercent = 0.5 + 2 * Math.sqrt(Math.max(p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
-            setImmediate(function () {
+            setTimeout(function () {
                 $anim.css('transform', $anim.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
             $overlay.css('border-radius', $(e.currentTarget).css('border-radius'));

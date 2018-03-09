@@ -210,7 +210,7 @@
 
     $.extend(TyperCanvas.prototype, {
         refresh: function () {
-            setImmediate(refresh, true);
+            setTimeout(refresh, 0, true);
         },
         clear: function () {
             oldLayers.push.apply(oldLayers, newLayers.splice(0));

@@ -13,7 +13,7 @@ module.exports = function (grunt) {
                         return '// source: ' + filepath + '\n' + src;
                     }
                 },
-                src: ['src/shim/*', 'node_modules/setimmediate/setimmediate.js'],
+                src: ['src/shim/*'],
                 dest: 'build/shim.js'
             },
             lib: {

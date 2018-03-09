@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.11.0
+ * jQuery Typer Plugin v0.11.1
  *
  * The MIT License (MIT)
  *
@@ -53,9 +53,49 @@
     var EVENT_ALL = 1;
     var EVENT_STATIC = 2;
     var EVENT_HANDLER = 3;
-    var EVENT_CURRENT = 4;
+    var IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     var IS_IE10 = !!window.ActiveXObject;
     var IS_IE = IS_IE10 || root.style.msTouchAction !== undefined || root.style.msUserSelect !== undefined;
+
+    var FLIP_POS = {
+        top: 'bottom',
+        left: 'right',
+        right: 'left',
+        bottom: 'top'
+    };
+    var WRITING_MODES = {
+        'horizontal-tb': 0,
+        'vertical-rl': 5,
+        'vertical-lr': 1,
+        'sideways-rl': 5,
+        'sideways-lr': 11,
+        'lr': 0,
+        'rl': 0,
+        'tb': 5,
+        'lr-tb': 0,
+        'lr-bt': 4,
+        'rl-tb': 0,
+        'rl-bt': 4,
+        'tb-rl': 5,
+        'bt-rl': 5,
+        'tb-lr': 1,
+        'bt-lr': 1
+    };
+
+    // each element represent two masks for each abstract box side pair
+    // incicate writing modes that the abstract start side maps to side with larger coordinate (right or bottom)
+    var RECT_COLLAPSE_MASK = [0x0f0, 0xccc, 0x5aa, 0xf00];
+    var RECT_SIDE = 'block-start block-end inline-start inline-end over under line-left line-right'.split(' ');
+
+    var CHARSET_RTL = '\u0590-\u07ff\u200f\u202b\u202e\ufb1d-\ufdfd\ufe70-\ufefc';
+    var RE_RTL = new RegExp('([' + CHARSET_RTL + '])');
+    var RE_LTR = new RegExp('([^\\s' + CHARSET_RTL + '])');
+    var RE_N_RTL = new RegExp('\\s([' + CHARSET_RTL + '])');
+    var RE_N_LTR = new RegExp('\\s([^\\s' + CHARSET_RTL + '])');
+
+    // unicode codepoints that caret position should not anchored on
+    // ZWSP, lower surrogates, diacritical and half marks, and combining marks (Arabic, Hebrew and Japanese)
+    var RE_SKIP = /[\u200b\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f\udc00-\udcff\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06dc\u06df-\u06e4\u06e7\u06e8\u06ea-\u06ed\u08d4-\u08e1\u08e3-\u08ff\u0900-\u0903\u093a-\u093c\u093e-\u094f\u0951-\u0957\u0962\u0963\u3099\u309a]/;
 
     // document.caretRangeFromPoint is still broken even in Edge browser
     // it does not return correct range for the points x or y larger than window's width or height
@@ -67,8 +107,8 @@
     var isFunction = $.isFunction;
     var extend = $.extend;
     var selection = window.getSelection();
-    var setImmediate = window.setImmediate;
-    var clearImmediate = window.clearImmediate;
+    var setTimeout = window.setTimeout;
+    var clearTimeout = window.clearTimeout;
     var MutationObserver = shim.MutationObserver;
     var WeakMap = shim.WeakMap;
     var Set = shim.Set;
@@ -80,7 +120,7 @@
     var dirtySelections = new Set();
     var windowFocusedOut;
     var permitFocusEvent;
-    var supportTextInputEvent;
+    var supportTextInputEvent = true;
     var currentSource = [];
     var lastTouchedElement;
     var checkNativeUpdate;
@@ -142,6 +182,14 @@
     function TyperCaret(typer, selection) {
         this.typer = typer;
         this.selection = selection || null;
+    }
+
+    function TyperRect(l, t, r, b) {
+        var self = this;
+        self.left = l;
+        self.top = t;
+        self.right = r;
+        self.bottom = b;
     }
 
     function transaction(finalize) {
@@ -208,6 +256,10 @@
         var result = [];
         iterate(iterator, array.push.bind(result), from, until);
         return callback ? $.map(result, callback) : result;
+    }
+
+    function next(iterator, direction) {
+        return iterator[direction < 0 ? 'previousNode' : 'nextNode']();
     }
 
     function consume(set) {
@@ -278,6 +330,15 @@
         return (dir >= 0 && (offset === v.length || str.slice(offset) === ZWSP)) ? 1 : (dir <= 0 && (!offset || str.slice(0, offset) === ZWSP)) ? -1 : 0;
     }
 
+    function isRTL(ch, baseRTL) {
+        return RE_RTL.test(ch) ? true : /[^\s!-\/:-@\[\]^_`{|}~]/.test(ch) ? false : baseRTL;
+    }
+
+    function getWritingMode(elm) {
+        var style = window.getComputedStyle(isElm(elm) || elm.parentNode);
+        return WRITING_MODES[style.getPropertyValue('writing-mode')] ^ (style.direction === 'rtl' ? 2 : 0);
+    }
+
     function closest(node, type) {
         for (; node && !is(node, type); node = node.parentNode);
         return is(node, NODE_WIDGET) ? node.typer.getNode(node.widget.element) : node;
@@ -324,7 +385,7 @@
 
     function getOffset(node, offset) {
         var len = node.length || node.childNodes.length;
-        return (offset === len || (offset === 0 && 1 / offset === -Infinity)) ? len : (len + offset) % len || 0;
+        return 1 / offset < 0 ? Math.max(0, len + offset) : Math.min(len, offset);
     }
 
     function getWholeTextOffset(node, textNode) {
@@ -395,26 +456,26 @@
     }
 
     function getRect(elm) {
+        var rect;
         elm = elm || root;
-        if (!containsOrEquals(root, elm)) {
+        if (elm.getRect) {
+            rect = elm.getRect();
+        } else if (elm === root) {
+            rect = toPlainRect(0, 0, root.offsetWidth, root.offsetHeight);
+        } else if (!containsOrEquals(root, elm)) {
             // IE10 throws Unspecified Error for detached elements
-            return toPlainRect(0, 0, 0, 0);
+            rect = toPlainRect(0, 0, 0, 0);
+        } else {
+            rect = toPlainRect(elm.getBoundingClientRect());
         }
-        return elm === root ? toPlainRect(0, 0, root.offsetWidth, root.offsetHeight) : toPlainRect(elm.getBoundingClientRect());
+        return rect;
     }
 
     function toPlainRect(l, t, r, b) {
         if (l.top !== undefined) {
             return toPlainRect(l.left, l.top, l.right, l.bottom);
         }
-        return {
-            top: t,
-            left: l,
-            right: r,
-            bottom: b,
-            width: r - l,
-            height: b - t
-        };
+        return new TyperRect(l, t, r, b);
     }
 
     function rectEquals(a, b) {
@@ -433,16 +494,36 @@
         return rect.width && rect.height && x - rect.left >= -within && x - rect.right <= within && y - rect.top >= -within && y - rect.bottom <= within;
     }
 
-    function computeTextRects(node) {
-        return $.map((is(node, Range) || createRange(node, 'contents')).getClientRects(), toPlainRect);
+    function getRects(range) {
+        return $.map((is(range, Range) || createRange(range, 'contents')).getClientRects(), toPlainRect);
     }
 
-    function rectFromPosition(node, offset) {
-        if (offset && offset === node.length) {
-            var rect = computeTextRects(createRange(node, offset - 1, node, offset))[0];
-            return rect && toPlainRect(rect.right, rect.top, rect.right, rect.bottom);
+    function getAbstractRect(rect, mode) {
+        var sign = mode / Math.abs(mode);
+        rect = is(rect, TyperRect) || getRect(rect);
+        mode /= sign;
+        var signX = mode & 2 ? -1 : 1;
+        var signY = mode & 4 ? -1 : 1;
+        if (sign > 0 && (mode & 1)) {
+            signX ^= signY;
+            signY ^= signX;
+            signX ^= signY;
         }
-        return computeTextRects(createRange(node, offset))[0];
+        var propX = signX < 0 ? 'right' : 'left';
+        var propY = signY < 0 ? 'bottom' : 'top';
+        if (mode & 1) {
+            rect = toPlainRect(rect[propY] * signY, rect[propX] * signX, rect[FLIP_POS[propY]] * signY, rect[FLIP_POS[propX]] * signX);
+        } else {
+            rect = toPlainRect(rect[propX] * signX, rect[propY] * signY, rect[FLIP_POS[propX]] * signX, rect[FLIP_POS[propY]] * signY);
+        }
+        return rect;
+    }
+
+    function getAbstractSide(side, mode) {
+        mode = +mode === mode ? mode : getWritingMode(mode);
+        side = +side === side ? side : RECT_SIDE.indexOf(side);
+        var prop = (side >> 1 & 1) ^ (mode & 1) ? 'left' : 'top';
+        return !!(RECT_COLLAPSE_MASK[side >> 1] & (1 << mode)) ^ (side & 1) ? FLIP_POS[prop] : prop;
     }
 
     function getActiveRange(container) {
@@ -552,49 +633,44 @@
 
     function scrollRectIntoView(element, rect) {
         var parent = getScrollParent(element);
-        var parentRect = getRect(parent);
-        var winOrElm = parent === root ? window : parent;
-        var origX = winOrElm.scrollX || winOrElm.scrollLeft || 0;
-        var origY = winOrElm.scrollY || winOrElm.scrollTop || 0;
-        var deltaX = Math.max(0, rect.right - (parentRect.right - (parent.scrollWidth > parent.offsetWidth ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
-        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (parent.scrollHeight > parent.offsetHeight ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
+        var parentRect = getRect(parent === document.body ? root : parent);
+        var style = window.getComputedStyle(parent);
+        var winOrElm = parent === root || parent === document.body ? window : parent;
+        var origX = $(winOrElm).scrollLeft();
+        var origY = $(winOrElm).scrollTop();
+        var deltaX = Math.max(0, rect.right - (parentRect.right - (style.overflowY === 'scroll' || (style.overflowY === 'auto' && parent.scrollHeight > parent.offsetHeight) ? scrollbarWidth : 0))) || Math.min(rect.left - parentRect.left, 0);
+        var deltaY = Math.max(0, rect.bottom - (parentRect.bottom - (style.overflowX === 'scroll' || (style.overflowY === 'auto' && parent.scrollWidth > parent.offsetWidth) ? scrollbarWidth : 0))) || Math.min(rect.top - parentRect.top, 0);
         if (deltaX || deltaY) {
-            winOrElm.scrollTo(origX + deltaX, origY + deltaY);
+            if (winOrElm.scrollTo) {
+                winOrElm.scrollTo(origX + deltaX, origY + deltaY);
+            } else {
+                winOrElm.scrollLeft = origX + deltaX;
+                winOrElm.scrollTop = origY + deltaY;
+            }
         }
         var result = {
-            x: (winOrElm.scrollX || winOrElm.scrollLeft || 0) - origX,
-            y: (winOrElm.scrollY || winOrElm.scrollTop || 0) - origY
+            x: $(winOrElm).scrollLeft() - origX,
+            y: $(winOrElm).scrollTop() - origY
         };
+        if (winOrElm !== window) {
+            var parentResult = scrollRectIntoView(parent.parentNode, rect.translate(result.x, result.y));
+            if (parentResult) {
+                result.x += parentResult.x;
+                result.y += parentResult.y;
+            }
+        }
         return (result.x || result.y) ? result : false;
     }
 
-    function fixIEInputEvent(element, topElement) {
-        // IE fires input and text-input event on the innermost element where the caret positions at
-        // the event does not bubble up so need to trigger manually on the top element
-        // also IE use all lowercase letter in the event name
-        $(element).on('input textinput', function (e) {
-            e.stopPropagation();
-            if (e.type === 'textinput' || topElement) {
-                var event = document.createEvent('Event');
-                event.initEvent(e.type === 'input' ? 'input' : 'textInput', true, false);
-                event.data = e.data;
-                (topElement || element).dispatchEvent(event);
-            }
-        });
-    }
-
-    function setImmediateOnce(fn) {
-        clearImmediate(fn._timeout);
-        fn._timeout = setImmediate(fn.bind.apply(fn, arguments));
+    function setTimeoutOnce(fn) {
+        clearTimeout(fn._timeout);
+        fn._timeout = setTimeout.apply(null, arguments);
     }
 
     function setEventSource(source, typer) {
         if (!currentSource[0]) {
-            setImmediate(function () {
-                // allow the event source to be accessible in immediate async event in the first round
-                setImmediate(function () {
-                    currentSource = [];
-                });
+            setTimeout(function () {
+                currentSource = [];
             });
         }
         if ((currentSource[1] || typer) === typer && SOURCE_PRIORITY.indexOf(source) > SOURCE_PRIORITY.indexOf(currentSource[0])) {
@@ -624,42 +700,19 @@
         var widgets = [];
         var widgetOptions = {};
         var relatedElements = new WeakMap();
-        var changedWidgets = new Set();
         var undoable = {};
         var currentSelection;
         var executing;
-        var needSnapshot;
-        var suppressTextEvent;
+        var muteChanges;
         var typerFocused = false;
         var $self = $(topElement);
 
         var codeUpdate = (function () {
             var run = transaction(function () {
+                normalize();
                 executing = false;
-                typer.getNode(topElement);
-                if (needSnapshot || changedWidgets.size) {
-                    normalize(topElement);
-                    undoable.snapshot();
-                }
-                var lastChanges = consume(changedWidgets);
-                setImmediate(function () {
-                    suppressTextEvent = false;
-                    if (lastChanges[0]) {
-                        codeUpdate(function () {
-                            $.each(lastChanges, function (i, v) {
-                                if (v.id !== WIDGET_ROOT) {
-                                    triggerEvent(v, 'contentChange');
-                                }
-                            });
-                            triggerEvent(EVENT_STATIC, 'contentChange');
-                        });
-                    }
-                });
             });
             return function (callback, args, thisArg) {
-                // IE fires textinput event on the parent element when the text node's value is modified
-                // even if modification is done through JavaScript rather than user action
-                suppressTextEvent = true;
                 executing = true;
                 setEventSource('script', typer);
                 return run(callback, args, thisArg);
@@ -681,13 +734,11 @@
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
                 case EVENT_ALL:
-                    return widgets.concat(currentSelection.getWidgets().slice(0, -1));
+                    return widgets.concat(currentSelection.getWidgets());
                 case EVENT_STATIC:
                     return widgets;
                 case EVENT_HANDLER:
                     return currentSelection.getWidgets().reverse().concat(widgets);
-                case EVENT_CURRENT:
-                    return currentSelection.focusNode.widget;
             }
         }
 
@@ -724,24 +775,34 @@
             return eventObj.isDefaultPrevented();
         }
 
-        function trackChange(node) {
-            changedWidgets.add(node.widget);
-        }
-
         function createTyperDocument(rootElement, fireEvent) {
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
             var nodeMap = new WeakMap();
             var dirtyElements = new Set();
+            var changedWidgets = new Set();
             var observer = new MutationObserver(handleMutations);
+
+            function triggerContentChange(source) {
+                setEventSource.apply(null, source);
+                codeUpdate(function () {
+                    $.each(consume(changedWidgets), function (i, v) {
+                        if (v.id !== WIDGET_ROOT) {
+                            triggerEvent(v, 'contentChange');
+                        }
+                    });
+                    triggerEvent(EVENT_STATIC, 'contentChange');
+                });
+                undoable.snapshot();
+            }
 
             function triggerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
                     if (widget.timeout) {
-                        clearImmediate(widget.timeout);
+                        clearTimeout(widget.timeout);
                         delete widget.timeout;
                     } else {
-                        widget.timeout = setImmediate(function () {
+                        widget.timeout = setTimeout(function () {
                             triggerEvent(widget, event);
                             triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
                                 targetWidget: widget
@@ -780,18 +841,22 @@
             }
 
             function removeFromParent(node, destroyWidget) {
-                var parentNode = node.parentNode;
-                var arr = parentNode.childNodes;
-                arr.splice(arr.indexOf(node), 1);
-                (node.previousSibling || {}).nextSibling = node.nextSibling;
-                (node.nextSibling || {}).previousSibling = node.previousSibling;
+                var parent = node.parentNode;
+                var prev = node.previousSibling;
+                var next = node.nextSibling;
+                parent.childNodes.splice(parent.childNodes.indexOf(node), 1);
+                (prev || {}).nextSibling = next;
+                (next || {}).previousSibling = prev;
                 node.parentNode = null;
                 node.nextSibling = null;
                 node.previousSibling = null;
                 if (destroyWidget) {
                     triggerWidgetEventRecursive(node, 'destroy');
                     iterate(new TyperTreeWalker(node, -1), function (v) {
-                        detachedElements.set(v.element, parentNode.element);
+                        detachedElements.set(v.element, {
+                            node: (prev || next || parent).element,
+                            offset: prev ? false : next ? true : 0
+                        });
                     });
                 }
             }
@@ -813,7 +878,7 @@
                 if (node.widget && node.widget.destroyed) {
                     delete node.widget;
                 }
-                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && !is(context, NODE_ANY_ALLOWTEXT))) {
+                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && is(context, NODE_WIDGET | NODE_INLINE_WIDGET))) {
                     node.widget = context.widget;
                 }
                 var widgetOption = widgetOptions[node.widget.id];
@@ -833,7 +898,7 @@
                         removeFromParent(v, true);
                     }
                 });
-                $(element.children).not('br').each(function (i, v) {
+                $(element).children().not('br').each(function (i, v) {
                     var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
                     var parentNode = node.parentNode;
                     addChild(thisNode, node);
@@ -841,11 +906,16 @@
                     nodeMap.set(v, node);
                     if (!parentNode || v.parentNode !== parentNode.element) {
                         visitElement(v);
-                        if (IS_IE) {
-                            fixIEInputEvent(v, topElement);
-                        }
                     }
                 });
+            }
+
+            function trackChange(node) {
+                // avoid trigger contentChange event before init
+                if (currentSelection && !muteChanges) {
+                    changedWidgets.add(node.widget);
+                    setTimeoutOnce(triggerContentChange, 0, currentSource.slice(0));
+                }
             }
 
             function handleMutations(mutations) {
@@ -853,8 +923,11 @@
                     if (!isBR(v.target)) {
                         if (v.addedNodes[0] || v.removedNodes[0]) {
                             dirtyElements.add(v.target);
-                        } else if (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style' && nodeMap.has(v.target)) {
-                            trackChange(nodeMap.get(v.target));
+                        } else if (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style')) {
+                            var elm = isElm(v.target) || v.target.parentNode;
+                            if (nodeMap.has(elm)) {
+                                trackChange(nodeMap.get(elm));
+                            }
                         }
                     }
                 });
@@ -898,7 +971,8 @@
                 observer.observe(rootElement, {
                     subtree: true,
                     childList: true,
-                    attributes: true
+                    attributes: true,
+                    characterData: true
                 });
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
@@ -936,8 +1010,9 @@
             });
         }
 
-        function normalize(element) {
-            iterate(new TyperTreeWalker(typer.getNode(element || topElement), NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
+        function normalize() {
+            muteChanges = true;
+            iterate(new TyperTreeWalker(typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
                 if (is(node, NODE_EDITABLE)) {
                     if (!node.firstChild) {
@@ -975,7 +1050,7 @@
                     if (firstBr && !firstBr.previousSibling) {
                         removeNode(firstBr);
                     }
-                    if (currentSelection.startNode !== node && currentSelection.endNode !== node) {
+                    if (!currentSelection || (currentSelection.startNode !== node && currentSelection.endNode !== node)) {
                         $.each(iterateToArray(createNodeIterator(element, 4)), function (i, v) {
                             updateTextNodeData(v, collapseWS(v.data) || ZWSP);
                             if (isText(v.nextSibling)) {
@@ -985,7 +1060,7 @@
                         });
                     }
                 }
-                if (is(node, NODE_INLINE) && currentSelection.startElement !== element && currentSelection.endElement !== element && !trim(element.textContent)) {
+                if (is(node, NODE_INLINE) && (!currentSelection || (currentSelection.startElement !== element && currentSelection.endElement !== element)) && !trim(element.textContent)) {
                     removeNode(element);
                 }
                 $('>br', element).each(function (i, v) {
@@ -996,6 +1071,9 @@
             });
             // Mozilla adds <br type="_moz"> when a container is empty
             $('br[type="_moz"]', topElement).remove();
+            // explicitly refresh document state and trigger contentChange or stateChange if appropriate
+            typer.getNode(topElement);
+            muteChanges = false;
         }
 
         function extractContents(range, mode, callback) {
@@ -1023,7 +1101,7 @@
                         var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
                         var isWidgetHead = node.widget.element === element;
 
-                        if (node === state.focusNode && is(node, NODE_EDITABLE)) {
+                        if (node === state.focusNode && !isWidgetHead && is(node, NODE_EDITABLE)) {
                             return 3;
                         }
                         if (!handler && !isWidgetHead && is(node, NODE_WIDGET | NODE_EDITABLE)) {
@@ -1084,6 +1162,13 @@
                     for (; stack[0]; shift());
                 }
                 if (isFunction(callback)) {
+                    // explicitly update the selection
+                    if (state.direction > 0) {
+                        state.select(range);
+                    } else {
+                        state.select(createRange(range, false));
+                        state.extendCaret.moveTo(createRange(range, true));
+                    }
                     if (!isSingleEditable) {
                         var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE, function (v) {
                             return widgetOptions[v.widget.id].textFlow ? 1 : 3;
@@ -1091,7 +1176,7 @@
                         var start = closest(state.baseCaret.node, NODE_ANY_BLOCK_EDITABLE);
                         var until = closest(state.extendCaret.node, NODE_ANY_BLOCK_EDITABLE);
                         iterator.currentNode = start;
-                        while (iterator[state.direction > 0 ? 'nextNode' : 'previousNode']());
+                        while (next(iterator, state.direction));
                         if (iterator.currentNode !== until) {
                             if (iterator.currentNode !== start) {
                                 state.extendCaret.moveTo(iterator.currentNode.element, 0 * -state.direction);
@@ -1125,8 +1210,8 @@
                 var allowedWidgets = ('__root__ ' + (widgetOptions[state.focusNode.widget.id].allowedWidgets || '*')).split(' ');
                 var caretPoint = state.getCaret('start').clone();
                 var startPoint = createRange(closest(startNode, NODE_ANY_BLOCK_EDITABLE).element, 0);
-                var forcedInline = is(startNode, NODE_EDITABLE_PARAGRAPH);
-                var insertAsInline = is(startNode, NODE_ANY_ALLOWTEXT);
+                var forcedInline = !!is(startNode, NODE_EDITABLE_PARAGRAPH);
+                var insertAsInline = !!is(startNode, NODE_ANY_ALLOWTEXT);
                 var paragraphAsInline = true;
                 var hasInsertedBlock;
                 var formattingNodes = [];
@@ -1148,7 +1233,7 @@
                 content.forEach(function (nodeToInsert) {
                     var caretNode = typer.getNode(caretPoint.element);
                     var node = new TyperNode(typer, textOnly ? NODE_PARAGRAPH : NODE_INLINE, nodeToInsert);
-                    var isLineBreak = isBR(nodeToInsert);
+                    var isLineBreak = !!isBR(nodeToInsert);
                     var needSplit = false;
                     var incompatParagraph = false;
                     var splitEnd;
@@ -1157,16 +1242,24 @@
                         startPoint.insertNode(nodeToInsert);
                         node = typer.getNode(nodeToInsert);
                         removeNode(nodeToInsert);
-                        if (!widgetAllowed(node.widget.id, caretNode)) {
-                            nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
-                            node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
-                        }
-                        if (content.length === 1 && is(node, NODE_WIDGET) && node.widget.id === caretNode.widget.id) {
-                            if (triggerDefaultPreventableEvent(caretNode.widget, 'receive', null, {
-                                receivedNode: nodeToInsert,
-                                caret: caretPoint.clone()
-                            })) {
-                                return;
+                        if (node.widget !== caretNode.widget) {
+                            for (var widgetNode = caretNode; is(widgetNode, NODE_ANY_INLINE | NODE_PARAGRAPH) || (is(widgetNode, NODE_EDITABLE_PARAGRAPH) && widgetNode === caretNode); widgetNode = widgetNode.parentNode) {
+                                if (!widgetAllowed(node.widget.id, widgetNode)) {
+                                    nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
+                                    node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
+                                    break;
+                                }
+                                if (content.length === 1 && node.widget.id === widgetNode.widget.id) {
+                                    var prop = {
+                                        receivedNode: nodeToInsert,
+                                        caret: caretPoint.clone()
+                                    };
+                                    if (triggerDefaultPreventableEvent(widgetNode.widget, 'receive', null, prop)) {
+                                        caretPoint = currentSelection.extendCaret.clone();
+                                        hasInsertedBlock = true;
+                                        return;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1179,8 +1272,10 @@
                             caretNode = closest(caretNode, NODE_PARAGRAPH) || caretNode;
                             splitEnd = createRange(caretNode.element, false);
                             if (is(node, NODE_PARAGRAPH)) {
-                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && trim(nodeToInsert.textContent);
-                                needSplit = incompatParagraph || !paragraphAsInline;
+                                incompatParagraph = !textOnly && !forcedInline && is(caretNode, NODE_PARAGRAPH) && !sameElementSpec(node.element, caretNode.element) && !!trim(nodeToInsert.textContent);
+                                needSplit = !paragraphAsInline || (incompatParagraph && !!trim(createRange(createRange(caretNode.element, true), createRange(caretPoint))));
+                                paragraphAsInline = !incompatParagraph;
+                                insertAsInline = insertAsInline && paragraphAsInline;
                             } else if (trim(createRange(createRange(caretNode.element, true), createRange(caretPoint)))) {
                                 needSplit = trim(createRange(splitEnd, createRange(caretPoint)));
                                 if (!needSplit) {
@@ -1201,11 +1296,8 @@
                             for (var cur1 = typer.getNode(splitFirstNode); cur1 && !trim(cur1.element.textContent); cur1 = cur1.firstChild) {
                                 if (is(cur1, NODE_INLINE_WIDGET | NODE_INLINE_EDITABLE)) {
                                     // avoid empty inline widget at the start of inserted line
-                                    if (cur1.element.firstChild) {
-                                        $(cur1.element).contents().unwrap();
-                                    } else {
-                                        $(cur1.element).remove();
-                                    }
+                                    $(cur1.element.childNodes).insertBefore(cur1.element);
+                                    removeNode(cur1.element);
                                     break;
                                 }
                             }
@@ -1225,8 +1317,6 @@
                             }
                             caretNode = typer.getNode(splitFirstNode);
                             caretPoint.moveTo(splitFirstNode, 0);
-                            paragraphAsInline = !incompatParagraph;
-                            insertAsInline = insertAsInline && paragraphAsInline;
                             hasInsertedBlock = true;
                         }
                     }
@@ -1257,14 +1347,14 @@
                         // check for the first block either if there is content or the insert point is a paragraph
                         // to avoid two empty lines inserted before block widget
                         if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
-                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE)) {
+                            if (is(caretNode, NODE_ANY_BLOCK_EDITABLE) && !is(caretNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
                                 createRange(caretNode.element, -0).insertNode(nodeToInsert);
                             } else {
                                 createRange(caretNode.element, true).insertNode(nodeToInsert);
                             }
-                            insertAsInline = forcedInline || is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
-                            caretPoint.moveTo(lastNode, insertAsInline ? -0 : false);
-                            paragraphAsInline = forcedInline || !insertAsInline;
+                            insertAsInline = !!is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
+                            paragraphAsInline = incompatParagraph || !insertAsInline;
+                            caretPoint.moveTo(lastNode, paragraphAsInline ? false : -0);
                         }
                         hasInsertedBlock = true;
                     }
@@ -1303,10 +1393,10 @@
                 });
             }
 
-            var lastNode, textTransform, text = '', innerText = '';
+            var lastNode, textTransform, handler, text = '', innerText = '';
             iterate(iterator, function (v) {
                 var node = (doc || typer).getNode(v);
-                var handler = widgetOptions[node.widget.id].text;
+                handler = widgetOptions[node.widget.id].text;
                 if (node !== lastNode) {
                     if (lastNode) {
                         text += transformText(innerText, textTransform);
@@ -1336,7 +1426,7 @@
                     }
                 }
             });
-            text += transformText(innerText, textTransform);
+            text += handler ? handler(lastNode.widget) : transformText(innerText, textTransform);
             return trim(text).replace(/\u00a0/g, ' ');
         }
 
@@ -1344,6 +1434,7 @@
             var snapshots = [];
             var currentIndex = 0;
             var suppressUntil = 0;
+            var timeout;
 
             function triggerStateChange() {
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
@@ -1374,7 +1465,7 @@
             }
 
             function takeSnapshot() {
-                var value = trim(topElement.innerHTML.replace(/\s+(style)(="[^"]*")?|(?!>)\u200b(?!<\/)/g, ''));
+                var value = undoable.getValue();
                 if (!snapshots[0] || value !== snapshots[currentIndex].value) {
                     snapshots.splice(0, currentIndex, {
                         value: value
@@ -1385,21 +1476,21 @@
                 snapshots[currentIndex].basePos = saveCaret(currentSelection.baseCaret);
                 snapshots[currentIndex].extendPos = saveCaret(currentSelection.extendCaret);
                 snapshots[currentIndex].html = topElement.innerHTML;
-                needSnapshot = false;
-                setImmediateOnce(triggerStateChange);
+                triggerStateChange();
+                clearTimeout(timeout);
             }
 
             function applySnapshot(state) {
                 $self.html(state.html);
                 restoreCaret(currentSelection, state.basePos);
                 restoreCaret(currentSelection.extendCaret, state.extendPos);
-                setImmediateOnce(triggerStateChange);
-                needSnapshot = false;
+                triggerStateChange();
+                clearTimeout(timeout);
             }
 
             extend(undoable, {
                 getValue: function () {
-                    return snapshots[currentIndex].value;
+                    return trim(topElement.innerHTML.replace(/\s+style(?:="[^"]*")?|\u200b+(?!<\/)|(^|[^>])\u200b+/g, '$1'));
                 },
                 canUndo: function () {
                     return currentIndex < snapshots.length - 1;
@@ -1418,13 +1509,10 @@
                     }
                 },
                 snapshot: function (ms) {
-                    suppressUntil = (+new Date() + ms) || suppressUntil;
-                    if (!executing && suppressUntil < +new Date()) {
-                        takeSnapshot();
-                    } else {
-                        needSnapshot = true;
-                        setImmediateOnce(triggerStateChange);
-                    }
+                    var cur = +new Date();
+                    clearTimeout(timeout);
+                    suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
+                    timeout = setTimeout(takeSnapshot, suppressUntil - cur);
                 }
             });
         }
@@ -1443,8 +1531,6 @@
             var composition;
             var modifierCount;
             var modifiedKeyCode;
-            var keyDefaultPrevented;
-            var hasKeyEvent;
             var touchObj;
             var activeWidget;
 
@@ -1467,15 +1553,6 @@
                 }
             }
 
-            function triggerClick(e, point) {
-                var props = {
-                    clientX: (point || e).clientX,
-                    clientY: (point || e).clientY,
-                    target: e.target
-                };
-                triggerEvent(EVENT_HANDLER, getEventName(e, 'click'), null, props);
-            }
-
             function updateFromNativeInput() {
                 var activeRange = getActiveRange(topElement);
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
@@ -1496,23 +1573,39 @@
                 }
             }
 
-            function handleTextInput(inputText, compositionend) {
+            function handleClick(e, point, eventName) {
+                var node = typer.getNode(e.target);
+                var props = {
+                    clientX: (point || e).clientX,
+                    clientY: (point || e).clientY,
+                    target: e.target
+                };
+                if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                    currentSelection.select(node.widget.element);
+                } else {
+                    currentSelection.moveToPoint(props.clientX, props.clientY);
+                }
+                currentSelection.focus();
+                updateWidgetFocus();
+                triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
+            }
+
+            function handleTextInput(inputText) {
                 setEventSource('input', typer);
                 if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
-                    return true;
+                    return;
                 }
-                if (compositionend || !currentSelection.startTextNode || !currentSelection.isCaret) {
+                if (!currentSelection.startTextNode || !currentSelection.isCaret) {
                     insertContents(currentSelection, inputText);
-                    return true;
+                } else if (inputText) {
+                    codeUpdate(function () {
+                        var curTextNode = currentSelection.startTextNode;
+                        curTextNode.data = curTextNode.data.substr(0, currentSelection.startOffset) + inputText + curTextNode.data.slice(currentSelection.startOffset);
+                        normalizeWhitespace(currentSelection.startNode.element);
+                        currentSelection.moveToText(curTextNode, currentSelection.startOffset + inputText.length);
+                        undoable.snapshot(200);
+                    });
                 }
-                setImmediate(function () {
-                    setEventSource('input', typer);
-                    updateFromNativeInput();
-                    normalizeWhitespace(currentSelection.startElement);
-                    currentSelection.focus();
-                });
-                trackChange(currentSelection.focusNode);
-                codeUpdate($.noop);
             }
 
             function handleDataTransfer(clipboardData) {
@@ -1525,7 +1618,7 @@
                     if (textContent === clipboard.textContent) {
                         insertContents(currentSelection, clipboard.content.cloneNode(true));
                     } else {
-                        handleTextInput(textContent, true);
+                        handleTextInput(textContent);
                     }
                 }
             }
@@ -1534,6 +1627,7 @@
                 var extendCaret = currentSelection.extendCaret;
                 var scrollParent = getScrollParent(e.target);
                 var scrollTimeout;
+                var mousemoved;
 
                 var scrollParentHandlers = {
                     mouseout: function (e) {
@@ -1560,28 +1654,26 @@
                 var handlers = {
                     mousemove: function (e) {
                         if (!e.which && mousedown) {
-                            handlers.mouseup();
+                            handlers.mouseup(e);
                             return;
                         }
+                        mousemoved = true;
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
-                        setImmediate(function () {
+                        setTimeout(function () {
                             currentSelection.focus();
                         });
                         e.preventDefault();
                     },
-                    mouseup: function (e2) {
+                    mouseup: function (e) {
                         mousedown = false;
                         clearInterval(scrollTimeout);
                         $(document.body).off(handlers);
                         $(scrollParent).off(scrollParentHandlers);
-                        if (e2 && e2.clientX === e.clientX && e2.clientY === e.clientY) {
-                            var node = typer.getNode(e2.target);
-                            if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-                                currentSelection.select(node.widget.element);
-                            }
-                        }
                         updateWidgetFocus();
+                        if (!mousemoved) {
+                            handleClick(e, null, 'click');
+                        }
                     }
                 };
                 if (e.which === 1) {
@@ -1595,70 +1687,52 @@
             });
 
             $self.on('compositionstart compositionupdate compositionend', function (e) {
-                e.stopPropagation();
                 composition = e.type.slice(-1) !== 'd';
                 if (!composition) {
                     var range = getActiveRange(topElement);
-                    createRange(range.startContainer, range.startOffset - e.originalEvent.data.length, range.startContainer, range.startOffset).deleteContents();
-                    updateFromNativeInput();
-                    handleTextInput(e.originalEvent.data, true);
+                    var node = range.startContainer;
+                    var offset = range.startOffset;
+                    if (isElm(node)) {
+                        node = node.childNodes[offset - 1];
+                        offset = node.length;
+                    }
+                    var text = e.originalEvent.data;
+                    createRange(node, offset - text.length, node, offset).deleteContents();
+                    currentSelection.select(node, offset - text.length);
+                    handleTextInput(text);
                 } else {
+                    updateFromNativeInput();
                     handleTextInput('');
                 }
             });
 
-            $self.on('keydown keypress keyup', function (e) {
-                if (composition) {
-                    e.stopImmediatePropagation();
-                    return;
-                }
-                hasKeyEvent = true;
-                setImmediate(function () {
-                    hasKeyEvent = false;
-                });
-                var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
-                var isSpecialKey = !isModifierKey && KEYNAMES[e.keyCode] !== String.fromCharCode(e.keyCode).toLowerCase();
-                if (e.type === 'keydown') {
-                    modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
-                    modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
-                    modifiedKeyCode = e.keyCode;
-                    if (modifierCount) {
-                        var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || String.fromCharCode(e.charCode));
-                        if (triggerEvent(EVENT_HANDLER, keyEventName)) {
-                            e.preventDefault();
+            $self.on('keydown keyup', function (e) {
+                if (!composition) {
+                    var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
+                    if (e.type === 'keydown') {
+                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.key || '').charAt(0) && (KEYNAMES[e.keyCode] || '').length > 1;
+                        modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
+                        modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
+                        modifiedKeyCode = e.keyCode;
+                        if (modifierCount) {
+                            var keyEventName = getEventName(e, KEYNAMES[modifiedKeyCode] || e.key);
+                            if (triggerEvent(EVENT_HANDLER, keyEventName)) {
+                                e.preventDefault();
+                            }
+                            if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
+                                e.preventDefault();
+                            }
                         }
-                        if (triggerDefaultPreventableEvent(EVENT_ALL, 'keystroke', keyEventName, e) || /ctrl(?![acfnprstvwx]|f5|shift[nt]$)|enter/i.test(keyEventName)) {
-                            e.preventDefault();
-                        }
-                    }
-                    keyDefaultPrevented = e.isDefaultPrevented();
-                    if (!keyDefaultPrevented) {
-                        suppressTextEvent = false;
-                    }
-                    setImmediate(function () {
-                        if (!composition && !keyDefaultPrevented) {
-                            updateFromNativeInput();
-                        }
-                    });
-                } else if (e.type === 'keypress') {
-                    if (!e.charCode) {
-                        e.stopImmediatePropagation();
-                    }
-                } else {
-                    if ((e.keyCode === modifiedKeyCode || isModifierKey) && modifierCount--) {
-                        e.stopImmediatePropagation();
-                    }
-                    if (!keyDefaultPrevented && !isModifierKey && !composition) {
-                        updateFromNativeInput();
+                    } else if (e.keyCode === modifiedKeyCode || isModifierKey) {
+                        modifierCount--;
                     }
                 }
             });
 
-            $self.on('keypress input textInput', function (e) {
-                if (!executing && !suppressTextEvent && (e.type === 'textInput' || !supportTextInputEvent) && (e.type !== 'keypress' || (!e.ctrlKey && !e.altKey && !e.metaKey))) {
-                    if (handleTextInput(e.originalEvent.data || String.fromCharCode(e.charCode) || '')) {
-                        e.preventDefault();
-                    }
+            $self.on('keypress textInput', function (e) {
+                if (!composition && !modifierCount && (e.type === 'textInput' || e.originalEvent.synthetic || !supportTextInputEvent)) {
+                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.keyCode));
+                    e.preventDefault();
                 }
             });
 
@@ -1685,7 +1759,7 @@
                     // IE put the caret in the wrong position after user code
                     // need to reposition the caret
                     var selection = currentSelection.clone();
-                    setImmediate(function () {
+                    setTimeout(function () {
                         currentSelection.select(selection);
                     });
                 }
@@ -1702,12 +1776,9 @@
 
             $self.on('touchstart touchmove touchend', function (e) {
                 if (e.type === 'touchend' && touchObj) {
-                    currentSelection.moveToPoint(touchObj.clientX, touchObj.clientY);
-                    currentSelection.focus();
-                    triggerClick(e, touchObj);
-                    e.preventDefault();
+                    handleClick(e, touchObj, 'click');
                 }
-                var touches = e.originalEvent.touches;
+                var touches = e.originalEvent.touches || e;
                 touchObj = e.type === 'touchstart' && !touches[1] && touches[0];
             });
 
@@ -1718,15 +1789,8 @@
                 }
             });
 
-            $self.on('click', function (e) {
-                triggerClick(e);
-                e.preventDefault();
-            });
-
             $self.on('dblclick', function (e) {
-                if (!triggerEvent(EVENT_HANDLER, 'dblclick')) {
-                    currentSelection.select('word');
-                }
+                handleClick(e);
                 e.preventDefault();
             });
 
@@ -1787,9 +1851,6 @@
                 ctrlShiftZ: undoable.redo,
                 backspace: deleteNextContent,
                 delete: deleteNextContent,
-                space: function () {
-                    insertContents(currentSelection, ' ');
-                },
                 escape: function () {
                     topElement.blur();
                     if (getActiveRange(topElement)) {
@@ -1815,13 +1876,17 @@
                     };
                 });
             });
-            widgetOptions.__core__.keystroke = function (e) {
-                if (!e.isDefaultPrevented() && (e.data in defaultKeystroke)) {
-                    e.preventDefault();
-                    defaultKeystroke[e.data](e);
+            extend(widgetOptions[WIDGET_CORE], {
+                dblclick: function (e) {
+                    currentSelection.select('word');
+                },
+                keystroke: function (e) {
+                    if (!e.isDefaultPrevented() && (e.data in defaultKeystroke)) {
+                        e.preventDefault();
+                        defaultKeystroke[e.data](e);
+                    }
                 }
-            };
-            fixIEInputEvent(topElement);
+            });
         }
 
         function activateWidget(name, settings) {
@@ -1880,6 +1945,10 @@
         initWidgets();
         normalizeInputEvent();
         $self.attr('contenteditable', 'true');
+        if (IS_IOS) {
+            // remove formatting options from iOS popout
+            $self.css('-webkit-user-modify', 'read-write-plaintext-only');
+        }
 
         extend(typer, undoable, createTyperDocument(topElement, true), {
             element: topElement,
@@ -1981,8 +2050,8 @@
             }
         });
 
-        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         codeUpdate(normalize);
+        currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         triggerEvent(EVENT_STATIC, 'init');
     }
 
@@ -2007,7 +2076,7 @@
         trim: trim,
         iterate: iterate,
         iterateToArray: iterateToArray,
-        setImmediateOnce: setImmediateOnce,
+        setTimeoutOnce: setTimeoutOnce,
         closest: closest,
         getCommonAncestor: getCommonAncestor,
         sameElementSpec: sameElementSpec,
@@ -2025,6 +2094,8 @@
         pointInRect: pointInRect,
         toPlainRect: toPlainRect,
         getRect: getRect,
+        getRects: getRects,
+        getAbstractSide: getAbstractSide,
         caretRangeFromPoint: caretRangeFromPoint,
         elementFromPoint: function (x, y) {
             return elementFromPoint_.call(document, x, y);
@@ -2248,35 +2319,24 @@
     }
 
     function selectionIterateTextNodes(inst) {
-        return iterateToArray(new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4), null, inst.startTextNode || inst.startElement, function (v) {
-            return comparePosition(v, inst.endTextNode || inst.endElement) <= 0;
+        var iterator = new TyperDOMNodeIterator(selectionCreateTreeWalker(inst, NODE_ANY_ALLOWTEXT), 4);
+        iterator.currentNode = inst.startTextNode || inst.startElement;
+        if (inst.startOffset === (inst.startTextNode || '').length) {
+            iterator.nextNode();
+        }
+        return iterateToArray(iterator, null, null, function (v) {
+            return comparePosition(v, inst.endTextNode || inst.endElement) <= (inst.endOffset !== 0 ? 0 : -1);
         });
     }
 
     function selectionSplitText(inst) {
         var p1 = inst.getCaret('start');
         var p2 = inst.getCaret('end');
-        var sameNode = (p1.textNode === p2.textNode);
         if (p2.textNode && !isTextNodeEnd(p2.textNode, p2.offset, 1)) {
             p2.textNode.splitText(p2.offset);
         }
         if (p1.textNode && !isTextNodeEnd(p1.textNode, p1.offset, -1)) {
-            var offset = p1.offset;
-            selectionAtomic(function () {
-                if (offset === p1.textNode.length) {
-                    var iterator = caretTextNodeIterator(p1);
-                    if (iterator.nextNode()) {
-                        caretSetPosition(p1, iterator.currentNode, 0);
-                    } else {
-                        caretSetPosition(p1, p1.element, false);
-                    }
-                } else {
-                    caretSetPositionRaw(p1, p1.node, p1.element, p1.textNode.splitText(p1.offset), 0);
-                }
-                if (sameNode) {
-                    caretSetPositionRaw(p2, p2.node, p2.element, p1.textNode, p2.offset - offset);
-                }
-            });
+            caretSetPositionRaw(p1, p1.node, p1.element, p1.textNode.splitText(p1.offset), 0);
         }
     }
 
@@ -2342,7 +2402,7 @@
         },
         getWidgets: function () {
             var nodes = [];
-            for (var node = this.focusNode; node; node = node.parentNode) {
+            for (var node = this.focusNode; node.widget.id !== WIDGET_ROOT; node = node.parentNode) {
                 nodes.unshift(node.widget);
                 node = this.typer.getNode(node.widget.element);
             }
@@ -2426,7 +2486,7 @@
         TyperSelection.prototype[v] = function () {
             var self = this;
             return selectionAtomic(function () {
-                return TyperCaret.prototype[v].apply(self.extendCaret, arguments) + self.collapse('extend') > 0;
+                return TyperCaret.prototype[v].apply(self.baseCaret, arguments) + self.collapse('base') > 0;
             }, slice(arguments));
         };
     });
@@ -2463,15 +2523,20 @@
             } else if (containsOrEquals(root, inst.node.element)) {
                 inst.moveToText(inst.node.element, inst.wholeTextOffset);
             } else {
+                var replace = {
+                    node: inst.element
+                };
                 inst.typer.getNode(node);
-                for (var replace = inst.element; detachedElements.has(replace); replace = detachedElements.get(replace));
-                inst.moveTo(replace, false);
+                for (; detachedElements.has(replace.node); replace = detachedElements.get(replace.node));
+                inst.moveTo(replace.node, replace.offset);
             }
         }
         return inst;
     }
 
     function caretSetPositionRaw(inst, node, element, textNode, offset) {
+        var oldNode = inst.textNode || inst.element;
+        var oldOffset = inst.offset;
         inst.node = node;
         inst.element = element;
         inst.textNode = textNode || null;
@@ -2480,15 +2545,12 @@
         if (inst.selection) {
             selectionUpdate(inst.selection);
         }
-        return true;
+        return oldNode !== (textNode || element) || oldOffset !== offset;
     }
 
     function caretSetPosition(inst, element, offset) {
         var textNode, end;
-        if (isBR(element)) {
-            textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
-            offset = 0;
-        } else {
+        if (!isBR(element)) {
             if (element.firstChild) {
                 end = offset === element.childNodes.length;
                 element = element.childNodes[offset] || element.lastChild;
@@ -2497,7 +2559,11 @@
             textNode = isText(element);
         }
         var node = inst.typer.getNode(element);
-        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET)) {
+        if (node.element !== (isText(element) || isBR(element) ? element.parentNode : element)) {
+            element = node.element;
+            textNode = null;
+        }
+        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET | NODE_INLINE_WIDGET)) {
             var child = any(node.childNodes, function (v) {
                 return comparePosition(textNode, v.element) < 0;
             });
@@ -2534,25 +2600,94 @@
         return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end);
     }
 
+    function caretRectFromPosition(node, offset) {
+        var mode = getWritingMode(node);
+        var invert = offset === node.length;
+
+        if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
+            var baseRTL = !!(mode & 2);
+            var root = node.parentNode;
+            var ch = node.data.charAt(offset - invert);
+
+            // bidi paragraph are isolated by block boundaries or boxes styled with isolate or isolate-override
+            for (; $.css(root, 'display') === 'inline' && $.css(root, 'unicode-bidi').slice(0, 7) !== 'isolate'; root = root.parentNode);
+
+            // only check adjacent directionality if there is strongly trans-directioned character
+            if (isRTL(ch) !== baseRTL && (baseRTL ? RE_LTR : RE_RTL).test(root.textContent)) {
+                var checkAdjacent = function (node, offset, direction) {
+                    var iterator = document.createTreeWalker(root, 5, function (v) {
+                        if (isElm(v) && !isBR(v)) {
+                            // any non-inline and replaced elements are considered neutral
+                            if ($.css(v, 'display') !== 'inline' || is(v, 'audio,canvas,embed,iframe,img,input,object,video')) {
+                                return 2;
+                            }
+                            switch ($.css(v, 'unicode-bidi')) {
+                                case 'normal':
+                                case 'plaintext':
+                                    return 3;
+                                case 'isolate':
+                                case 'isolate-override':
+                                    // isolated bidi sequences are considered neutral
+                                    return 2;
+                            }
+                        }
+                        return 1;
+                    }, false);
+                    iterator.currentNode = node;
+                    while (isText(node)) {
+                        while (offset !== getOffset(node, 0 * -direction)) {
+                            offset += direction;
+                            if (/(\S)/.test(node.data.charAt(offset))) {
+                                return isRTL(RegExp.$1, baseRTL);
+                            }
+                        }
+                        node = next(iterator, direction);
+                        offset = direction > 0 ? -1 : (node || '').length;
+                    }
+                    return !node || isBR(node) ? baseRTL : $.css(node, 'direction') === 'rtl';
+                };
+                var prevRTL = checkAdjacent(node, offset - invert, -1);
+                var nextRTL = checkAdjacent(node, offset - invert, 1);
+                var curRTL = prevRTL === nextRTL && /\s/.test(ch) ? prevRTL : isRTL(ch, baseRTL);
+                if (!invert && curRTL !== baseRTL && prevRTL === baseRTL) {
+                    // sticks at the end of cis-directioned text sequence at cis/trans boundary
+                    invert = true;
+                    curRTL = prevRTL;
+                }
+                mode = (mode & ~2) | (curRTL ? 2 : 0);
+            }
+        }
+        var rect = getRects(createRange(node, offset - invert, node, offset + !invert))[0];
+        return rect && rect.collapse(getAbstractSide(2 | invert, mode));
+    }
+
+    function caretMoveToRect(inst, rect) {
+        var delta = scrollRectIntoView(inst.typer.element, rect);
+        return inst.moveToPoint(rect.centerX - (delta.x || 0), rect.centerY - (delta.y || 0));
+    }
+
     definePrototype(TyperCaret, {
         getRect: function () {
             var self = caretEnsureState(this);
+            var mode = getWritingMode(self.element);
             if (!self.textNode) {
-                var prop = self.offset ? 'left' : 'right';
                 var elmRect = getRect(self.element);
-                return toPlainRect(elmRect[prop], elmRect.top, elmRect[prop], elmRect.bottom);
+                return elmRect.collapse(getAbstractSide(2 | !self.offset, mode));
             }
-            var rect = rectFromPosition(self.textNode, self.offset);
-            if (!rect || !rect.height) {
+            var rect = caretRectFromPosition(self.textNode, self.offset);
+            if (!rect || (!rect.width && !rect.height)) {
                 // Mozilla returns a zero height rect and IE returns no rects for range collapsed at whitespace characters
                 // infer the position by getting rect for preceding non-whitespace character
                 var iterator = caretTextNodeIterator(self, self.node);
+                var rectH = rect && getAbstractRect(rect, mode);
+                var node = iterator.currentNode;
                 do {
-                    var r = rectFromPosition(iterator.currentNode, /(\s)$/.test(iterator.currentNode.data) ? -RegExp.$1.length : -0);
-                    if (r && r.height) {
-                        return rect ? toPlainRect(rect.left, r.top, rect.left, r.bottom) : r;
+                    var r = caretRectFromPosition(node, getOffset(node, /(\s)$/.test(node.data) ? -RegExp.$1.length : -0));
+                    var rH = r && getAbstractRect(r, mode);
+                    if (r && rH.height) {
+                        return rect ? getAbstractRect(toPlainRect(rectH.left, rH.top, rectH.left, rH.bottom), -mode) : r;
                     }
-                } while (iterator.previousNode());
+                } while ((node = iterator.previousNode()));
             }
             return rect || toPlainRect(0, 0, 0, 0);
         },
@@ -2575,8 +2710,9 @@
             return createRange(node, self.offset);
         },
         clone: function () {
-            var clone = new TyperCaret(this.typer);
-            clone.moveTo(this);
+            var self = this;
+            var clone = new TyperCaret(self.typer);
+            caretSetPositionRaw(clone, self.node, self.element, self.textNode, self.offset);
             return clone;
         },
         moveTo: function (node, offset) {
@@ -2605,35 +2741,39 @@
             if (node.nodeType !== 3) {
                 var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(this.typer.getNode(node), NODE_ANY_ALLOWTEXT), 4);
                 if (1 / offset > 0) {
-                    for (; iterator.nextNode() && offset > iterator.currentNode.length; offset -= iterator.currentNode.length);
+                    for (; offset >= 0 && iterator.nextNode(); offset -= iterator.currentNode.length);
                 } else {
                     while (iterator.nextNode());
                 }
                 node = iterator.currentNode;
+                offset = node && Math.min(offset + node.length, node.length);
             }
             return !!node && caretSetPosition(this, node, getOffset(node, offset));
         },
         moveToLineEnd: function (direction) {
             var self = caretEnsureState(this);
+            var mode = getWritingMode(self.element) ^ (direction < 0 ? 2 : 0);
             var iterator = caretTextNodeIterator(self, self.node);
-            var rect = self.getRect();
-            var minx = rect.left;
+            var rect = getAbstractRect(self, mode);
+            var newX = rect.left;
             do {
-                $.each(computeTextRects(iterator.currentNode), function (i, v) {
+                $.each(getRects(iterator.currentNode), function (i, v) {
+                    v = getAbstractRect(v, mode);
                     if (v.top <= rect.bottom && v.bottom >= rect.top) {
-                        minx = Math[direction < 0 ? 'min' : 'max'](minx, direction < 0 ? v.left : v.right);
+                        newX = Math.max(newX, v.right);
                     }
                 });
-            } while (iterator[direction < 0 ? 'previousNode' : 'nextNode']());
-            return self.moveToPoint(minx, rect.top + rect.height / 2);
+            } while (next(iterator, direction));
+            return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, rect.top, newX, rect.bottom), -mode));
         },
         moveByLine: function (direction) {
             var self = this;
+            var mode = getWritingMode(self.element) ^ (direction < 0 ? 4 : 0);
             var iterator = new TyperTreeWalker(self.typer.rootNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET);
-            var rect = self.getRect();
+            var rect = getAbstractRect(self, mode);
             var node = self.node;
             var deltaX = Infinity;
-            var untilY = Infinity * direction;
+            var untilY = Infinity;
             var nextBlock;
             var newRect;
 
@@ -2644,35 +2784,38 @@
                         nextBlock = nextBlock || node.element;
                     }
                 } else {
-                    var elmRect = getRect(node.element);
-                    if (direction > 0 ? elmRect.top > untilY : elmRect.bottom < untilY) {
+                    var elmRect = getAbstractRect(node.element, mode);
+                    if (elmRect.top > untilY) {
                         break;
                     }
-                    var rects = computeTextRects(node.element);
+                    var rects = getRects(node.element);
                     $.each(direction < 0 ? slice(rects).reverse() : rects, function (i, v) {
-                        if (direction < 0 ? v.bottom <= rect.top : v.top >= rect.bottom) {
-                            if ((v.top + v.bottom) / 2 * direction > untilY * direction) {
+                        v = getAbstractRect(v, mode);
+                        if (v.top >= rect.bottom) {
+                            if (v.centerY > untilY) {
                                 return false;
                             }
-                            untilY = direction > 0 ? v.bottom : v.top;
-                            if (v.right >= rect.left && v.left <= rect.left) {
+                            var dx1 = v.right - rect.left;
+                            var dx2 = v.left - rect.left;
+                            untilY = v.bottom;
+                            if (dx1 >= 0 && dx2 <= 0) {
                                 deltaX = 0;
                                 newRect = v;
-                            } else if (Math.abs(v.right - rect.left) < Math.abs(deltaX)) {
-                                deltaX = v.right - rect.left;
+                            } else if (Math.abs(dx1) < Math.abs(deltaX)) {
+                                deltaX = dx1;
                                 newRect = v;
-                            } else if (Math.abs(v.left - rect.left) < Math.abs(deltaX)) {
-                                deltaX = v.left - rect.left;
+                            } else if (Math.abs(dx2) < Math.abs(deltaX)) {
+                                deltaX = dx2;
                                 newRect = v;
                             }
                         }
                     });
                 }
-            } while (deltaX && (node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
+            } while (deltaX && (node = next(iterator, direction)) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
 
             if (newRect) {
-                var delta = scrollRectIntoView(self.typer.element, newRect);
-                return self.moveToPoint(rect.left + deltaX - (delta.x || 0), (newRect.top + newRect.bottom) / 2 - (delta.y || 0));
+                var newX = rect.left + deltaX;
+                return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, newRect.top, newX, newRect.bottom), -mode));
             }
             if (nextBlock) {
                 return self.moveTo(nextBlock, true);
@@ -2694,7 +2837,7 @@
             var iterator = caretTextNodeIterator(self, self.node);
             var lastNode = iterator.currentNode;
             var lastLength = matched && RegExp.$1.length;
-            while ((node = iterator[direction < 0 ? 'previousNode' : 'nextNode']())) {
+            while ((node = next(iterator, direction))) {
                 str = direction < 0 ? node.data + str : str + node.data;
                 if ((matched = re.test(str)) && RegExp.$1.length !== str.length) {
                     // avoid unnecessarily expanding selection over multiple text nodes or elements
@@ -2717,19 +2860,19 @@
             var overBr = false;
             while (true) {
                 if (!node || offset === getOffset(node, 0 * -direction)) {
-                    while (!(node = iterator[direction < 0 ? 'previousNode' : 'nextNode']()) || !node.length) {
+                    while (!(node = next(iterator, direction)) || !node.length) {
                         if (!node) {
                             return false;
                         }
                         if (is(self.typer.getNode(node), NODE_WIDGET) && !containsOrEquals(node, self.element)) {
                             return self.moveToText(node, 0 * direction) || self.moveTo(node, direction < 0);
                         }
-                        overBr |= isBR(node);
+                        overBr |= !!isBR(node);
                     }
                     offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
                 offset += direction;
-                var newRect = node.data.charAt(offset) !== ZWSP && rectFromPosition(node, offset);
+                var newRect = !RE_SKIP.test(node.data.charAt(offset)) && caretRectFromPosition(node, offset);
                 if (newRect && !rectEquals(rect, newRect)) {
                     return self.moveToText(node, offset);
                 }
@@ -2746,6 +2889,29 @@
                 return !direction || step !== direction;
             });
         };
+    });
+
+    definePrototype(TyperRect, {
+        get width() {
+            return this.right - this.left;
+        },
+        get height() {
+            return this.bottom - this.top;
+        },
+        get centerX() {
+            return (this.left + this.right) / 2;
+        },
+        get centerY() {
+            return (this.top + this.bottom) / 2;
+        },
+        collapse: function (side) {
+            var rect = this;
+            return side === 'left' || side === 'right' ? toPlainRect(rect[side], rect.top, rect[side], rect.bottom) : toPlainRect(rect.left, rect[side], rect.right, rect[side]);
+        },
+        translate: function (x, y) {
+            var self = this;
+            return toPlainRect(self.left + x, self.top + y, self.right + x, self.bottom + y);
+        }
     });
 
     definePrototype(TyperWidget, {
@@ -2785,7 +2951,8 @@
         trackEventSource(document.body);
 
         // detect native scrollbar size
-        var $d = $('<div style="overflow:scroll;height:10px"><div style="height:100px"></div></div>').appendTo(document.body);
+        // height being picked because scrollbar may not be shown if container is too short
+        var $d = $('<div style="overflow:scroll;height:80px"><div style="height:100px"></div></div>').appendTo(document.body);
         scrollbarWidth = $d.width() - $d.children().width();
         $d.remove();
     });
@@ -2800,7 +2967,7 @@
                     var style = window.getComputedStyle(v);
                     var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
                     if (style.pointerEvents !== 'none' && (currentZIndex === undefined || zIndex >= currentZIndex)) {
-                        var containsPoint = any(style.display === 'inline' ? v.getClientRects() : [getRect(v)], function (v) {
+                        var containsPoint = any(style.display === 'inline' ? getRects(v) : [getRect(v)], function (v) {
                             return pointInRect(x, y, v);
                         });
                         if (containsPoint) {
@@ -2833,68 +3000,98 @@
                 };
             }
             return function (x, y) {
-                function distanceToRect(rect) {
-                    var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
-                    var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
-                    return distX && distY ? Infinity : Math.abs(distX || distY);
+                var stack = [elementFromPoint_.call(document, x, y)];
+                var minDist = Infinity;
+                var element = stack[0];
+                var textNode, textPoint, mode, point;
+
+                function getBidiBoundaries(node, baseRTL) {
+                    var bidiPoints = [];
+                    if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
+                        var pos = 0;
+                        var re = baseRTL ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
+                        while (re[bidiPoints.length & 1].test(node.data.slice(pos))) {
+                            pos = node.data.indexOf(RegExp.$1, pos);
+                            bidiPoints.push(pos);
+                        }
+                    }
+                    bidiPoints.push(node.length);
+                    return bidiPoints;
                 }
 
-                function distanceFromCharacter(node, index) {
+                function distanceFromCharacter(node, index, mode, point) {
                     // IE11 (update version 11.0.38) crashes with memory access violation when
                     // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
                     // https://jsfiddle.net/b6q4p664/
                     while (/[^\S\u00a0]/.test(node.data.charAt(index)) && --index);
-                    var rect = rectFromPosition(node, index);
+                    var rect = getRects(createRange(node, index))[0];
                     if (rect) {
-                        var distX = rect.left > x ? rect.left - x : Math.min(0, rect.right - x);
-                        var distY = rect.top > y ? rect.top - y : Math.min(0, rect.bottom - y);
-                        return !distY ? distX : distY > 0 ? Infinity : -Infinity;
+                        rect = getAbstractRect(rect, mode);
+                        return rect.top > point.top ? Infinity : rect.bottom < point.top ? -Infinity : rect.left - point.left;
                     }
                 }
 
-                function findOffset(node) {
-                    var b0 = 0;
-                    var b1 = node.length;
-                    while (b1 - b0 > 1) {
-                        var mid = (b1 + b0) >> 1;
-                        var p = distanceFromCharacter(node, mid) < 0;
-                        b0 = p ? mid : b0;
-                        b1 = p ? b1 : mid;
-                    }
-                    return Math.abs(distanceFromCharacter(node, b0)) < Math.abs(distanceFromCharacter(node, b1)) ? b0 : b1;
-                }
-
-                var newY = y;
-                var element = elementFromPoint_.call(document, x, y);
-                for (var target = element, distY, lastDistY; isElm(target); element = target || element) {
-                    distY = Infinity;
-                    target = null;
-                    $(element).contents().each(function (i, v) {
-                        var rects;
-                        if (isText(v)) {
-                            rects = computeTextRects(v);
-                        } else if (isElm(v) && $(v).css('pointer-events') !== 'none') {
-                            rects = [getRect(v)];
+                while (stack[0]) {
+                    var node = stack.pop();
+                    var rects, dist;
+                    if (isElm(node)) {
+                        if ($.css(node, 'pointer-events') === 'none') {
+                            continue;
                         }
-                        for (var j = 0, length = (rects || '').length; j < length; j++) {
-                            if (rects[j].top <= y && rects[j].bottom >= y) {
-                                target = v;
-                                newY = y;
-                                distY = 0;
-                                return isElm(v) || distanceFromCharacter(v, v.length - 1) < 0;
-                            }
-                            lastDistY = distY;
-                            distY = Math.min(distY, distanceToRect(rects[j]));
-                            if (distY < lastDistY) {
-                                target = v;
-                                newY = isElm(v) ? y : rects[j].top + rects[j].height / 2;
-                            }
+                        rects = [getRect(node)];
+                    } else {
+                        rects = getRects(node);
+                    }
+                    mode = getWritingMode(node);
+                    point = getAbstractRect(toPlainRect(x, y, x, y), mode);
+                    rects.forEach(function (v) {
+                        v = getAbstractRect(v, mode);
+                        var distX = Math.max(0, v.left - point.left) || Math.min(0, v.right - point.left);
+                        var distY = Math.max(0, v.top - point.top) || Math.min(0, v.bottom - point.top);
+                        var newPoint;
+                        if (!distX) {
+                            newPoint = point.translate(0, distY);
+                            dist = distY * v.width;
+                        } else if (!distY) {
+                            newPoint = point.translate(distX, 0);
+                            dist = distX;
+                        } else {
+                            dist = Infinity;
+                        }
+                        if (isText(node) && Math.abs(dist) < minDist) {
+                            minDist = Math.abs(dist);
+                            textNode = node;
+                            textPoint = getAbstractRect(newPoint || point, -mode);
                         }
                     });
+                    if (isElm(node) && dist !== Infinity) {
+                        element = node;
+                        stack.push.apply(stack, node.childNodes);
+                    }
                 }
-                if (isText(element)) {
-                    y = newY;
-                    return createRange(element, findOffset(element));
+                if (textNode) {
+                    var baseMode = getWritingMode(textNode);
+                    var bidiPoints = getBidiBoundaries(textNode, baseMode & 2);
+                    for (var i = 0; i < bidiPoints.length; i++) {
+                        var b0 = bidiPoints[i - 1] || 0;
+                        var b1 = bidiPoints[i];
+                        var containsPoint = any(getRects(createRange(textNode, b0, textNode, b1)), function (v) {
+                            return pointInRect(textPoint.left, textPoint.top, v);
+                        });
+                        if (containsPoint) {
+                            mode = baseMode ^ (i & 1 ? 2 : 0);
+                            point = getAbstractRect(textPoint, mode);
+                            while (b1 - b0 > 1) {
+                                var mid = (b1 + b0) >> 1;
+                                var p = distanceFromCharacter(textNode, mid, mode, point) < 0;
+                                b0 = p ? mid : b0;
+                                b1 = p ? b1 : mid;
+                            }
+                            var d1 = distanceFromCharacter(textNode, b0, mode, point);
+                            var d2 = distanceFromCharacter(textNode, b1, mode, point);
+                            return createRange(textNode, Math.abs(d1) < Math.abs(d2) ? b0 : b1);
+                        }
+                    }
                 }
                 return createRange(element, -0);
             };
@@ -2903,14 +3100,22 @@
 
     // detect support for textInput event
     function detectTextInputEvent(e) {
-        var self = detectTextInputEvent;
-        self.keypressed = e.type === 'keypress';
-        self.data = e.data;
-        if (self.keypressed) {
-            setImmediate(function () {
-                supportTextInputEvent = !self.keypressed && self.data !== null;
+        detectTextInputEvent.lastEvent = e;
+        if (e.type === 'keypress' && !e.synthetic) {
+            setTimeout(function () {
+                var lastEvent = detectTextInputEvent.lastEvent;
                 document.removeEventListener('keypress', detectTextInputEvent, true);
                 document.removeEventListener('textInput', detectTextInputEvent, true);
+                if (lastEvent.type === 'keypress') {
+                    supportTextInputEvent = false;
+                    var ch = String.fromCharCode(lastEvent.charCode);
+                    var range = getActiveRange(document.body);
+                    range.setStart(range.startContainer, range.startOffset - (lastEvent.key || ch).length);
+                    range.deleteContents();
+                    var e = document.createEvent('KeyboardEvent');
+                    e.initKeyboardEvent('keypress', true, true, lastEvent.view, ch, lastEvent.key, lastEvent.location, '', lastEvent.repeat);
+                    lastEvent.target.dispatchEvent(e);
+                }
             });
         }
     }
@@ -2922,20 +3127,6 @@
 
 // source: src/presets.js
 (function ($, Typer) {
-    function fixTextOverflow(typer) {
-        var topElement = typer.element;
-        var style = window.getComputedStyle(topElement);
-        if (style.whiteSpace === 'nowrap' && style.overflow === 'hidden') {
-            var rect = Typer.getRect(topElement);
-            var pos = Typer.getRect(typer.getSelection().extendCaret.getRange());
-            if (pos.left - rect.right >= 1) {
-                topElement.style.textIndent = parseInt(style.textIndent) - (pos.left - rect.right + 5) + 'px';
-            } else if (rect.left - pos.left >= 1) {
-                topElement.style.textIndent = Math.min(0, parseInt(style.textIndent) + (rect.left - pos.left + 5)) + 'px';
-            }
-        }
-    }
-
     Typer.presets = {};
 
     Typer.preset = function (element, name, options) {
@@ -2948,9 +3139,6 @@
             defaultOptions: false,
             disallowedElement: '*',
             widgets: {},
-            stateChange: function (e) {
-                fixTextOverflow(e.typer);
-            },
             __preset__: $.extend({}, options)
         };
         $.each(preset, function (i, v) {
@@ -3243,8 +3431,8 @@
 
     function cssFromRect(rect, parent) {
         var style = cssFromPoint(rect, null, parent);
-        style.width = ((rect.width || rect.right - rect.left) | 0) + 'px';
-        style.height = ((rect.height || rect.bottom - rect.top) | 0) + 'px';
+        style.width = (rect.width | 0) + 'px';
+        style.height = (rect.height | 0) + 'px';
         return style;
     }
 
@@ -4402,7 +4590,7 @@
                 };
                 ui.update();
                 $(ui.element).appendTo(document.body);
-                setImmediate(function () {
+                setTimeout(function () {
                     callThemeFunction(self, 'afterShow', data);
                     typerUI.focus(self.element);
                 });
@@ -4499,14 +4687,14 @@
         });
         $(window).focusin(function (e) {
             if (currentDialog && e.relatedTarget && !elementOfControl(currentDialog.control, e.target)) {
-                setImmediate(typerUI.focus, currentDialog.control.element);
+                setTimeout(typerUI.focus, 0, currentDialog.control.element);
             }
         });
         $(window).on('resize scroll orientationchange', function () {
-            Typer.setImmediateOnce(updateSnaps);
+            Typer.setTimeoutOnce(updateSnaps);
         });
         $(document.body).on('mousemove mousewheel keyup touchend', function () {
-            Typer.setImmediateOnce(updateSnaps);
+            Typer.setTimeoutOnce(updateSnaps);
         });
         $(document.body).on('click', 'label', function (e) {
             // IE does not focus on focusable element when clicking containing LABEL element
@@ -4563,11 +4751,8 @@
 
 // source: src/canvas.js
 (function ($, Typer) {
-    var INVALID = {
-        left: 10000,
-        right: -10000
-    };
     var root = document.documentElement;
+    var getRect = Typer.getRect;
     var parseFloat = window.parseFloat;
     var allLayers = {};
     var pointerRegions = [];
@@ -4582,7 +4767,7 @@
 
     function TyperCanvas() {
         state.timestamp = activeTyper.getSelection().timestamp;
-        state.rect = translate(Typer.getRect(activeTyper.element), root.scrollLeft, root.scrollTop);
+        state.rect = toAbsolute(getRect(activeTyper.element));
         $.extend(this, {
             typer: activeTyper,
             pointerX: state.x || 0,
@@ -4601,33 +4786,22 @@
             E: 'before',
             F: 'after',
             G: 'background',
-            L: 'left',
-            R: 'right',
-            T: 'top',
-            B: 'bottom',
-            U: 'radius',
-            P: 'polygon(100% 100%,100% 0,96.6% 25.9%,86.6% 50%,70.7% 70.7%,50% 86.6%,25.9% 96.6%,0 100%)',
-            X: 'transform'
+            S: 'selection',
+            X: 'transparent'
         };
         var style =
+            '.has-N{caret-color:X;}' +
             '.has-N:focus{outline:none;}' +
-            '.has-N::selection,.has-N ::selection{G:transparent;}' +
-            '.has-N::-moz-selection,.has-N ::-moz-selection{G:transparent;}' +
+            '.has-N::S,.has-N ::S{G:X;}' +
+            '.has-N::-moz-S,.has-N ::-moz-S{G:X;}' +
             '.N{position:absolute;T:0;L:0;font-family:serif;font-size:12px;}' +
             '.N>div{position:absolute;pointer-events:none;}' +
+            '.N>.k{animation:caret 0.5s infinite alternate ease-in;outline:1px solid rgba(0,31,81,0.8);}' +
             '.N>.c{pointer-events:all;border:1px solid black;G:white;}' +
             '.N>.f{G:rgba(0,31,81,0.2);}' +
             '.N>.m:E{content:"\\0000b6";position:absolute;top:50%;margin-top:-0.5em;left:4px;color:rgba(0,0,0,0.5);line-height:1;text-shadow:0 0 1px white,0 0 2px white;}' +
             '.N>.m-br:E{content:"\\0021a9";}' +
-            '@supports (clip-path:polygon(0 0,0 0)) or (-webkit-clip-path:polygon(0 0,0 0)){.N>.bl-r:E,.N>.tl-r:E,.N>.br-r:F,.N>.tr-r:F{content:"";display:block;position:absolute;G:rgba(0,31,81,0.2);width:4px;height:4px;-webkit-clip-path:P;clip-path:P;}}' +
-            '.N>.bl{border-B-L-U:4px;}' +
-            '.N>.tl{border-T-L-U:4px;}' +
-            '.N>.br{border-B-R-U:4px;}' +
-            '.N>.tr{border-T-R-U:4px;}' +
-            '.N>.bl-r:E{R:100%;B:0;}' +
-            '.N>.tl-r:E{R:100%;T:0;-webkit-X:flipY();X:flipY();}' +
-            '.N>.br-r:F{L:100%;B:0;-webkit-X:flipX();X:flipX();}' +
-            '.N>.tr-r:F{L:100%;T:0;-webkit-X:rotate(180deg);X:rotate(180deg);}';
+            '@keyframes caret{0%{opacity:1;}100%{opacity:0;}}';
         $(document.body).append('<style>' + style.replace(/\b[A-Z]/g, function (v) {
             return repl[v] || v;
         }) + '</style>');
@@ -4638,7 +4812,7 @@
 
         $(document.body).mousedown(function (e) {
             $.each(pointerRegions, function (i, v) {
-                if (Typer.pointInRect(e.clientX, e.clientY, translate(v.rect, -root.scrollLeft, -root.scrollTop))) {
+                if (Typer.pointInRect(e.clientX, e.clientY, toFixed(v.rect))) {
                     var promise = handlePointer(e);
                     v.handler(promise);
                     promise.always(function () {
@@ -4661,47 +4835,31 @@
         });
     }
 
-    function translate(rect, x, y) {
-        return Typer.toPlainRect(rect.left + x, rect.top + y, rect.right + x, rect.bottom + y);
+    function toAbsolute(rect) {
+        return rect.translate(root.scrollLeft, root.scrollTop);
+    }
+
+    function toFixed(rect) {
+        return rect.translate(-root.scrollLeft, -root.scrollTop);
     }
 
     function computeFillRects(range) {
-        var container = range.commonAncestorContainer;
-        var bRect = Typer.getRect(container.nodeType === 1 ? container : container.parentNode);
-        var rects = $.map(range.getClientRects(), Typer.toPlainRect);
+        var start = Typer.getAbstractSide('inline-start', range.startContainer);
+        var end = Typer.getAbstractSide('inline-end', range.startContainer);
         var result = [];
-        rects.sort(function (a, b) {
-            return (a.top - b.top) || (a.left - b.left) || (b.bottom - a.bottom) || (b.right - a.right);
-        });
-        $.each(rects, function (i, v) {
-            var prev = result[0];
-            if (v.width <= 1) {
-                v.right += 5;
+        $.each(Typer.getRects(range), function (i, v) {
+            if (Math.abs(v[start] - v[end]) <= 1) {
+                v[end] += 5;
             }
-            if (prev) {
-                if (v.left >= prev.right && v.top < prev.bottom) {
-                    result.shift();
-                    v.top = Math.min(v.top, prev.top);
-                    v.left = prev.left;
-                    v.bottom = Math.max(v.bottom, prev.bottom);
-                    prev = result[0];
-                } else if (v.top >= prev.bottom) {
-                    prev.left = result[1] ? bRect.left : prev.left;
-                    prev.right = bRect.right;
+            result.forEach(function (prev) {
+                if (Math.abs(v.left - prev.right) <= 1) {
+                    prev.right = v.left;
                 }
-            }
-            if (prev) {
-                if (Typer.rectCovers(prev, v)) {
-                    return;
-                }
-                if (v.top > prev.top) {
+                if (Math.abs(v.top - prev.bottom) <= 1) {
                     prev.bottom = v.top;
                 }
-                if (result[1] && prev.left === result[1].left && prev.right === result[1].right) {
-                    prev.top = result.splice(1, 1)[0].top;
-                }
-            }
-            result.unshift((delete v.width, delete v.height, v));
+            });
+            result.unshift(v);
         });
         return result;
     }
@@ -4752,7 +4910,7 @@
     function paint(className, rect, extraCSS, handler) {
         newLayers[newLayers.length] = {
             className: className,
-            rect: translate('top' in rect ? rect : rect.getRect ? rect.getRect() : Typer.getRect(rect), root.scrollLeft, root.scrollTop),
+            rect: toAbsolute('top' in rect ? rect : getRect(rect)),
             css: extraCSS,
             handler: handler
         };
@@ -4786,7 +4944,7 @@
                             newLayers.forEach(function (v, i) {
                                 var dom = arr[i] || (arr[i] = $(freeDiv.pop() || document.createElement('div')).appendTo(container)[0]);
                                 dom.className = v.className;
-                                $(dom).css($.extend(Typer.ui.cssFromRect(translate(v.rect, -root.scrollLeft, -root.scrollTop), container), v.css));
+                                $(dom).css($.extend(Typer.ui.cssFromRect(toFixed(v.rect), container), v.css));
                             });
                         }
                         v.layers.forEach(function (w) {
@@ -4802,43 +4960,34 @@
 
     $.extend(TyperCanvas.prototype, {
         refresh: function () {
-            setImmediate(refresh, true);
+            setTimeout(refresh, 0, true);
         },
         clear: function () {
             oldLayers.push.apply(oldLayers, newLayers.splice(0));
         },
         fill: function (range) {
             if (range instanceof Node) {
-                addObject('f tl tr bl br', range);
+                addObject('f', range);
             } else {
                 var arr = [];
                 Typer.iterate(activeTyper.createSelection(range).createTreeWalker(-1, function (v) {
-                    if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT) || Typer.rangeCovers(range, v.element)) {
-                        var r = Typer.createRange(range, Typer.createRange(v.element));
-                        if (!arr[0] || arr[0].commonAncestorContainer !== v.element.parentNode) {
-                            arr.unshift(r);
-                        } else {
-                            arr[0] = Typer.createRange(Typer.createRange(arr[0], true), Typer.createRange(r, false));
-                        }
+                    if (Typer.rangeCovers(range, v.element)) {
+                        arr[arr.length] = getRect(v.element);
                         return 2;
                     }
+                    if (Typer.is(v, Typer.NODE_ANY_ALLOWTEXT)) {
+                        arr.push.apply(arr, computeFillRects(Typer.createRange(range, Typer.createRange(v.element, 'content'))));
+                        return 2;
+                    }
+                    return 1;
                 }));
                 arr.forEach(function (v) {
-                    addObject('f', v, function (range) {
-                        var rects = computeFillRects(range);
-                        $.each(rects, function (i, v) {
-                            var prev = rects[i - 1] || INVALID;
-                            var next = rects[i + 1] || INVALID;
-                            var className = [
-                                v.left < prev.left || v.left > prev.right ? ' bl' : v.left > prev.left && v.left < prev.right ? ' bl-r' : '',
-                                v.left < next.left || v.left > next.right ? ' tl' : v.left > next.left && v.left < next.right ? ' tl-r' : '',
-                                v.right > prev.right || v.right < prev.left ? ' br' : v.right < prev.right && v.right > prev.left ? ' br-r' : '',
-                                v.right > next.right || v.right < next.left ? ' tr' : v.right < next.right && v.right > next.left ? ' tr-r' : ''].join('');
-                            paint('f' + className, v);
-                        });
-                    });
-                }, this);
+                    addObject('f', v);
+                });
             }
+        },
+        drawCaret: function (caret) {
+            addObject('k', caret.clone());
         },
         drawBorder: function (element, mtop, mright, mbottom, mleft, color, inset) {
             var style = {};
@@ -4865,7 +5014,7 @@
         },
         addControlPoint: function (element, cursor, callback) {
             addObject('c', element, function () {
-                var r = Typer.getRect(element);
+                var r = getRect(element);
                 paint('c', Typer.toPlainRect(r.right, r.top - 8, r.right + 8, r.top), {
                     cursor: cursor || 'pointer'
                 }, callback);
@@ -4888,6 +5037,9 @@
         var selection = canvas.typer.getSelection();
         var startNode = selection.startNode;
         if (selection.isCaret) {
+            if ('caretColor' in root.style) {
+                canvas.drawCaret(selection.baseCaret);
+            }
             canvas.drawLineBreak(startNode);
         } else if (Typer.is(startNode, Typer.NODE_WIDGET) === selection.focusNode) {
             canvas.fill(startNode.element);
@@ -4966,7 +5118,7 @@
             if (node && !Typer.containsOrEquals(activeNode.element, node.element)) {
                 var rectA = Typer.getRect(node.element);
                 var rectC = Typer.getRect(Typer.closest(node, Typer.NODE_EDITABLE).element);
-                var before = canvas.pointerY < (rectA.top + rectA.bottom) / 2;
+                var before = canvas.pointerY < rectA.centerY;
                 var nextNode = before ? node.previousSibling : node.nextSibling;
                 if (nextNode !== activeNode && canvas.typer.widgetAllowed(activeNode.widget.id, node)) {
                     var y;
@@ -5294,6 +5446,15 @@
         insert: listCommand,
         textFlow: true,
         remove: 'keepText',
+        extract: function (e) {},
+        receive: function (e) {
+            if (Typer.sameElementSpec(e.widget.element, e.receivedNode)) {
+                e.preventDefault();
+                e.typer.invoke(function (tx) {
+                    tx.insertHtml(e.receivedNode.childNodes);
+                });
+            }
+        },
         tab: function (e) {
             e.typer.invoke('indent');
         },
@@ -6209,12 +6370,9 @@
             };
         }
         if (position) {
-            var range = toolbar.typer.getSelection().getRange();
-            if (range) {
-                var r = range.getClientRects()[0] || Typer.getRect(range);
-                if (r.top >= position.top && r.top <= position.top + height) {
-                    position.top = r.bottom + 10;
-                }
+            var r = toolbar.typer.getSelection().extendCaret.getRect();
+            if (r.top >= position.top && r.top <= position.top + height) {
+                position.top = r.bottom + 10;
             }
             $(toolbar.element).css(position);
         }
@@ -6750,11 +6908,7 @@
             });
             $('s', self.element).on('mousedown touchstart', function (e) {
                 var elm = e.target;
-                var center = Typer.getRect(elm.parentNode);
-                center = {
-                    top: (center.top + center.bottom) / 2,
-                    left: (center.left + center.right) / 2
-                };
+                var rect = Typer.getRect(elm.parentNode);
                 var isTouch = e.type === 'touchstart';
                 var handlers = {};
                 handlers[isTouch ? 'touchmove' : 'mousemove'] = function (e) {
@@ -6762,7 +6916,7 @@
                         return handlers.mouseup();
                     }
                     var point = isTouch ? e.originalEvent.touches[0] : e;
-                    var rad = Math.atan2(point.clientY - center.top, point.clientX - center.left) / Math.PI;
+                    var rad = Math.atan2(point.clientY - rect.centerY, point.clientX - rect.centerX) / Math.PI;
                     var curM = getMinutes(self.value);
                     var curH = getHours(self.value);
                     if (elm.getAttribute('hand') === 'm') {
@@ -6790,8 +6944,8 @@
             $(self.element).on('mousewheel', function (e) {
                 self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
-                clearImmediate(mousewheelTimeout);
-                mousewheelTimeout = setImmediate(function () {
+                clearTimeout(mousewheelTimeout);
+                mousewheelTimeout = setTimeout(function () {
                     ui.execute(self);
                 });
             });
@@ -7053,7 +7207,7 @@
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
             if (Typer.ui.isTouchDevice) {
-                setImmediate(function () {
+                setTimeout(function () {
                     if (e.typer === activeTyper) {
                         callout.focus();
                     }
@@ -7061,7 +7215,7 @@
             }
         },
         focusout: function (e) {
-            setImmediate(function () {
+            setTimeout(function () {
                 if (e.typer === activeTyper) {
                     activeTyper = null;
                     callout.hide();
@@ -7536,7 +7690,7 @@
         contextmenu: '<div class="typer-ui-float is-contextmenu anim-target"><div class="typer-ui-buttonlist"><br x:t="children"/></div></div>',
         group: '<div class="typer-ui-group"><br x:t="children"/></div>',
         groupStateChange: function (ui, control) {
-            setImmediate(function () {
+            setTimeout(function () {
                 control.setState('sep-before', !!$(control.element).prevAll(':not(.hidden)')[0]);
                 control.setState('sep-after', !!$(control.element).nextAll(':not(.hidden):first:not(.typer-ui-group)')[0]);
             });
@@ -7547,7 +7701,7 @@
         fileInit: function (ui, control) {
             $(control.element).find(':file').change(function (e) {
                 ui.execute(control, e.target.files);
-                setImmediate(function () {
+                setTimeout(function () {
                     var form = document.createElement('form');
                     form.appendChild(e.target);
                     form.reset();
@@ -7650,7 +7804,7 @@
             var p3 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.left, 2);
             var p4 = Math.pow(e.clientY - pos.bottom, 2) + Math.pow(e.clientX - pos.right, 2);
             var scalePercent = 0.5 + 2 * Math.sqrt(Math.max(p1, p2, p3, p4)) / parseFloat($overlay.css('font-size'));
-            setImmediate(function () {
+            setTimeout(function () {
                 $anim.css('transform', $anim.css('transform') + ' scale(' + scalePercent + ')').addClass('animate-in');
             });
             $overlay.css('border-radius', $(e.currentTarget).css('border-radius'));
@@ -7682,25 +7836,24 @@ this.MutationObserver = window.MutationObserver || (function () {
     MutationObserver.prototype = {
         observe: function (element, init) {
             var self = this;
-            $(element).on('DOMNodeInserted DOMNodeRemoved DOMAttrModified', function (e) {
+            $(element).on('DOMNodeInserted DOMNodeRemoved DOMAttrModified DOMCharacterDataModified', function (e) {
                 var type = e.type.charAt(7);
                 var record = {};
                 record.addedNodes = [];
                 record.removedNodes = [];
                 if (type === 'M') {
-                    if (!init.attributes) {
-                        return;
-                    }
+                    record.type = 'attributes';
                     record.target = e.target;
                     record.attributeName = e.originalEvent.attrName;
+                } else if (type === 'a') {
+                    record.type = 'characterData';
+                    record.target = e.originalEvent.target;
                 } else {
-                    if (!init.childList) {
-                        return;
-                    }
+                    record.type = 'childList';
                     record.target = e.target.parentNode;
                     record[type === 'I' ? 'addedNodes' : 'removedNodes'][0] = e.target;
                 }
-                if (init.subtree || record.target === element) {
+                if (init[record.type] && (init.subtree || record.target === element)) {
                     self.records[self.records.length] = record;
                     clearTimeout(self.timeout);
                     self.timeout = setTimeout(function () {
@@ -7774,193 +7927,5 @@ this.WeakMap = window.WeakMap || (function () {
     };
     return WeakMap;
 }());
-
-// source: node_modules/setimmediate/setimmediate.js
-(function (global, undefined) {
-    "use strict";
-
-    if (global.setImmediate) {
-        return;
-    }
-
-    var nextHandle = 1; // Spec says greater than zero
-    var tasksByHandle = {};
-    var currentlyRunningATask = false;
-    var doc = global.document;
-    var registerImmediate;
-
-    function setImmediate(callback) {
-      // Callback can either be a function or a string
-      if (typeof callback !== "function") {
-        callback = new Function("" + callback);
-      }
-      // Copy function arguments
-      var args = new Array(arguments.length - 1);
-      for (var i = 0; i < args.length; i++) {
-          args[i] = arguments[i + 1];
-      }
-      // Store and register the task
-      var task = { callback: callback, args: args };
-      tasksByHandle[nextHandle] = task;
-      registerImmediate(nextHandle);
-      return nextHandle++;
-    }
-
-    function clearImmediate(handle) {
-        delete tasksByHandle[handle];
-    }
-
-    function run(task) {
-        var callback = task.callback;
-        var args = task.args;
-        switch (args.length) {
-        case 0:
-            callback();
-            break;
-        case 1:
-            callback(args[0]);
-            break;
-        case 2:
-            callback(args[0], args[1]);
-            break;
-        case 3:
-            callback(args[0], args[1], args[2]);
-            break;
-        default:
-            callback.apply(undefined, args);
-            break;
-        }
-    }
-
-    function runIfPresent(handle) {
-        // From the spec: "Wait until any invocations of this algorithm started before this one have completed."
-        // So if we're currently running a task, we'll need to delay this invocation.
-        if (currentlyRunningATask) {
-            // Delay by doing a setTimeout. setImmediate was tried instead, but in Firefox 7 it generated a
-            // "too much recursion" error.
-            setTimeout(runIfPresent, 0, handle);
-        } else {
-            var task = tasksByHandle[handle];
-            if (task) {
-                currentlyRunningATask = true;
-                try {
-                    run(task);
-                } finally {
-                    clearImmediate(handle);
-                    currentlyRunningATask = false;
-                }
-            }
-        }
-    }
-
-    function installNextTickImplementation() {
-        registerImmediate = function(handle) {
-            process.nextTick(function () { runIfPresent(handle); });
-        };
-    }
-
-    function canUsePostMessage() {
-        // The test against `importScripts` prevents this implementation from being installed inside a web worker,
-        // where `global.postMessage` means something completely different and can't be used for this purpose.
-        if (global.postMessage && !global.importScripts) {
-            var postMessageIsAsynchronous = true;
-            var oldOnMessage = global.onmessage;
-            global.onmessage = function() {
-                postMessageIsAsynchronous = false;
-            };
-            global.postMessage("", "*");
-            global.onmessage = oldOnMessage;
-            return postMessageIsAsynchronous;
-        }
-    }
-
-    function installPostMessageImplementation() {
-        // Installs an event handler on `global` for the `message` event: see
-        // * https://developer.mozilla.org/en/DOM/window.postMessage
-        // * http://www.whatwg.org/specs/web-apps/current-work/multipage/comms.html#crossDocumentMessages
-
-        var messagePrefix = "setImmediate$" + Math.random() + "$";
-        var onGlobalMessage = function(event) {
-            if (event.source === global &&
-                typeof event.data === "string" &&
-                event.data.indexOf(messagePrefix) === 0) {
-                runIfPresent(+event.data.slice(messagePrefix.length));
-            }
-        };
-
-        if (global.addEventListener) {
-            global.addEventListener("message", onGlobalMessage, false);
-        } else {
-            global.attachEvent("onmessage", onGlobalMessage);
-        }
-
-        registerImmediate = function(handle) {
-            global.postMessage(messagePrefix + handle, "*");
-        };
-    }
-
-    function installMessageChannelImplementation() {
-        var channel = new MessageChannel();
-        channel.port1.onmessage = function(event) {
-            var handle = event.data;
-            runIfPresent(handle);
-        };
-
-        registerImmediate = function(handle) {
-            channel.port2.postMessage(handle);
-        };
-    }
-
-    function installReadyStateChangeImplementation() {
-        var html = doc.documentElement;
-        registerImmediate = function(handle) {
-            // Create a <script> element; its readystatechange event will be fired asynchronously once it is inserted
-            // into the document. Do so, thus queuing up the task. Remember to clean up once it's been called.
-            var script = doc.createElement("script");
-            script.onreadystatechange = function () {
-                runIfPresent(handle);
-                script.onreadystatechange = null;
-                html.removeChild(script);
-                script = null;
-            };
-            html.appendChild(script);
-        };
-    }
-
-    function installSetTimeoutImplementation() {
-        registerImmediate = function(handle) {
-            setTimeout(runIfPresent, 0, handle);
-        };
-    }
-
-    // If supported, we should attach to the prototype of global, since that is where setTimeout et al. live.
-    var attachTo = Object.getPrototypeOf && Object.getPrototypeOf(global);
-    attachTo = attachTo && attachTo.setTimeout ? attachTo : global;
-
-    // Don't get fooled by e.g. browserify environments.
-    if ({}.toString.call(global.process) === "[object process]") {
-        // For Node.js before 0.9
-        installNextTickImplementation();
-
-    } else if (canUsePostMessage()) {
-        // For non-IE10 modern browsers
-        installPostMessageImplementation();
-
-    } else if (global.MessageChannel) {
-        // For web workers, where supported
-        installMessageChannelImplementation();
-
-    } else if (doc && "onreadystatechange" in doc.createElement("script")) {
-        // For IE 6–8
-        installReadyStateChangeImplementation();
-
-    } else {
-        // For older browsers
-        installSetTimeoutImplementation();
-    }
-
-    attachTo.setImmediate = setImmediate;
-    attachTo.clearImmediate = clearImmediate;
-}(typeof self === "undefined" ? typeof global === "undefined" ? this : global : self));
 
 })));

@@ -272,8 +272,8 @@
             $(self.element).on('mousewheel', function (e) {
                 self.setValue(stepDate('minute', self.value, Typer.ui.getWheelDelta(e), self.step));
                 e.preventDefault();
-                clearImmediate(mousewheelTimeout);
-                mousewheelTimeout = setImmediate(function () {
+                clearTimeout(mousewheelTimeout);
+                mousewheelTimeout = setTimeout(function () {
                     ui.execute(self);
                 });
             });
@@ -535,7 +535,7 @@
             callout.setValue(e.typer.getValue() || new Date());
             callout.show(e.typer.element);
             if (Typer.ui.isTouchDevice) {
-                setImmediate(function () {
+                setTimeout(function () {
                     if (e.typer === activeTyper) {
                         callout.focus();
                     }
@@ -543,7 +543,7 @@
             }
         },
         focusout: function (e) {
-            setImmediate(function () {
+            setTimeout(function () {
                 if (e.typer === activeTyper) {
                     activeTyper = null;
                     callout.hide();

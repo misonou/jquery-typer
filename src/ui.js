@@ -1413,7 +1413,7 @@
                 };
                 ui.update();
                 $(ui.element).appendTo(document.body);
-                setImmediate(function () {
+                setTimeout(function () {
                     callThemeFunction(self, 'afterShow', data);
                     typerUI.focus(self.element);
                 });
@@ -1510,14 +1510,14 @@
         });
         $(window).focusin(function (e) {
             if (currentDialog && e.relatedTarget && !elementOfControl(currentDialog.control, e.target)) {
-                setImmediate(typerUI.focus, currentDialog.control.element);
+                setTimeout(typerUI.focus, 0, currentDialog.control.element);
             }
         });
         $(window).on('resize scroll orientationchange', function () {
-            Typer.setImmediateOnce(updateSnaps);
+            Typer.setTimeoutOnce(updateSnaps);
         });
         $(document.body).on('mousemove mousewheel keyup touchend', function () {
-            Typer.setImmediateOnce(updateSnaps);
+            Typer.setTimeoutOnce(updateSnaps);
         });
         $(document.body).on('click', 'label', function (e) {
             // IE does not focus on focusable element when clicking containing LABEL element
