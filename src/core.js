@@ -198,7 +198,7 @@
     function any(arr, callback) {
         var result;
         $.each(arr, function (i, v) {
-            result = callback.call(this, v) && v;
+            result = callback.call(this, v, i) && v;
             return !result;
         });
         return result;
@@ -234,18 +234,13 @@
         return iterator[direction < 0 ? 'previousNode' : 'nextNode']();
     }
 
-    function consume(set) {
-        var arr;
-        if (Array.from) {
-            arr = Array.from(set);
-        } else {
-            arr = [];
-            set.forEach(function (v) {
-                arr[arr.length] = v;
-            });
-        }
+    function consume(set, callback) {
+        var arr = [];
+        set.forEach(function (v) {
+            arr[arr.length] = v;
+        });
         set.clear();
-        return arr;
+        arr.forEach(callback);
     }
 
     function trim(v) {
@@ -676,6 +671,7 @@
         var currentSelection;
         var executing;
         var muteChanges;
+        var needNormalize = true;
         var typerFocused = false;
         var $self = $(topElement);
 
@@ -687,7 +683,8 @@
             return function (callback, args, thisArg) {
                 executing = true;
                 setEventSource('script', typer);
-                return run(callback, args, thisArg);
+                run(callback, args, thisArg);
+                typer.getNode();
             };
         }());
 
@@ -722,7 +719,11 @@
         }
 
         function triggerEvent(eventMode, eventName, data, props) {
-            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode)).filter(function (v) {
+            if (eventMode.id === WIDGET_ROOT) {
+                // root widget should not be considered as content widget although it appears in node
+                return false;
+            }
+            var widgets = (getTargetedWidgets(eventMode) || $.makeArray(eventMode)).filter(function (v) {
                 return !v.destroyed && isFunction(widgetOptions[v.id][eventName]);
             });
             if (widgets[0]) {
@@ -751,47 +752,45 @@
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
             var nodeMap = new WeakMap();
-            var dirtyElements = new Set();
             var changedWidgets = new Set();
+            var initOrDestroyWidgets = new Set();
             var observer = new MutationObserver(handleMutations);
 
-            function triggerContentChange(source) {
+            function triggerWidgetEvents(source) {
                 setEventSource.apply(null, source);
+                if (needNormalize) {
+                    normalize();
+                }
                 codeUpdate(function () {
-                    $.each(consume(changedWidgets), function (i, v) {
-                        if (v.id !== WIDGET_ROOT) {
-                            triggerEvent(v, 'contentChange');
-                        }
+                    consume(initOrDestroyWidgets, function (v) {
+                        triggerEvent(v, v._event);
+                        triggerEvent(EVENT_STATIC, 'widget' + capfirst(v._event), null, {
+                            targetWidget: v
+                        });
+                        v.destroyed = v._event === 'destroy';
+                        delete v._event;
                     });
-                    triggerEvent(EVENT_STATIC, 'contentChange');
+                    if (changedWidgets.size) {
+                        consume(changedWidgets, function (v) {
+                            triggerEvent(v, 'contentChange');
+                        });
+                        triggerEvent(EVENT_STATIC, 'contentChange');
+                    }
                 });
                 undoable.snapshot();
             }
 
-            function triggerWidgetEvent(widget, event) {
+            function registerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
-                    if (widget.timeout) {
-                        clearTimeout(widget.timeout);
-                        delete widget.timeout;
+                    if (initOrDestroyWidgets.has(widget)) {
+                        initOrDestroyWidgets.delete(widget);
+                        delete widget._event;
                     } else {
-                        widget.timeout = setTimeout(function () {
-                            triggerEvent(widget, event);
-                            triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
-                                targetWidget: widget
-                            });
-                            widget.destroyed = event === 'destroy';
-                            delete widget.timeout;
-                        });
+                        initOrDestroyWidgets.add(widget);
+                        defineProperty(widget, '_event', event);
+                        setTimeoutOnce(triggerWidgetEvents, 0, currentSource.slice(0));
                     }
                 }
-            }
-
-            function triggerWidgetEventRecursive(node, event) {
-                iterate(new TyperTreeWalker(node, -1), function (v) {
-                    if (v.widget.element === v.element) {
-                        triggerWidgetEvent(v.widget, event);
-                    }
-                });
             }
 
             function addChild(parent, node) {
@@ -801,7 +800,12 @@
                     if (node.parentNode) {
                         removeFromParent(node);
                     } else {
-                        triggerWidgetEventRecursive(node, 'init');
+                        // revoke any destroy event registered previously when being removed from old parent
+                        iterate(new TyperTreeWalker(node, -1), function (v) {
+                            if (v.widget.element === v.element) {
+                                registerWidgetEvent(v.widget, 'init');
+                            }
+                        });
                     }
                     arr.splice(index, 0, node);
                     node.parentNode = parent;
@@ -809,6 +813,7 @@
                     node.nextSibling = arr[index + 1] || null;
                     (node.previousSibling || {}).nextSibling = node;
                     (node.nextSibling || {}).previousSibling = node;
+                    return true;
                 }
             }
 
@@ -823,110 +828,103 @@
                 node.nextSibling = null;
                 node.previousSibling = null;
                 if (destroyWidget) {
-                    triggerWidgetEventRecursive(node, 'destroy');
                     iterate(new TyperTreeWalker(node, -1), function (v) {
                         detachedElements.set(v.element, {
                             node: (prev || next || parent).element,
                             offset: prev ? false : next ? true : 0
                         });
+                        if (v.widget.element === v.element) {
+                            registerWidgetEvent(v.widget, 'destroy');
+                        }
                     });
                 }
             }
 
             function updateNode(node) {
-                var context = node.parentNode || nodeMap.get(rootElement);
-                if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
-                    if (node.widget && node.widget.element === node.element) {
-                        triggerWidgetEvent(node.widget, 'destroy');
-                    }
-                    $.each(widgetOptions, function (i, v) {
-                        if (is(node.element, v.element)) {
-                            node.widget = new TyperWidget(nodeSource, i, node.element, v.options);
-                            triggerWidgetEvent(node.widget, 'init');
-                            return false;
-                        }
+                var oldWidget = node.widget;
+                var oldNodeType = node.nodeType;
+                var parent = node.parentNode;
+
+                node.widget = (oldWidget || '').element !== node.element ? parent.widget : oldWidget;
+                if (!is(parent, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                    var matchedId;
+                    var matched = any(widgetOptions, function (v, i) {
+                        return is(node.element, v.element) && (matchedId = i);
                     });
+                    if (matched && (node.widget === parent.widget || node.widget.id !== matchedId)) {
+                        node.widget = new TyperWidget(nodeSource, matchedId, node.element, matched.options);
+                        registerWidgetEvent(node.widget, 'init');
+                    }
                 }
-                if (node.widget && node.widget.destroyed) {
-                    delete node.widget;
-                }
-                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && is(context, NODE_WIDGET | NODE_INLINE_WIDGET))) {
-                    node.widget = context.widget;
+                if (oldWidget && oldWidget !== node.widget) {
+                    registerWidgetEvent(oldWidget, 'destroy');
                 }
                 var widgetOption = widgetOptions[node.widget.id];
-                if (node.widget === context.widget && !is(context, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                if (node.widget === parent.widget && !is(parent, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
                 } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
                     node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
                 } else {
-                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    node.nodeType = widgetOption.inline && node.widget !== parent.widget && is(parent, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
                 }
             }
 
-            function visitElement(element) {
-                var thisNode = nodeMap.get(element);
+            function visitNode(thisNode) {
                 $.each(thisNode.childNodes.slice(0), function (i, v) {
-                    if (!containsOrEquals(element, v.element)) {
+                    if (!containsOrEquals(thisNode.element, v.element)) {
                         removeFromParent(v, true);
                     }
                 });
-                $(element).children().not('br').each(function (i, v) {
+                $(thisNode.element).children().not('br').each(function (i, v) {
                     var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
-                    var parentNode = node.parentNode;
-                    addChild(thisNode, node);
-                    updateNode(node);
                     nodeMap.set(v, node);
-                    if (!parentNode || v.parentNode !== parentNode.element) {
-                        visitElement(v);
+                    if (addChild(thisNode, node)) {
+                        updateNode(node);
+                        visitNode(node);
                     }
                 });
-            }
-
-            function trackChange(node) {
-                // avoid trigger contentChange event before init
-                if (currentSelection && !muteChanges) {
-                    changedWidgets.add(node.widget);
-                    setTimeoutOnce(triggerContentChange, 0, currentSource.slice(0));
-                }
             }
 
             function handleMutations(mutations) {
+                var trackChange = currentSelection && !muteChanges;
+                var beforeSize = changedWidgets.size;
+                var dirtyNodes = new Set();
+
                 $.each(mutations, function (i, v) {
-                    if (!isBR(v.target)) {
+                    var node = nodeMap.get(isElm(v.target) || v.target.parentNode);
+                    if (node) {
                         if (v.addedNodes[0] || v.removedNodes[0]) {
-                            dirtyElements.add(v.target);
-                        } else if (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style')) {
-                            var elm = isElm(v.target) || v.target.parentNode;
-                            if (nodeMap.has(elm)) {
-                                trackChange(nodeMap.get(elm));
-                            }
+                            dirtyNodes.add(node);
+                        } else if (trackChange && (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style'))) {
+                            changedWidgets.add(node.widget);
                         }
                     }
                 });
-            }
-
-            function ensureState() {
-                handleMutations(observer.takeRecords());
-                if (dirtyElements.size) {
-                    var arr = consume(dirtyElements);
-                    arr.sort(function (a, b) {
-                        return !connected(root, a) ? -1 : comparePosition(a, b);
-                    });
-                    $(rootElement.parentNode || rootElement).find(arr).each(function (i, v) {
-                        visitElement(v);
-                        trackChange(nodeMap.get(v));
-                    });
-                    if (currentSelection) {
-                        selectionAtomic(function () {
-                            caretEnsureState(currentSelection.baseCaret);
-                            caretEnsureState(currentSelection.extendCaret);
-                        });
+                dirtyNodes.forEach(function (v) {
+                    if (containsOrEquals(rootElement, v.element)) {
+                        visitNode(v);
+                        if (trackChange) {
+                            changedWidgets.add(v.widget);
+                        }
                     }
+                });
+                if (currentSelection) {
+                    selectionAtomic(function () {
+                        caretEnsureState(currentSelection.baseCaret);
+                        caretEnsureState(currentSelection.extendCaret);
+                    });
+                }
+                if (beforeSize !== changedWidgets.size) {
+                    needNormalize = true;
+                    setTimeoutOnce(triggerWidgetEvents, 0, currentSource.slice(0));
                 }
             }
 
             function getNode(element) {
-                ensureState();
+                var mutations = observer.takeRecords();
+                if (mutations[0]) {
+                    handleMutations(mutations);
+                }
                 if (isText(element) || isBR(element)) {
                     element = element.parentNode || element;
                 }
@@ -949,7 +947,7 @@
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
             nodeMap.set(rootElement, rootNode);
-            visitElement(rootElement);
+            visitNode(rootNode);
 
             return extend(self, {
                 rootNode: rootNode,
@@ -984,7 +982,10 @@
 
         function normalize() {
             // flush any previous changes so that they would not be muted away
-            typer.getNode(topElement);
+            typer.getNode();
+            if (!needNormalize) {
+                return;
+            }
             muteChanges = true;
             iterate(new TyperTreeWalker(typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
@@ -1045,9 +1046,10 @@
             });
             // Mozilla adds <br type="_moz"> when a container is empty
             $('br[type="_moz"]', topElement).remove();
-            // explicitly refresh document state and trigger contentChange or stateChange if appropriate
-            typer.getNode(topElement);
+            // flush any changes due to normalization so that they will not be included nor cause recursion
+            typer.getNode();
             muteChanges = false;
+            needNormalize = false;
         }
 
         function extractContents(range, mode, callback) {
@@ -1566,7 +1568,7 @@
 
             function handleTextInput(inputText) {
                 setEventSource('input', typer);
-                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
+                if (inputText && (triggerDefaultPreventableEvent(currentSelection.focusNode.widget, 'textInput', inputText) || triggerDefaultPreventableEvent(EVENT_STATIC, 'textInput', inputText))) {
                     return;
                 }
                 if (!currentSelection.startTextNode || !currentSelection.isCaret) {
@@ -2024,7 +2026,7 @@
             }
         });
 
-        codeUpdate(normalize);
+        normalize();
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         triggerEvent(EVENT_STATIC, 'init');
     }
