@@ -128,13 +128,13 @@
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(TR_SELECTOR, tx.widget.element).each(function (i, v) {
-                    $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).forEach(tx.removeElement);
+                    $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).remove();
                 });
                 tx.selection.moveTo(getRow(tx.widget, info.minRow).children[Math.max(0, info.minColumn - 1)], -0);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).forEach(tx.removeElement);
+                $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).remove();
                 tx.selection.moveTo(getRow(tx.widget, Math.max(0, info.minRow - 1)).children[info.minColumn], -0);
             },
             toggleTableHeader: function (tx) {

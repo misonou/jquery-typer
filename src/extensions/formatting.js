@@ -121,7 +121,7 @@
         $(paragraphs).find(unwrapSpec).each(function (i, v) {
             if (Typer.sameElementSpec(v.previousSibling, v)) {
                 $(v.childNodes).appendTo(v.previousSibling);
-                tx.removeElement(v);
+                $(v).remove();
             }
         });
     }
@@ -175,7 +175,7 @@
                 $(Typer.createTextNode('\u00a0')).insertBefore(newList);
             }
             if (!list.children[0]) {
-                tx.removeElement(list);
+                $(list).remove();
             }
         });
     }
@@ -196,13 +196,13 @@
             if (parentList) {
                 $(v).insertAfter(parentList);
                 if (!Typer.trim(tx.typer.extractText(parentList))) {
-                    tx.removeElement(parentList);
+                    $(parentList).remove();
                 }
             } else {
                 $(tx.replaceElement(v, 'p')).insertAfter(list);
             }
             if (!list.children[0]) {
-                tx.removeElement(list);
+                $(list).remove();
             }
         });
     }
@@ -330,7 +330,7 @@
         contentChange: function (e) {
             if (!$(e.widget.element).children('li')[0]) {
                 e.typer.invoke(function (tx) {
-                    tx.removeElement(e.widget.element);
+                    $(e.widget.element).remove();
                 });
             }
         },
