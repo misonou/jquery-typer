@@ -6,6 +6,9 @@ this.Set = window.Set || (function () {
         get size() {
             return this.items.length;
         },
+        has: function (v) {
+            return this.items.indexOf(v) >= 0;
+        },
         add: function (v) {
             var items = this.items;
             if (items.indexOf(v) < 0) {
