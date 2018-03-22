@@ -2545,7 +2545,7 @@
             textNode = isText(element);
         }
         var node = inst.typer.getNode(element);
-        if (node.element !== (isText(element) || isBR(element) ? element.parentNode : element)) {
+        if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
             element = node.element;
             textNode = null;
         }
