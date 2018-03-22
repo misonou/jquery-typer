@@ -1315,8 +1315,7 @@
                             normalizeWhitespace(caretNode.element);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
-                                var textNode = createTextNode();
-                                createRange(lastNode, false).insertNode(textNode);
+                                var textNode = $(createTextNode()).insertAfter(lastNode)[0];
                                 caretPoint.moveTo(textNode, -0);
                             } else {
                                 caretPoint.moveTo(lastNode, -0);
@@ -1328,9 +1327,9 @@
                         // to avoid two empty lines inserted before block widget
                         if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
                             if (is(caretNode, NODE_ANY_BLOCK_EDITABLE) && !is(caretNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
-                                createRange(caretNode.element, -0).insertNode(nodeToInsert);
+                                $(nodeToInsert).appendTo(caretNode.element);
                             } else {
-                                createRange(caretNode.element, true).insertNode(nodeToInsert);
+                                $(nodeToInsert).insertBefore(caretNode.element);
                             }
                             insertAsInline = !!is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
                             paragraphAsInline = incompatParagraph || !insertAsInline;
@@ -2682,26 +2681,21 @@
         getRange: function () {
             var self = caretEnsureState(this);
             var node = self.textNode || self.element;
-            if (IS_IE && self.offset === node.length && isElm(node.nextSibling) && !/inline/.test($(node.nextSibling).css('display'))) {
-                // IE fails to visually position caret when it is at the end of text line
-                // and there is a next sibling element which its display mode is not inline
-                if (node.data.slice(-1) === ZWSP) {
-                    self.offset--;
-                } else {
-                    node.data += ZWSP;
-                }
-            }
+            var offset = self.offset;
             if (node === self.typer.element) {
                 // avoid creating range that is outside the content editable area
-                return createRange(node, self.offset ? 0 : -0);
+                return createRange(node, offset ? 0 : -0);
             }
-            return createRange(node, self.offset);
+            if (offset % node.length === 0) {
+                // set the created range before or after the text node
+                // to reduce chances of empty text node created during manipulation
+                return createRange(node, !offset);
+            }
+            return createRange(node, offset);
         },
         clone: function () {
-            var self = this;
-            var clone = new TyperCaret(self.typer);
-            caretSetPositionRaw(clone, self.node, self.element, self.textNode, self.offset);
-            return clone;
+            var self = caretEnsureState(this);
+            return extend(new TyperCaret(self.typer), self);
         },
         moveTo: function (node, offset) {
             var range = is(node, Range) || createRange(node, offset);
