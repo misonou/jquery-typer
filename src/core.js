@@ -439,8 +439,12 @@
     }
 
     function toPlainRect(l, t, r, b) {
+        function clip(v) {
+            // IE provides precision up to 0.05 but with floating point errors that hinder comparisons
+            return Math.round(v * 1000) / 1000;
+        }
         if (l.top !== undefined) {
-            return toPlainRect(l.left, l.top, l.right, l.bottom);
+            return new TyperRect(clip(l.left), clip(l.top), clip(l.right), clip(l.bottom));
         }
         return new TyperRect(l, t, r, b);
     }
