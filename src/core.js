@@ -2267,7 +2267,13 @@
         var typer = iterator.currentNode.typer;
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
             var node = typer.getNode(v);
-            return (node.element !== (isElm(v) || v.parentNode) && !isBR(v)) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
+            if (!treeWalkerNodeAccepted(iterator, node, true)) {
+                return treeWalkerAcceptNode.returnValue;
+            }
+            if ((isText(v) || isBR(v)) && !is(node, NODE_ANY_ALLOWTEXT)) {
+                return 2;
+            }
+            return acceptNode(inst, v) | 1;
         }, false);
         defineProperty(inst, 'iterator', iterator2);
     }
