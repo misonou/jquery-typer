@@ -1731,7 +1731,7 @@
                 if (!composition) {
                     var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
                     if (e.type === 'keydown') {
-                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.char || e.key) && (KEYNAMES[e.keyCode] || '').length > 1;
+                        var isSpecialKey = !isModifierKey && (KEYNAMES[e.keyCode] || '').length > 1;
                         modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
                         modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
                         modifiedKeyCode = e.keyCode;
@@ -1752,7 +1752,7 @@
 
             $self.on('keypress beforeinput', function (e) {
                 if (!composition && !modifierCount && (e.type === 'beforeinput' || e.originalEvent.synthetic || !('onbeforeinput' in topElement))) {
-                    handleTextInput(e.originalEvent.data || e.char || e.key || String.fromCharCode(e.keyCode));
+                    handleTextInput(e.originalEvent.data || e.char || e.key || String.fromCharCode(e.charCode));
                     e.preventDefault();
                 }
             });
