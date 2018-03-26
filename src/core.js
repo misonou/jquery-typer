@@ -1666,23 +1666,25 @@
                 e.preventDefault();
             });
 
-            $self.on('compositionstart compositionupdate compositionend', function (e) {
-                composition = e.type.slice(-1) !== 'd';
-                if (!composition) {
-                    var range = getActiveRange(topElement);
-                    var node = range.startContainer;
-                    var offset = range.startOffset;
-                    if (isElm(node)) {
-                        node = node.childNodes[offset - 1];
-                        offset = node.length;
-                    }
-                    var text = e.originalEvent.data;
+            $self.on('compositionstart compositionend', function (e) {
+                var previous = composition;
+                var range = getActiveRange(topElement);
+                var node = range.startContainer;
+                var offset = range.startOffset;
+                if (isElm(node)) {
+                    node = node.childNodes[offset] || node.lastChild;
+                    offset = node.length;
+                }
+                composition = e.type.slice(-1) === 't' && {};
+                muteChanges = !!composition;
+                if (composition) {
+                    composition.node = node;
+                    composition.offset = offset;
+                } else {
+                    var text = e.originalEvent.data || previous.node.data.slice(previous.offset - offset);
                     createRange(node, offset - text.length, node, offset).deleteContents();
                     currentSelection.select(node, offset - text.length);
                     handleTextInput(text);
-                } else {
-                    updateFromNativeInput();
-                    handleTextInput('');
                 }
             });
 
@@ -1690,7 +1692,7 @@
                 if (!composition) {
                     var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
                     if (e.type === 'keydown') {
-                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.key || '').charAt(0) && (KEYNAMES[e.keyCode] || '').length > 1;
+                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.char || e.key) && (KEYNAMES[e.keyCode] || '').length > 1;
                         modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
                         modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
                         modifiedKeyCode = e.keyCode;
@@ -1709,9 +1711,9 @@
                 }
             });
 
-            $self.on('keypress textInput', function (e) {
-                if (!composition && !modifierCount && (e.type === 'textInput' || e.originalEvent.synthetic || !supportTextInputEvent)) {
-                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.charCode || e.keyCode));
+            $self.on('keypress beforeinput', function (e) {
+                if (!composition && !modifierCount && (e.type === 'beforeinput' || e.originalEvent.synthetic || !('onbeforeinput' in topElement))) {
+                    handleTextInput(e.originalEvent.data || e.char || e.key || String.fromCharCode(e.keyCode));
                     e.preventDefault();
                 }
             });
@@ -3083,30 +3085,5 @@
             };
         }();
     }
-
-    // detect support for textInput event
-    function detectTextInputEvent(e) {
-        detectTextInputEvent.lastEvent = e;
-        if (e.type === 'keypress' && !e.synthetic) {
-            setTimeout(function () {
-                var lastEvent = detectTextInputEvent.lastEvent;
-                document.removeEventListener('keypress', detectTextInputEvent, true);
-                document.removeEventListener('textInput', detectTextInputEvent, true);
-                if (lastEvent.type === 'keypress') {
-                    supportTextInputEvent = false;
-                    var ch = String.fromCharCode(lastEvent.charCode);
-                    var range = getActiveRange(document.body);
-                    range.setStart(range.startContainer, range.startOffset - (lastEvent.key || ch).length);
-                    range.deleteContents();
-                    var e = document.createEvent('KeyboardEvent');
-                    e.initKeyboardEvent('keypress', true, true, lastEvent.view, ch, lastEvent.key, lastEvent.location, '', lastEvent.repeat);
-                    lastEvent.target.dispatchEvent(e);
-                }
-            });
-        }
-    }
-
-    document.addEventListener('keypress', detectTextInputEvent, true);
-    document.addEventListener('textInput', detectTextInputEvent, true);
 
 }(jQuery, document.documentElement, Array.prototype));
