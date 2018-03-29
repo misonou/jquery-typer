@@ -2935,7 +2935,7 @@
         },
         moveTo: function (node, offset) {
             if (is(node, TyperCaret)) {
-                return caretSetPosition(this, node.textNode || node.element, node.offset, node.beforeSoftBreak);
+                return caretSetPositionRaw(this, node.node, node.element, node.textNode, node.offset, node.beforeSoftBreak);
             }
             var range = is(node, Range) || createRange(node, offset);
             if (range && containsOrEquals(this.typer.element, range.startContainer)) {
