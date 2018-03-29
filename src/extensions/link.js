@@ -164,22 +164,23 @@
 
     Typer.ui.addHook('space enter', function (e) {
         if (e.typer.widgetEnabled('link')) {
-            var originalSelection = e.typer.getSelection().clone();
-            var selection = originalSelection.clone();
+            var selection = e.typer.getSelection().clone();
             if (e.data === 'enter') {
                 selection.moveByCharacter(-1);
             }
             if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^([a-z]+:\/\/\S+)|(\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
                 var link = RegExp.$1 || ('mailto:' + RegExp.$2);
-                e.typer.snapshot(true);
-                e.typer.select(selection);
                 e.typer.invoke(function (tx) {
+                    if (e.data === 'space') {
+                        tx.insertText(' ');
+                    }
+                    var originalSelection = tx.selection.clone();
+                    e.typer.snapshot(true);
+                    e.typer.select(selection);
                     tx.insertWidget('link', link);
+                    e.typer.select(originalSelection);
                 });
-                e.typer.select(originalSelection);
-                if (e.data === 'space') {
-                    e.preventDefault();
-                }
+                e.preventDefault();
             }
         }
     });
