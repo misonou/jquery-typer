@@ -1,3 +1,15 @@
+## 0.11.2 / 2018-03-29
+
+- Improvement on line search for `moveToLineEnd` and `moveByLine`
+- Fix: previous changes muted when normalizing content
+- Fix: reduce redundant calls to normalize
+- Fix: missing `Set.has` in shim
+- Fix: node iterator returns ineditable text nodes
+- Fix: possible issue due to floating point errors in IE DOMRect
+- Fix: caret anchor on ineditable text nodes
+- Fix: text input by IME (composition events)
+- Fix: snapshot not captured immediately when calling `typer.snapshot` with argument `true`
+
 ## 0.11.1 / 2018-03-09
 
 - Handle unicode bidirectionality, surrogates, combining marks and vertical writing modes

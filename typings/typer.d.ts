@@ -474,7 +474,7 @@ interface TyperUIStatic {
     (options?: TyperUIOptions): TyperUI;
     (controls: string, options?: TyperUIOptions): TyperUI;
 
-    readonly isTouchDevice: bool;
+    readonly isTouchDevice: boolean;
 
     readonly controls: Dictionary<TyperControlDefinition>;
     readonly themes: Dictionary<TyperTheme>;

@@ -1,5 +1,5 @@
 /*!
- * jQuery Typer Plugin v0.11.1
+ * jQuery Typer Plugin v0.11.2
  *
  * The MIT License (MIT)
  *
@@ -90,17 +90,14 @@
     var CHARSET_RTL = '\u0590-\u07ff\u200f\u202b\u202e\ufb1d-\ufdfd\ufe70-\ufefc';
     var RE_RTL = new RegExp('([' + CHARSET_RTL + '])');
     var RE_LTR = new RegExp('([^\\s' + CHARSET_RTL + '])');
-    var RE_N_RTL = new RegExp('\\s([' + CHARSET_RTL + '])');
-    var RE_N_LTR = new RegExp('\\s([^\\s' + CHARSET_RTL + '])');
+    var RE_N_RTL = new RegExp('(\\s|[' + CHARSET_RTL + '])');
+    var RE_N_LTR = new RegExp('(\\s|[^' + CHARSET_RTL + '])');
 
     // unicode codepoints that caret position should not anchored on
     // ZWSP, lower surrogates, diacritical and half marks, and combining marks (Arabic, Hebrew and Japanese)
     var RE_SKIP = /[\u200b\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f\udc00-\udcff\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06dc\u06df-\u06e4\u06e7\u06e8\u06ea-\u06ed\u08d4-\u08e1\u08e3-\u08ff\u0900-\u0903\u093a-\u093c\u093e-\u094f\u0951-\u0957\u0962\u0963\u3099\u309a]/;
 
-    // document.caretRangeFromPoint is still broken even in Edge browser
-    // it does not return correct range for the points x or y larger than window's width or height
-    var caretRangeFromPoint_ = IS_IE ? undefined : document.caretRangeFromPoint;
-    var elementFromPoint_ = IS_IE ? undefined : document.elementFromPoint;
+    var elementsFromPoint_ = document.msElementsFromPoint || document.elementsFromPoint;
     var compareDocumentPosition_ = document.compareDocumentPosition;
     var compareBoundaryPoints_ = Range.prototype.compareBoundaryPoints;
 
@@ -109,6 +106,7 @@
     var selection = window.getSelection();
     var setTimeout = window.setTimeout;
     var clearTimeout = window.clearTimeout;
+    var getComputedStyle = window.getComputedStyle;
     var MutationObserver = shim.MutationObserver;
     var WeakMap = shim.WeakMap;
     var Set = shim.Set;
@@ -226,7 +224,7 @@
     function any(arr, callback) {
         var result;
         $.each(arr, function (i, v) {
-            result = callback.call(this, v) && v;
+            result = callback.call(this, v, i) && v;
             return !result;
         });
         return result;
@@ -262,18 +260,13 @@
         return iterator[direction < 0 ? 'previousNode' : 'nextNode']();
     }
 
-    function consume(set) {
-        var arr;
-        if (Array.from) {
-            arr = Array.from(set);
-        } else {
-            arr = [];
-            set.forEach(function (v) {
-                arr[arr.length] = v;
-            });
-        }
+    function consume(set, callback) {
+        var arr = [];
+        set.forEach(function (v) {
+            arr[arr.length] = v;
+        });
         set.clear();
-        return arr;
+        arr.forEach(callback);
     }
 
     function trim(v) {
@@ -335,7 +328,7 @@
     }
 
     function getWritingMode(elm) {
-        var style = window.getComputedStyle(isElm(elm) || elm.parentNode);
+        var style = getComputedStyle(isElm(elm) || elm.parentNode);
         return WRITING_MODES[style.getPropertyValue('writing-mode')] ^ (style.direction === 'rtl' ? 2 : 0);
     }
 
@@ -472,8 +465,15 @@
     }
 
     function toPlainRect(l, t, r, b) {
+        function clip(v) {
+            // IE provides precision up to 0.05 but with floating point errors that hinder comparisons
+            return Math.round(v * 1000) / 1000;
+        }
         if (l.top !== undefined) {
-            return toPlainRect(l.left, l.top, l.right, l.bottom);
+            return new TyperRect(clip(l.left), clip(l.top), clip(l.right), clip(l.bottom));
+        }
+        if (r === undefined) {
+            return new TyperRect(l, t, l, t);
         }
         return new TyperRect(l, t, r, b);
     }
@@ -492,6 +492,10 @@
     function pointInRect(x, y, rect, within) {
         within = within || 0;
         return rect.width && rect.height && x - rect.left >= -within && x - rect.right <= within && y - rect.top >= -within && y - rect.bottom <= within;
+    }
+
+    function mergeRect(a, b) {
+        return toPlainRect(Math.min(a.left, b.left), Math.min(a.top, b.top), Math.max(a.right, b.right), Math.max(a.bottom, b.bottom));
     }
 
     function getRects(range) {
@@ -533,26 +537,31 @@
         }
     }
 
-    function caretRangeFromPoint(x, y, element) {
-        var range = caretRangeFromPoint_.call(document, x, y);
-        if (range && element && element !== document.body && pointInRect(x, y, getRect(element))) {
-            var elm = [];
+    function elementFromPoint(x, y, container) {
+        container = container || document.body;
+        if (elementsFromPoint_) {
+            return any(elementsFromPoint_.call(document, x, y), function (v) {
+                return containsOrEquals(container, v) && $.css(v, 'pointer-events') !== 'none';
+            }) || null;
+        }
+        var element = document.elementFromPoint(x, y);
+        if (!containsOrEquals(container, element) && pointInRect(x, y, getRect(container))) {
+            var tmp = [];
             try {
-                var container;
-                while (comparePosition(element, (container = range.startContainer), true)) {
-                    var target = $(container).parentsUntil(getCommonAncestor(element, container)).slice(-1)[0] || container;
-                    if (target === elm[elm.length - 1]) {
+                while (comparePosition(container, element, true)) {
+                    var target = $(element).parentsUntil(getCommonAncestor(container, element)).slice(-1)[0] || element;
+                    if (target === tmp[tmp.length - 1]) {
                         return null;
                     }
                     target.style.pointerEvents = 'none';
-                    elm[elm.length] = target;
-                    range = caretRangeFromPoint_.call(document, x, y);
+                    tmp[tmp.length] = target;
+                    element = document.elementFromPoint(x, y);
                 }
             } finally {
-                $(elm).css('pointer-events', '');
+                $(tmp).css('pointer-events', '');
             }
         }
-        return range && containsOrEquals(element, range.startContainer) ? range : null;
+        return containsOrEquals(container, element) ? element : null;
     }
 
     function createDocumentFragment(node) {
@@ -634,7 +643,7 @@
     function scrollRectIntoView(element, rect) {
         var parent = getScrollParent(element);
         var parentRect = getRect(parent === document.body ? root : parent);
-        var style = window.getComputedStyle(parent);
+        var style = getComputedStyle(parent);
         var winOrElm = parent === root || parent === document.body ? window : parent;
         var origX = $(winOrElm).scrollLeft();
         var origY = $(winOrElm).scrollTop();
@@ -660,6 +669,36 @@
             }
         }
         return (result.x || result.y) ? result : false;
+    }
+
+    function getFontMetric(elm) {
+        var cache = getFontMetric.cache || (getFontMetric.cache = {});
+        var style = getComputedStyle(isElm(elm) || elm.parentNode);
+        var key = [style.fontFamily, style.fontWeight, style.fontStyle].join('|');
+        if (!cache[key]) {
+            var $dummy = $('<div style="position:fixed;font-size:1000px;"><span style="display:inline-block;width:0;height:0;"></span>&nbsp;</div>').css({
+                fontFamily: style.fontFamily,
+                fontWeight: style.fontWeight,
+                fontStyle: style.fontStyle
+            }).appendTo(document.body);
+            var $img = $dummy.children();
+            var offset = getRect($dummy[0]).top;
+            cache[key] = {
+                baseline: (getRect($img.css('vertical-align', 'baseline')[0]).top - offset) / 1000,
+                height: (getRect($img.css('vertical-align', 'text-bottom')[0]).top - offset) / 1000,
+                middle: (getRect($img.css('vertical-align', 'middle')[0]).top - offset) / 1000,
+                wsWidth: $dummy.width() / 1000
+            };
+            $dummy.remove();
+        }
+        var fontSize = parseFloat(style.fontSize);
+        return {
+            fontSize: fontSize,
+            baseline: cache[key].baseline * fontSize,
+            height: cache[key].height * fontSize,
+            middle: cache[key].middle * fontSize,
+            wsWidth: cache[key].wsWidth * fontSize
+        };
     }
 
     function setTimeoutOnce(fn) {
@@ -704,6 +743,7 @@
         var currentSelection;
         var executing;
         var muteChanges;
+        var needNormalize = true;
         var typerFocused = false;
         var $self = $(topElement);
 
@@ -715,7 +755,8 @@
             return function (callback, args, thisArg) {
                 executing = true;
                 setEventSource('script', typer);
-                return run(callback, args, thisArg);
+                run(callback, args, thisArg);
+                typer.getNode();
             };
         }());
 
@@ -750,7 +791,11 @@
         }
 
         function triggerEvent(eventMode, eventName, data, props) {
-            var widgets = $.makeArray(is(eventMode, TyperWidget) || getTargetedWidgets(eventMode)).filter(function (v) {
+            if (eventMode.id === WIDGET_ROOT) {
+                // root widget should not be considered as content widget although it appears in node
+                return false;
+            }
+            var widgets = (getTargetedWidgets(eventMode) || $.makeArray(eventMode)).filter(function (v) {
                 return !v.destroyed && isFunction(widgetOptions[v.id][eventName]);
             });
             if (widgets[0]) {
@@ -779,47 +824,45 @@
             var self = {};
             var nodeSource = containsOrEquals(topElement, rootElement) ? typer : self;
             var nodeMap = new WeakMap();
-            var dirtyElements = new Set();
             var changedWidgets = new Set();
+            var initOrDestroyWidgets = new Set();
             var observer = new MutationObserver(handleMutations);
 
-            function triggerContentChange(source) {
+            function triggerWidgetEvents(source) {
                 setEventSource.apply(null, source);
+                if (needNormalize) {
+                    normalize();
+                }
                 codeUpdate(function () {
-                    $.each(consume(changedWidgets), function (i, v) {
-                        if (v.id !== WIDGET_ROOT) {
-                            triggerEvent(v, 'contentChange');
-                        }
+                    consume(initOrDestroyWidgets, function (v) {
+                        triggerEvent(v, v._event);
+                        triggerEvent(EVENT_STATIC, 'widget' + capfirst(v._event), null, {
+                            targetWidget: v
+                        });
+                        v.destroyed = v._event === 'destroy';
+                        delete v._event;
                     });
-                    triggerEvent(EVENT_STATIC, 'contentChange');
+                    if (changedWidgets.size) {
+                        consume(changedWidgets, function (v) {
+                            triggerEvent(v, 'contentChange');
+                        });
+                        triggerEvent(EVENT_STATIC, 'contentChange');
+                    }
                 });
                 undoable.snapshot();
             }
 
-            function triggerWidgetEvent(widget, event) {
+            function registerWidgetEvent(widget, event) {
                 if (fireEvent && widget.id !== WIDGET_UNKNOWN) {
-                    if (widget.timeout) {
-                        clearTimeout(widget.timeout);
-                        delete widget.timeout;
+                    if (initOrDestroyWidgets.has(widget)) {
+                        initOrDestroyWidgets.delete(widget);
+                        delete widget._event;
                     } else {
-                        widget.timeout = setTimeout(function () {
-                            triggerEvent(widget, event);
-                            triggerEvent(EVENT_STATIC, 'widget' + capfirst(event), null, {
-                                targetWidget: widget
-                            });
-                            widget.destroyed = event === 'destroy';
-                            delete widget.timeout;
-                        });
+                        initOrDestroyWidgets.add(widget);
+                        defineProperty(widget, '_event', event);
+                        setTimeoutOnce(triggerWidgetEvents, 0, currentSource.slice(0));
                     }
                 }
-            }
-
-            function triggerWidgetEventRecursive(node, event) {
-                iterate(new TyperTreeWalker(node, -1), function (v) {
-                    if (v.widget.element === v.element) {
-                        triggerWidgetEvent(v.widget, event);
-                    }
-                });
             }
 
             function addChild(parent, node) {
@@ -829,7 +872,12 @@
                     if (node.parentNode) {
                         removeFromParent(node);
                     } else {
-                        triggerWidgetEventRecursive(node, 'init');
+                        // revoke any destroy event registered previously when being removed from old parent
+                        iterate(new TyperTreeWalker(node, -1), function (v) {
+                            if (v.widget.element === v.element) {
+                                registerWidgetEvent(v.widget, 'init');
+                            }
+                        });
                     }
                     arr.splice(index, 0, node);
                     node.parentNode = parent;
@@ -837,6 +885,7 @@
                     node.nextSibling = arr[index + 1] || null;
                     (node.previousSibling || {}).nextSibling = node;
                     (node.nextSibling || {}).previousSibling = node;
+                    return true;
                 }
             }
 
@@ -851,110 +900,103 @@
                 node.nextSibling = null;
                 node.previousSibling = null;
                 if (destroyWidget) {
-                    triggerWidgetEventRecursive(node, 'destroy');
                     iterate(new TyperTreeWalker(node, -1), function (v) {
                         detachedElements.set(v.element, {
                             node: (prev || next || parent).element,
                             offset: prev ? false : next ? true : 0
                         });
+                        if (v.widget.element === v.element) {
+                            registerWidgetEvent(v.widget, 'destroy');
+                        }
                     });
                 }
             }
 
             function updateNode(node) {
-                var context = node.parentNode || nodeMap.get(rootElement);
-                if (!is(context, NODE_WIDGET) && (!node.widget || !is(node.element, widgetOptions[node.widget.id].element))) {
-                    if (node.widget && node.widget.element === node.element) {
-                        triggerWidgetEvent(node.widget, 'destroy');
-                    }
-                    $.each(widgetOptions, function (i, v) {
-                        if (is(node.element, v.element)) {
-                            node.widget = new TyperWidget(nodeSource, i, node.element, v.options);
-                            triggerWidgetEvent(node.widget, 'init');
-                            return false;
-                        }
+                var oldWidget = node.widget;
+                var oldNodeType = node.nodeType;
+                var parent = node.parentNode;
+
+                node.widget = (oldWidget || '').element !== node.element ? parent.widget : oldWidget;
+                if (!is(parent, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                    var matchedId;
+                    var matched = any(widgetOptions, function (v, i) {
+                        return is(node.element, v.element) && (matchedId = i);
                     });
+                    if (matched && (node.widget === parent.widget || node.widget.id !== matchedId)) {
+                        node.widget = new TyperWidget(nodeSource, matchedId, node.element, matched.options);
+                        registerWidgetEvent(node.widget, 'init');
+                    }
                 }
-                if (node.widget && node.widget.destroyed) {
-                    delete node.widget;
-                }
-                if (!node.widget || node.widget.element !== node.element || (node.widget.id === WIDGET_UNKNOWN && is(context, NODE_WIDGET | NODE_INLINE_WIDGET))) {
-                    node.widget = context.widget;
+                if (oldWidget && oldWidget !== node.widget) {
+                    registerWidgetEvent(oldWidget, 'destroy');
                 }
                 var widgetOption = widgetOptions[node.widget.id];
-                if (node.widget === context.widget && !is(context, NODE_WIDGET | NODE_INLINE_WIDGET)) {
+                if (node.widget === parent.widget && !is(parent, NODE_WIDGET | NODE_INLINE_WIDGET)) {
                     node.nodeType = is(node.element, INNER_PTAG) ? NODE_PARAGRAPH : NODE_INLINE;
                 } else if (is(node.element, widgetOption.editable) || (widgetOption.inline && !widgetOption.editable)) {
                     node.nodeType = widgetOption.inline ? NODE_INLINE_EDITABLE : is(node.element, INNER_PTAG) ? NODE_EDITABLE_PARAGRAPH : NODE_EDITABLE;
                 } else {
-                    node.nodeType = widgetOption.inline && node.widget !== context.widget && is(context, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
+                    node.nodeType = widgetOption.inline && node.widget !== parent.widget && is(parent, NODE_ANY_ALLOWTEXT) ? NODE_INLINE_WIDGET : NODE_WIDGET;
                 }
             }
 
-            function visitElement(element) {
-                var thisNode = nodeMap.get(element);
+            function visitNode(thisNode) {
                 $.each(thisNode.childNodes.slice(0), function (i, v) {
-                    if (!containsOrEquals(element, v.element)) {
+                    if (!containsOrEquals(thisNode.element, v.element)) {
                         removeFromParent(v, true);
                     }
                 });
-                $(element).children().not('br').each(function (i, v) {
+                $(thisNode.element).children().not('br').each(function (i, v) {
                     var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
-                    var parentNode = node.parentNode;
-                    addChild(thisNode, node);
-                    updateNode(node);
                     nodeMap.set(v, node);
-                    if (!parentNode || v.parentNode !== parentNode.element) {
-                        visitElement(v);
+                    if (addChild(thisNode, node)) {
+                        updateNode(node);
+                        visitNode(node);
                     }
                 });
-            }
-
-            function trackChange(node) {
-                // avoid trigger contentChange event before init
-                if (currentSelection && !muteChanges) {
-                    changedWidgets.add(node.widget);
-                    setTimeoutOnce(triggerContentChange, 0, currentSource.slice(0));
-                }
             }
 
             function handleMutations(mutations) {
+                var trackChange = currentSelection && !muteChanges;
+                var beforeSize = changedWidgets.size;
+                var dirtyNodes = new Set();
+
                 $.each(mutations, function (i, v) {
-                    if (!isBR(v.target)) {
+                    var node = nodeMap.get(isElm(v.target) || v.target.parentNode);
+                    if (node) {
                         if (v.addedNodes[0] || v.removedNodes[0]) {
-                            dirtyElements.add(v.target);
-                        } else if (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style')) {
-                            var elm = isElm(v.target) || v.target.parentNode;
-                            if (nodeMap.has(elm)) {
-                                trackChange(nodeMap.get(elm));
-                            }
+                            dirtyNodes.add(node);
+                        } else if (trackChange && (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style'))) {
+                            changedWidgets.add(node.widget);
                         }
                     }
                 });
-            }
-
-            function ensureState() {
-                handleMutations(observer.takeRecords());
-                if (dirtyElements.size) {
-                    var arr = consume(dirtyElements);
-                    arr.sort(function (a, b) {
-                        return !connected(root, a) ? -1 : comparePosition(a, b);
-                    });
-                    $(rootElement.parentNode || rootElement).find(arr).each(function (i, v) {
-                        visitElement(v);
-                        trackChange(nodeMap.get(v));
-                    });
-                    if (currentSelection) {
-                        selectionAtomic(function () {
-                            caretEnsureState(currentSelection.baseCaret);
-                            caretEnsureState(currentSelection.extendCaret);
-                        });
+                dirtyNodes.forEach(function (v) {
+                    if (containsOrEquals(rootElement, v.element)) {
+                        visitNode(v);
+                        if (trackChange) {
+                            changedWidgets.add(v.widget);
+                        }
                     }
+                });
+                if (currentSelection) {
+                    selectionAtomic(function () {
+                        caretEnsureState(currentSelection.baseCaret);
+                        caretEnsureState(currentSelection.extendCaret);
+                    });
+                }
+                if (beforeSize !== changedWidgets.size) {
+                    needNormalize = true;
+                    setTimeoutOnce(triggerWidgetEvents, 0, currentSource.slice(0));
                 }
             }
 
             function getNode(element) {
-                ensureState();
+                var mutations = observer.takeRecords();
+                if (mutations[0]) {
+                    handleMutations(mutations);
+                }
                 if (isText(element) || isBR(element)) {
                     element = element.parentNode || element;
                 }
@@ -977,7 +1019,7 @@
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
             nodeMap.set(rootElement, rootNode);
-            visitElement(rootElement);
+            visitNode(rootNode);
 
             return extend(self, {
                 rootNode: rootNode,
@@ -1011,6 +1053,11 @@
         }
 
         function normalize() {
+            // flush any previous changes so that they would not be muted away
+            typer.getNode();
+            if (!needNormalize) {
+                return;
+            }
             muteChanges = true;
             iterate(new TyperTreeWalker(typer.rootNode, NODE_ANY_ALLOWTEXT | NODE_EDITABLE | NODE_SHOW_HIDDEN), function (node) {
                 var element = node.element;
@@ -1071,9 +1118,10 @@
             });
             // Mozilla adds <br type="_moz"> when a container is empty
             $('br[type="_moz"]', topElement).remove();
-            // explicitly refresh document state and trigger contentChange or stateChange if appropriate
-            typer.getNode(topElement);
+            // flush any changes due to normalization so that they will not be included nor cause recursion
+            typer.getNode();
             muteChanges = false;
+            needNormalize = false;
         }
 
         function extractContents(range, mode, callback) {
@@ -1335,8 +1383,7 @@
                             normalizeWhitespace(caretNode.element);
                             if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
                                 // ensure there is a text insertion point after an inline widget
-                                var textNode = createTextNode();
-                                createRange(lastNode, false).insertNode(textNode);
+                                var textNode = $(createTextNode()).insertAfter(lastNode)[0];
                                 caretPoint.moveTo(textNode, -0);
                             } else {
                                 caretPoint.moveTo(lastNode, -0);
@@ -1348,9 +1395,9 @@
                         // to avoid two empty lines inserted before block widget
                         if (hasInsertedBlock || !is(startNode, NODE_WIDGET) || trim(nodeToInsert.textContent)) {
                             if (is(caretNode, NODE_ANY_BLOCK_EDITABLE) && !is(caretNode.parentNode, NODE_ANY_BLOCK_EDITABLE)) {
-                                createRange(caretNode.element, -0).insertNode(nodeToInsert);
+                                $(nodeToInsert).appendTo(caretNode.element);
                             } else {
-                                createRange(caretNode.element, true).insertNode(nodeToInsert);
+                                $(nodeToInsert).insertBefore(caretNode.element);
                             }
                             insertAsInline = !!is(node, NODE_ANY_ALLOWTEXT | NODE_ANY_INLINE);
                             paragraphAsInline = incompatParagraph || !insertAsInline;
@@ -1434,9 +1481,18 @@
             var snapshots = [];
             var currentIndex = 0;
             var suppressUntil = 0;
+            var activeWidget;
             var timeout;
 
             function triggerStateChange() {
+                var widget = currentSelection.focusNode.widget;
+                if (activeWidget !== widget) {
+                    if (activeWidget) {
+                        triggerEvent(activeWidget, 'focusout');
+                    }
+                    activeWidget = widget;
+                    triggerEvent(activeWidget, 'focusin');
+                }
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
                 triggerEvent(EVENT_ALL, 'stateChange');
             }
@@ -1511,8 +1567,12 @@
                 snapshot: function (ms) {
                     var cur = +new Date();
                     clearTimeout(timeout);
-                    suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
-                    timeout = setTimeout(takeSnapshot, suppressUntil - cur);
+                    if (ms === true) {
+                        takeSnapshot();
+                    } else {
+                        suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
+                        timeout = setTimeout(takeSnapshot, suppressUntil - cur);
+                    }
                 }
             });
         }
@@ -1532,25 +1592,10 @@
             var modifierCount;
             var modifiedKeyCode;
             var touchObj;
-            var activeWidget;
 
             function getEventName(e, suffix) {
                 var mod = ((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '');
                 return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
-            }
-
-            function updateWidgetFocus() {
-                var widget = currentSelection.focusNode.widget;
-                if (activeWidget !== widget) {
-                    if (activeWidget && !activeWidget.destroyed) {
-                        triggerEvent(activeWidget, 'focusout');
-                        activeWidget = null;
-                    }
-                    if (widget.id !== WIDGET_ROOT) {
-                        activeWidget = widget;
-                        triggerEvent(activeWidget, 'focusin');
-                    }
-                }
             }
 
             function updateFromNativeInput() {
@@ -1558,7 +1603,6 @@
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                     undoable.snapshot(200);
                     currentSelection.select(activeRange);
-                    updateWidgetFocus();
                 }
             }
 
@@ -1586,13 +1630,13 @@
                     currentSelection.moveToPoint(props.clientX, props.clientY);
                 }
                 currentSelection.focus();
-                updateWidgetFocus();
+                undoable.snapshot();
                 triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
             }
 
             function handleTextInput(inputText) {
                 setEventSource('input', typer);
-                if (inputText && triggerDefaultPreventableEvent(EVENT_ALL, 'textInput', inputText)) {
+                if (inputText && (triggerDefaultPreventableEvent(currentSelection.focusNode.widget, 'textInput', inputText) || triggerDefaultPreventableEvent(EVENT_STATIC, 'textInput', inputText))) {
                     return;
                 }
                 if (!currentSelection.startTextNode || !currentSelection.isCaret) {
@@ -1627,6 +1671,7 @@
                 var extendCaret = currentSelection.extendCaret;
                 var scrollParent = getScrollParent(e.target);
                 var scrollTimeout;
+                var lastPos;
                 var mousemoved;
 
                 var scrollParentHandlers = {
@@ -1657,7 +1702,7 @@
                             handlers.mouseup(e);
                             return;
                         }
-                        mousemoved = true;
+                        mousemoved |= e.clientX !== lastPos.clientX || e.clientY !== lastPos.clientY;
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
                         setTimeout(function () {
@@ -1670,7 +1715,6 @@
                         clearInterval(scrollTimeout);
                         $(document.body).off(handlers);
                         $(scrollParent).off(scrollParentHandlers);
-                        updateWidgetFocus();
                         if (!mousemoved) {
                             handleClick(e, null, 'click');
                         }
@@ -1681,28 +1725,31 @@
                     currentSelection.focus();
                     $(document.body).on(handlers);
                     $(scrollParent).on(scrollParentHandlers);
+                    lastPos = e;
                     mousedown = true;
                 }
                 e.preventDefault();
             });
 
-            $self.on('compositionstart compositionupdate compositionend', function (e) {
-                composition = e.type.slice(-1) !== 'd';
-                if (!composition) {
-                    var range = getActiveRange(topElement);
-                    var node = range.startContainer;
-                    var offset = range.startOffset;
-                    if (isElm(node)) {
-                        node = node.childNodes[offset - 1];
-                        offset = node.length;
-                    }
-                    var text = e.originalEvent.data;
+            $self.on('compositionstart compositionend', function (e) {
+                var previous = composition;
+                var range = getActiveRange(topElement);
+                var node = range.startContainer;
+                var offset = range.startOffset;
+                if (isElm(node)) {
+                    node = node.childNodes[offset] || node.lastChild;
+                    offset = node.length;
+                }
+                composition = e.type.slice(-1) === 't' && {};
+                muteChanges = !!composition;
+                if (composition) {
+                    composition.node = node;
+                    composition.offset = offset;
+                } else {
+                    var text = e.originalEvent.data || previous.node.data.slice(previous.offset - offset);
                     createRange(node, offset - text.length, node, offset).deleteContents();
                     currentSelection.select(node, offset - text.length);
                     handleTextInput(text);
-                } else {
-                    updateFromNativeInput();
-                    handleTextInput('');
                 }
             });
 
@@ -1710,7 +1757,7 @@
                 if (!composition) {
                     var isModifierKey = ($.inArray(e.keyCode, [16, 17, 18, 91, 93]) >= 0);
                     if (e.type === 'keydown') {
-                        var isSpecialKey = !isModifierKey && String.fromCharCode(e.keyCode) !== (e.key || '').charAt(0) && (KEYNAMES[e.keyCode] || '').length > 1;
+                        var isSpecialKey = !isModifierKey && (KEYNAMES[e.keyCode] || '').length > 1;
                         modifierCount = e.ctrlKey + e.shiftKey + e.altKey + e.metaKey + !isModifierKey;
                         modifierCount *= isSpecialKey || ((modifierCount > 2 || (modifierCount > 1 && !e.shiftKey)) && !isModifierKey);
                         modifiedKeyCode = e.keyCode;
@@ -1729,9 +1776,9 @@
                 }
             });
 
-            $self.on('keypress textInput', function (e) {
-                if (!composition && !modifierCount && (e.type === 'textInput' || e.originalEvent.synthetic || !supportTextInputEvent)) {
-                    handleTextInput(e.originalEvent.data || e.key || String.fromCharCode(e.keyCode));
+            $self.on('keypress beforeinput', function (e) {
+                if (!composition && !modifierCount && (e.type === 'beforeinput' || e.originalEvent.synthetic || !('onbeforeinput' in topElement))) {
+                    handleTextInput(e.originalEvent.data || e.char || e.key || String.fromCharCode(e.charCode));
                     e.preventDefault();
                 }
             });
@@ -1767,7 +1814,7 @@
 
             $self.on('drop', function (e) {
                 setEventSource('drop', typer);
-                if (currentSelection.moveToPoint(e.originalEvent.clientX, e.originalEvent.clientY)) {
+                if (currentSelection.moveToPoint(e.clientX, e.clientY)) {
                     handleDataTransfer(e.originalEvent.dataTransfer);
                 }
                 currentSelection.focus();
@@ -1783,9 +1830,10 @@
             });
 
             $self.on('contextmenu', function (e) {
-                var range = caretRangeFromPoint(e.clientX, e.clientY, topElement);
-                if (currentSelection.isCaret || !rangeIntersects(currentSelection, range)) {
-                    currentSelection.select(range);
+                var caret = new TyperCaret(typer);
+                caret.moveToPoint(e.clientX, e.clientY);
+                if (currentSelection.isCaret || !rangeIntersects(currentSelection, caret)) {
+                    currentSelection.select(caret);
                 }
             });
 
@@ -1829,7 +1877,6 @@
                     if (!focusRetained(e.relatedTarget || lastTouchedElement)) {
                         typerFocused = false;
                         checkNativeUpdate = null;
-                        updateWidgetFocus();
                         triggerEvent(EVENT_ALL, 'focusout');
 
                         // prevent focus returns to current editor
@@ -1955,8 +2002,8 @@
             hasCommand: function (command) {
                 return !!findWidgetWithCommand(command);
             },
-            focused: function () {
-                return typerFocused;
+            focused: function (strict) {
+                return typerFocused && (!strict || containsOrEquals(topElement, document.activeElement));
             },
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
@@ -2050,7 +2097,7 @@
             }
         });
 
-        codeUpdate(normalize);
+        normalize();
         currentSelection = new TyperSelection(typer, createRange(topElement, 0));
         triggerEvent(EVENT_STATIC, 'init');
     }
@@ -2096,10 +2143,7 @@
         getRect: getRect,
         getRects: getRects,
         getAbstractSide: getAbstractSide,
-        caretRangeFromPoint: caretRangeFromPoint,
-        elementFromPoint: function (x, y) {
-            return elementFromPoint_.call(document, x, y);
-        },
+        elementFromPoint: elementFromPoint,
         historyLevel: 100,
         defaultOptions: {
             widgets: {}
@@ -2119,9 +2163,9 @@
             return new TyperSelection(this, createRange(startNode, startOffset, endNode, endOffset));
         },
         nodeFromPoint: function (x, y, whatToShow) {
-            var range = caretRangeFromPoint(x, y, this.element);
-            if (range) {
-                var node = this.getNode(range.startContainer);
+            var element = elementFromPoint(x, y, this.element);
+            if (element) {
+                var node = this.getNode(element);
                 if (is(node, NODE_EDITABLE)) {
                     node = any(node.childNodes, function (v) {
                         var r = getRect(v.element);
@@ -2291,7 +2335,13 @@
         var typer = iterator.currentNode.typer;
         var iterator2 = document.createTreeWalker(iterator.root.element, inst.whatToShow | 1, function (v) {
             var node = typer.getNode(v);
-            return (node.element !== (isElm(v) || v.parentNode) && !isBR(v)) || treeWalkerAcceptNode(iterator, node, true) !== 1 ? 3 : acceptNode(inst, v) | 1;
+            if (!treeWalkerNodeAccepted(iterator, node, true)) {
+                return treeWalkerAcceptNode.returnValue;
+            }
+            if ((isText(v) || isBR(v)) && !is(node, NODE_ANY_ALLOWTEXT)) {
+                return 2;
+            }
+            return acceptNode(inst, v) | 1;
         }, false);
         defineProperty(inst, 'iterator', iterator2);
     }
@@ -2534,7 +2584,7 @@
         return inst;
     }
 
-    function caretSetPositionRaw(inst, node, element, textNode, offset) {
+    function caretSetPositionRaw(inst, node, element, textNode, offset, beforeSoftBreak) {
         var oldNode = inst.textNode || inst.element;
         var oldOffset = inst.offset;
         inst.node = node;
@@ -2542,13 +2592,14 @@
         inst.textNode = textNode || null;
         inst.offset = offset;
         inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
+        inst.beforeSoftBreak = !!beforeSoftBreak;
         if (inst.selection) {
             selectionUpdate(inst.selection);
         }
         return oldNode !== (textNode || element) || oldOffset !== offset;
     }
 
-    function caretSetPosition(inst, element, offset) {
+    function caretSetPosition(inst, element, offset, beforeSoftBreak) {
         var textNode, end;
         if (!isBR(element)) {
             if (element.firstChild) {
@@ -2559,7 +2610,7 @@
             textNode = isText(element);
         }
         var node = inst.typer.getNode(element);
-        if (node.element !== (isText(element) || isBR(element) ? element.parentNode : element)) {
+        if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
             element = node.element;
             textNode = null;
         }
@@ -2582,7 +2633,7 @@
             textNode = isText(iterator.currentNode) || $(createTextNode())[end ? 'appendTo' : 'prependTo'](node.element)[0];
             offset = textNode && end ? textNode.length : 0;
         }
-        if (textNode) {
+        if (textNode && !beforeSoftBreak) {
             var moveToMostInner = function (dir, pSib, pChild, mInsert) {
                 var next = isTextNodeEnd(textNode, offset, dir) && isElm(textNode[pSib]);
                 if (next && !isBR(next) && is(inst.typer.getNode(next), NODE_ANY_ALLOWTEXT)) {
@@ -2597,23 +2648,22 @@
                 offset = 1;
             }
         }
-        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end);
+        return caretSetPositionRaw(inst, closest(node, NODE_ANY_BLOCK), textNode ? textNode.parentNode : node.element, textNode, textNode ? offset : !end, beforeSoftBreak);
     }
 
-    function caretRectFromPosition(node, offset) {
+    function caretRectFromPosition(node, offset, beforeSoftBreak, visual) {
         var mode = getWritingMode(node);
-        var invert = offset === node.length;
+        var invert = offset === node.length || (!!beforeSoftBreak && offset > 0);
+        var baseRTL = !!(mode & 2);
+        var ch = node.data.charAt(offset - invert);
 
-        if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
-            var baseRTL = !!(mode & 2);
-            var root = node.parentNode;
-            var ch = node.data.charAt(offset - invert);
-
+        if (isRTL(ch) !== baseRTL && $.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
             // bidi paragraph are isolated by block boundaries or boxes styled with isolate or isolate-override
+            var root = node.parentNode;
             for (; $.css(root, 'display') === 'inline' && $.css(root, 'unicode-bidi').slice(0, 7) !== 'isolate'; root = root.parentNode);
 
             // only check adjacent directionality if there is strongly trans-directioned character
-            if (isRTL(ch) !== baseRTL && (baseRTL ? RE_LTR : RE_RTL).test(root.textContent)) {
+            if ((baseRTL ? RE_LTR : RE_RTL).test(root.textContent)) {
                 var checkAdjacent = function (node, offset, direction) {
                     var iterator = document.createTreeWalker(root, 5, function (v) {
                         if (isElm(v) && !isBR(v)) {
@@ -2657,65 +2707,264 @@
                 mode = (mode & ~2) | (curRTL ? 2 : 0);
             }
         }
-        var rect = getRects(createRange(node, offset - invert, node, offset + !invert))[0];
-        return rect && rect.collapse(getAbstractSide(2 | invert, mode));
+
+        var rect = getRects(createRange(node, offset - invert, node, offset + !invert))[0] || toPlainRect(0, 0);
+        if (visual && invert && /\s/.test(node.data.charAt(offset - invert)) && !getAbstractRect(rect, mode).width) {
+            // Firefox returns zero-width rect when whitespace character acts as soft paragraph break
+            rect[getAbstractSide(3, mode)] += getFontMetric(node).wsWidth;
+        }
+        return rect.collapse(getAbstractSide(2 | invert, mode));
     }
 
-    function caretMoveToRect(inst, rect) {
-        var delta = scrollRectIntoView(inst.typer.element, rect);
-        return inst.moveToPoint(rect.centerX - (delta.x || 0), rect.centerY - (delta.y || 0));
+    function caretMoveToPoint(inst, textNode, point, dirX, dirY) {
+        var container = closest(inst.typer.getNode(textNode), NODE_ANY_BLOCK);
+        var mode = getWritingMode(textNode);
+        var mCacheElm = [];
+        var mCacheProp = [];
+        var lastDist = -Infinity;
+        var newPoint;
+
+        function getTextProperties(elm) {
+            var index = mCacheElm.indexOf(elm);
+            if (index >= 0) {
+                return mCacheProp[index];
+            }
+            var style = getComputedStyle(elm);
+            var container = elm;
+            for (; $.css(container, 'display') === 'inline'; container = container.parentNode);
+
+            var obj = mCacheProp[mCacheElm.push(elm) - 1] = getFontMetric(elm);
+            obj.lineHeight = style.lineHeight.slice(-2) === 'px' ? parseFloat(style.lineHeight) : (style.lineHeight === 'normal' ? 1.15 : style.lineHeight) * obj.fontSize;
+            obj.verticalAlign = style.verticalAlign;
+            obj.baselineOffset = obj.baseline - obj.height + getBaselineOffset(elm, container);
+            return obj;
+        }
+
+        function getBaselineOffset(elm, parent) {
+            if (elm === parent) {
+                return 0;
+            }
+            if (elm.parentNode !== parent) {
+                return getBaselineOffset(elm, elm.parentNode) + getBaselineOffset(elm.parentNode, parent);
+            }
+            var m = getTextProperties(elm);
+            switch (m.verticalAlign) {
+                case 'baseline':
+                    return 0;
+                case 'middle':
+                    var m1 = getTextProperties(elm.parentNode);
+                    return -m.height / 2 + (m1.baseline - m1.middle);
+                case 'top':
+                case 'bottom':
+                    return NaN;
+                case 'text-top':
+                    return (m.lineHeight - m.height) / 2;
+                case 'text-bottom':
+                    return (m.lineHeight + m.height) / 2 - getTextProperties(elm.parentNode).height;
+                case 'sub':
+                    return -0.21 * m.fontSize;
+                case 'super':
+                    return 0.34 * m.fontSize;
+            }
+            return isNaN(m.verticalAlign) ? parseFloat(m.verticalAlign) / 100 * m.lineHeight : +m.verticalAlign || 0;
+        }
+
+        function checkRect(rect) {
+            var dist, newX;
+            if (dirX) {
+                newX = dirX > 0 ? rect.right : rect.left;
+                dist = (newX - point.left) * dirX;
+            } else {
+                dist = Math.min(0, rect.right - point.left) || Math.max(0, rect.left - point.left);
+                newX = point.left + dist;
+            }
+            if (dirX ? dist > lastDist : Math.abs(dist) < Math.abs(lastDist)) {
+                lastDist = dist;
+                textNode = rect.node;
+                newPoint = getAbstractRect(toPlainRect(newX, rect.centerY), -mode);
+            }
+        }
+
+        function findNearsetPoint(container, textNode, dir, scanCount, untilY) {
+            var iterator = new TyperDOMNodeIterator(new TyperTreeWalker(container, NODE_ANY_ALLOWTEXT), 4);
+            var prop = dir > 0 ? 'bottom' : 'top';
+            var linebox = point;
+            var pending = [];
+            var baseline;
+
+            if (!isText(textNode)) {
+                while (iterator.nextNode() && dir < 0);
+                textNode = iterator.currentNode;
+                if (!isText(textNode)) {
+                    return linebox[prop];
+                }
+            } else {
+                iterator.currentNode = textNode;
+            }
+            do {
+                var m = getTextProperties(textNode.parentNode);
+                var rects = getRects(textNode);
+                if (dir < 0) {
+                    rects.reverse();
+                }
+                for (var i = 0, len = rects.length; i < len; i++) {
+                    var curRect = getAbstractRect(rects[i], mode);
+                    var halfLead = (m.lineHeight - curRect.height) >> 1;
+                    var curLinebox = toPlainRect(curRect.left, curRect.top - halfLead, curRect.right, curRect.bottom + halfLead);
+                    var curBaseline = curRect.bottom + m.baselineOffset;
+                    var isSameLine = false;
+                    curLinebox.node = textNode;
+
+                    // skip rects until we reach our starting Y-position
+                    if (baseline === undefined && curLinebox[prop] * dir < linebox[FLIP_POS[prop]] * dir) {
+                        continue;
+                    }
+                    if (isNaN(baseline) || Math.abs(curBaseline - baseline) < 1 || (curLinebox.top < linebox.bottom && curLinebox.bottom > linebox.top)) {
+                        isSameLine = true;
+                    } else if (isNaN(curBaseline)) {
+                        if (m.verticalAlign === FLIP_POS[prop]) {
+                            // we can safely determine if the vertical align is opposite to scanning direction (i.e. top for scanning down)
+                            // since it is on the same line iff it overlaps the current line box
+                            isSameLine = curLinebox[FLIP_POS[prop]] * dir <= linebox[prop] * dir;
+                        } else if (!pending[0] || curLinebox[prop] === pending[0][prop]) {
+                            pending.push(curLinebox);
+                            continue;
+                        } else {
+                            // not aligning with previous box with the same vertical align
+                            // push previous pending box into result if it aligns with the current line box edge
+                            var arr = pending.splice(0, pending.length, curLinebox);
+                            if (arr[0][prop] === linebox[prop]) {
+                                arr.forEach(checkRect);
+                            }
+                        }
+                    }
+                    if (baseline === undefined || !isNaN(curBaseline)) {
+                        baseline = curBaseline;
+                    }
+                    if ((!isSameLine && !--scanCount) || baseline * dir > untilY * dir) {
+                        return linebox[prop];
+                    }
+                    linebox = mergeRect(linebox, curLinebox);
+                    if (scanCount === 1) {
+                        pending.splice(0).forEach(checkRect);
+                        checkRect(curLinebox);
+                    }
+                }
+            } while ((textNode = next(iterator, dir)));
+            return linebox[prop];
+        }
+
+        function findOffset(textNode, newPoint, mode, beforeSoftBreak) {
+            var b0 = 0;
+            var b1 = textNode.length;
+
+            function distanceFromCharacter(index) {
+                // IE11 (update version 11.0.38) crashes with memory access violation when
+                // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
+                // https://jsfiddle.net/b6q4p664/
+                // while (/[^\S\u00a0]/.test(node.data.charAt(index)) && --index);
+                var rect = getAbstractRect(caretRectFromPosition(textNode, index, beforeSoftBreak), mode);
+                return ((rect.centerY - newPoint.centerY) | 0) * Infinity || ((rect.left - newPoint.left) | 0);
+            }
+
+            // determine directionality at the given point if there is characters with different directionality
+            if ($.css(textNode.parentNode, 'unicode-bidi').slice(-8) !== 'override' && (mode & 2 ? RE_LTR : RE_RTL).test(textNode.data)) {
+                var re = mode & 2 ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
+                var i = 0, containsPoint;
+                b1 = -1;
+                while (!containsPoint && re[++i & 1].test(textNode.data.slice(b1 + 1))) {
+                    b0 = Math.max(0, b1);
+                    b1 = textNode.data.indexOf(RegExp.$1, b1 + 1);
+                    containsPoint = any(getRects(createRange(textNode, b0, textNode, b1)), function (v) {
+                        // do not use pointInRect as we need to match zero-width rect
+                        return v.top <= newPoint.top && v.bottom >= newPoint.top && v.left <= newPoint.left && v.right >= newPoint.left;
+                    });
+                }
+                mode ^= (i & 1) ? 2 : 0;
+                if (!containsPoint) {
+                    b1 = textNode.length;
+                }
+            }
+            newPoint = getAbstractRect(newPoint, mode);
+            while (b1 - b0 > 1) {
+                var mid = (b1 + b0) >> 1;
+                var p = distanceFromCharacter(mid) <= 0;
+                b0 = p ? mid : b0;
+                b1 = p ? b1 : mid;
+            }
+            return Math.abs(distanceFromCharacter(b0)) < Math.abs(distanceFromCharacter(b1)) ? b0 : b1;
+        }
+
+        point = getAbstractRect(toPlainRect(point.centerX, point.centerY), mode);
+        if (inst.softPoint) {
+            point.left = point.right = getAbstractRect(inst.softPoint, mode).left;
+        }
+        if (dirY) {
+            var startY = findNearsetPoint(container, textNode, dirY, 2);
+            if (!newPoint) {
+                var iterator = new TyperTreeWalker(inst.typer.rootNode, NODE_ANY_BLOCK);
+                iterator.currentNode = container;
+                var untilY;
+                while ((container = next(iterator, dirY))) {
+                    var containerRect = getAbstractRect(getRect(container.element), mode);
+                    var prop = dirY > 0 ? 'bottom' : 'top';
+                    if (containerRect[FLIP_POS[prop]] * dirY < startY * dirY) {
+                        continue;
+                    }
+                    if (containerRect[FLIP_POS[prop]] * dirY >= untilY * dirY) {
+                        break;
+                    }
+                    findNearsetPoint(container, null, dirY, 1, untilY);
+                    untilY = containerRect[prop];
+                }
+                if (!newPoint && untilY !== undefined) {
+                    return caretSetPosition(inst, iterator.currentNode.element, 0);
+                }
+            }
+        } else {
+            findNearsetPoint(container, textNode, (dirX || 1) * (mode & 2 ? -1 : 1), 1);
+        }
+        if (newPoint) {
+            var beforeSoftBreak = dirX > 0 || lastDist < 0;
+            var offset = findOffset(textNode, newPoint, mode, beforeSoftBreak);
+            inst.softPoint = dirY ? getAbstractRect(toPlainRect(point.left, getAbstractRect(newPoint, mode).centerY), -mode) : null;
+            return caretSetPosition(inst, textNode, offset, beforeSoftBreak);
+        }
+        return false;
     }
 
     definePrototype(TyperCaret, {
         getRect: function () {
             var self = caretEnsureState(this);
-            var mode = getWritingMode(self.element);
             if (!self.textNode) {
                 var elmRect = getRect(self.element);
-                return elmRect.collapse(getAbstractSide(2 | !self.offset, mode));
+                return elmRect.collapse(getAbstractSide(2 | !self.offset, getWritingMode(self.element)));
             }
-            var rect = caretRectFromPosition(self.textNode, self.offset);
-            if (!rect || (!rect.width && !rect.height)) {
-                // Mozilla returns a zero height rect and IE returns no rects for range collapsed at whitespace characters
-                // infer the position by getting rect for preceding non-whitespace character
-                var iterator = caretTextNodeIterator(self, self.node);
-                var rectH = rect && getAbstractRect(rect, mode);
-                var node = iterator.currentNode;
-                do {
-                    var r = caretRectFromPosition(node, getOffset(node, /(\s)$/.test(node.data) ? -RegExp.$1.length : -0));
-                    var rH = r && getAbstractRect(r, mode);
-                    if (r && rH.height) {
-                        return rect ? getAbstractRect(toPlainRect(rectH.left, rH.top, rectH.left, rH.bottom), -mode) : r;
-                    }
-                } while ((node = iterator.previousNode()));
-            }
-            return rect || toPlainRect(0, 0, 0, 0);
+            return caretRectFromPosition(self.textNode, self.offset, self.beforeSoftBreak, true);
         },
         getRange: function () {
             var self = caretEnsureState(this);
             var node = self.textNode || self.element;
-            if (IS_IE && self.offset === node.length && isElm(node.nextSibling) && !/inline/.test($(node.nextSibling).css('display'))) {
-                // IE fails to visually position caret when it is at the end of text line
-                // and there is a next sibling element which its display mode is not inline
-                if (node.data.slice(-1) === ZWSP) {
-                    self.offset--;
-                } else {
-                    node.data += ZWSP;
-                }
-            }
+            var offset = self.offset;
             if (node === self.typer.element) {
                 // avoid creating range that is outside the content editable area
-                return createRange(node, self.offset ? 0 : -0);
+                return createRange(node, offset ? 0 : -0);
             }
-            return createRange(node, self.offset);
+            if (offset % node.length === 0) {
+                // set the created range before or after the text node
+                // to reduce chances of empty text node created during manipulation
+                return createRange(node, !offset);
+            }
+            return createRange(node, offset);
         },
         clone: function () {
-            var self = this;
-            var clone = new TyperCaret(self.typer);
-            caretSetPositionRaw(clone, self.node, self.element, self.textNode, self.offset);
-            return clone;
+            var self = caretEnsureState(this);
+            return extend(new TyperCaret(self.typer), self);
         },
         moveTo: function (node, offset) {
+            if (is(node, TyperCaret)) {
+                return caretSetPositionRaw(this, node.node, node.element, node.textNode, node.offset, node.beforeSoftBreak);
+            }
             var range = is(node, Range) || createRange(node, offset);
             if (range && containsOrEquals(this.typer.element, range.startContainer)) {
                 return caretSetPosition(this, range.startContainer, range.startOffset);
@@ -2723,19 +2972,9 @@
             return false;
         },
         moveToPoint: function (x, y) {
-            var range = caretRangeFromPoint(x, y, this.typer.element);
-            if (range) {
-                var node = this.typer.getNode(range.startContainer);
-                if (is(node, NODE_WIDGET)) {
-                    // range returned is anchored at the closest text node which may or may not be at the point (x, y)
-                    // avoid moving caret to widget element that does not actually cover that point
-                    if (!pointInRect(x, y, getRect(node.element))) {
-                        range = createRange(node.element, false);
-                    }
-                }
-                return this.moveTo(range);
-            }
-            return false;
+            var self = this;
+            var node = self.typer.nodeFromPoint(x, y);
+            return !!node && caretMoveToPoint(self, node.element, toPlainRect(x, y));
         },
         moveToText: function (node, offset) {
             if (node.nodeType !== 3) {
@@ -2752,75 +2991,11 @@
         },
         moveToLineEnd: function (direction) {
             var self = caretEnsureState(this);
-            var mode = getWritingMode(self.element) ^ (direction < 0 ? 2 : 0);
-            var iterator = caretTextNodeIterator(self, self.node);
-            var rect = getAbstractRect(self, mode);
-            var newX = rect.left;
-            do {
-                $.each(getRects(iterator.currentNode), function (i, v) {
-                    v = getAbstractRect(v, mode);
-                    if (v.top <= rect.bottom && v.bottom >= rect.top) {
-                        newX = Math.max(newX, v.right);
-                    }
-                });
-            } while (next(iterator, direction));
-            return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, rect.top, newX, rect.bottom), -mode));
+            return caretMoveToPoint(self, self.textNode || self.element, self.getRect(), direction, 0);
         },
         moveByLine: function (direction) {
             var self = this;
-            var mode = getWritingMode(self.element) ^ (direction < 0 ? 4 : 0);
-            var iterator = new TyperTreeWalker(self.typer.rootNode, NODE_PARAGRAPH | NODE_EDITABLE_PARAGRAPH | NODE_WIDGET);
-            var rect = getAbstractRect(self, mode);
-            var node = self.node;
-            var deltaX = Infinity;
-            var untilY = Infinity;
-            var nextBlock;
-            var newRect;
-
-            iterator.currentNode = node;
-            do {
-                if (is(node, NODE_WIDGET)) {
-                    if (!containsOrEquals(node.element, self.element)) {
-                        nextBlock = nextBlock || node.element;
-                    }
-                } else {
-                    var elmRect = getAbstractRect(node.element, mode);
-                    if (elmRect.top > untilY) {
-                        break;
-                    }
-                    var rects = getRects(node.element);
-                    $.each(direction < 0 ? slice(rects).reverse() : rects, function (i, v) {
-                        v = getAbstractRect(v, mode);
-                        if (v.top >= rect.bottom) {
-                            if (v.centerY > untilY) {
-                                return false;
-                            }
-                            var dx1 = v.right - rect.left;
-                            var dx2 = v.left - rect.left;
-                            untilY = v.bottom;
-                            if (dx1 >= 0 && dx2 <= 0) {
-                                deltaX = 0;
-                                newRect = v;
-                            } else if (Math.abs(dx1) < Math.abs(deltaX)) {
-                                deltaX = dx1;
-                                newRect = v;
-                            } else if (Math.abs(dx2) < Math.abs(deltaX)) {
-                                deltaX = dx2;
-                                newRect = v;
-                            }
-                        }
-                    });
-                }
-            } while (deltaX && (node = next(iterator, direction)) && (!nextBlock || containsOrEquals(nextBlock, node.element)));
-
-            if (newRect) {
-                var newX = rect.left + deltaX;
-                return caretMoveToRect(self, getAbstractRect(toPlainRect(newX, newRect.top, newX, newRect.bottom), -mode));
-            }
-            if (nextBlock) {
-                return self.moveTo(nextBlock, true);
-            }
-            return self.moveToLineEnd(direction);
+            return caretMoveToPoint(self, self.textNode || self.element, self.getRect(), 0, direction) || self.moveToLineEnd(direction);
         },
         moveByWord: function (direction) {
             var self = this;
@@ -2853,7 +3028,8 @@
         },
         moveByCharacter: function (direction) {
             var self = this;
-            var rect = self.getRect();
+            var mode = getWritingMode(self.element);
+            var rect = getAbstractRect(self, mode);
             var iterator = caretTextNodeIterator(self, null, 5);
             var node = isText(iterator.currentNode);
             var offset = self.offset;
@@ -2872,9 +3048,11 @@
                     offset = (direction < 0 ? node.length : 0) + ((overBr || !containsOrEquals(self.node.element, node)) && -direction);
                 }
                 offset += direction;
-                var newRect = !RE_SKIP.test(node.data.charAt(offset)) && caretRectFromPosition(node, offset);
-                if (newRect && !rectEquals(rect, newRect)) {
-                    return self.moveToText(node, offset);
+                if (!RE_SKIP.test(node.data.charAt(offset))) {
+                    var newRect = getAbstractRect(caretRectFromPosition(node, offset), mode);
+                    if (!rectEquals(rect, newRect)) {
+                        return caretSetPosition(self, node, offset, direction > 0 && rect.centerY !== newRect.centerY);
+                    }
                 }
             }
         }
@@ -2956,172 +3134,6 @@
         scrollbarWidth = $d.width() - $d.children().width();
         $d.remove();
     });
-
-    // polyfill for document.elementFromPoint and especially for IE
-    if (!elementFromPoint_) {
-        elementFromPoint_ = function (x, y) {
-            function hitTestChildElements(node) {
-                var currentZIndex;
-                var target;
-                $(node).children().each(function (i, v) {
-                    var style = window.getComputedStyle(v);
-                    var zIndex = style.position === 'static' ? undefined : parseInt(style.zIndex) || 0;
-                    if (style.pointerEvents !== 'none' && (currentZIndex === undefined || zIndex >= currentZIndex)) {
-                        var containsPoint = any(style.display === 'inline' ? getRects(v) : [getRect(v)], function (v) {
-                            return pointInRect(x, y, v);
-                        });
-                        if (containsPoint) {
-                            currentZIndex = zIndex;
-                            target = v;
-                        }
-                    }
-                });
-                return target;
-            }
-
-            // IE returns outer element when the coordinate exactly on the box boundaries
-            // manually finds the innermost selectable element and starts searching caret position there first
-            // also before IE11 pointer-events does not thus cannot use document.elementFromPoint
-            var element = IS_IE10 ? document.body : document.elementFromPoint(x, y);
-            for (var child = element; child; element = child || element) {
-                child = hitTestChildElements(element);
-            }
-            return element;
-        };
-    }
-
-    // polyfill for document.caretRangeFromPoint
-    if (!caretRangeFromPoint_) {
-        caretRangeFromPoint_ = function () {
-            if (document.caretPositionFromPoint) {
-                return function (x, y) {
-                    var pos = document.caretPositionFromPoint(x, y);
-                    return pos && createRange(pos.offsetNode, pos.offset);
-                };
-            }
-            return function (x, y) {
-                var stack = [elementFromPoint_.call(document, x, y)];
-                var minDist = Infinity;
-                var element = stack[0];
-                var textNode, textPoint, mode, point;
-
-                function getBidiBoundaries(node, baseRTL) {
-                    var bidiPoints = [];
-                    if ($.css(node.parentNode, 'unicode-bidi').slice(-8) !== 'override') {
-                        var pos = 0;
-                        var re = baseRTL ? [RE_LTR, RE_N_RTL] : [RE_RTL, RE_N_LTR];
-                        while (re[bidiPoints.length & 1].test(node.data.slice(pos))) {
-                            pos = node.data.indexOf(RegExp.$1, pos);
-                            bidiPoints.push(pos);
-                        }
-                    }
-                    bidiPoints.push(node.length);
-                    return bidiPoints;
-                }
-
-                function distanceFromCharacter(node, index, mode, point) {
-                    // IE11 (update version 11.0.38) crashes with memory access violation when
-                    // Range.getClientRects() is called on a whitespace neignboring a non-static positioned element
-                    // https://jsfiddle.net/b6q4p664/
-                    while (/[^\S\u00a0]/.test(node.data.charAt(index)) && --index);
-                    var rect = getRects(createRange(node, index))[0];
-                    if (rect) {
-                        rect = getAbstractRect(rect, mode);
-                        return rect.top > point.top ? Infinity : rect.bottom < point.top ? -Infinity : rect.left - point.left;
-                    }
-                }
-
-                while (stack[0]) {
-                    var node = stack.pop();
-                    var rects, dist;
-                    if (isElm(node)) {
-                        if ($.css(node, 'pointer-events') === 'none') {
-                            continue;
-                        }
-                        rects = [getRect(node)];
-                    } else {
-                        rects = getRects(node);
-                    }
-                    mode = getWritingMode(node);
-                    point = getAbstractRect(toPlainRect(x, y, x, y), mode);
-                    rects.forEach(function (v) {
-                        v = getAbstractRect(v, mode);
-                        var distX = Math.max(0, v.left - point.left) || Math.min(0, v.right - point.left);
-                        var distY = Math.max(0, v.top - point.top) || Math.min(0, v.bottom - point.top);
-                        var newPoint;
-                        if (!distX) {
-                            newPoint = point.translate(0, distY);
-                            dist = distY * v.width;
-                        } else if (!distY) {
-                            newPoint = point.translate(distX, 0);
-                            dist = distX;
-                        } else {
-                            dist = Infinity;
-                        }
-                        if (isText(node) && Math.abs(dist) < minDist) {
-                            minDist = Math.abs(dist);
-                            textNode = node;
-                            textPoint = getAbstractRect(newPoint || point, -mode);
-                        }
-                    });
-                    if (isElm(node) && dist !== Infinity) {
-                        element = node;
-                        stack.push.apply(stack, node.childNodes);
-                    }
-                }
-                if (textNode) {
-                    var baseMode = getWritingMode(textNode);
-                    var bidiPoints = getBidiBoundaries(textNode, baseMode & 2);
-                    for (var i = 0; i < bidiPoints.length; i++) {
-                        var b0 = bidiPoints[i - 1] || 0;
-                        var b1 = bidiPoints[i];
-                        var containsPoint = any(getRects(createRange(textNode, b0, textNode, b1)), function (v) {
-                            return pointInRect(textPoint.left, textPoint.top, v);
-                        });
-                        if (containsPoint) {
-                            mode = baseMode ^ (i & 1 ? 2 : 0);
-                            point = getAbstractRect(textPoint, mode);
-                            while (b1 - b0 > 1) {
-                                var mid = (b1 + b0) >> 1;
-                                var p = distanceFromCharacter(textNode, mid, mode, point) < 0;
-                                b0 = p ? mid : b0;
-                                b1 = p ? b1 : mid;
-                            }
-                            var d1 = distanceFromCharacter(textNode, b0, mode, point);
-                            var d2 = distanceFromCharacter(textNode, b1, mode, point);
-                            return createRange(textNode, Math.abs(d1) < Math.abs(d2) ? b0 : b1);
-                        }
-                    }
-                }
-                return createRange(element, -0);
-            };
-        }();
-    }
-
-    // detect support for textInput event
-    function detectTextInputEvent(e) {
-        detectTextInputEvent.lastEvent = e;
-        if (e.type === 'keypress' && !e.synthetic) {
-            setTimeout(function () {
-                var lastEvent = detectTextInputEvent.lastEvent;
-                document.removeEventListener('keypress', detectTextInputEvent, true);
-                document.removeEventListener('textInput', detectTextInputEvent, true);
-                if (lastEvent.type === 'keypress') {
-                    supportTextInputEvent = false;
-                    var ch = String.fromCharCode(lastEvent.charCode);
-                    var range = getActiveRange(document.body);
-                    range.setStart(range.startContainer, range.startOffset - (lastEvent.key || ch).length);
-                    range.deleteContents();
-                    var e = document.createEvent('KeyboardEvent');
-                    e.initKeyboardEvent('keypress', true, true, lastEvent.view, ch, lastEvent.key, lastEvent.location, '', lastEvent.repeat);
-                    lastEvent.target.dispatchEvent(e);
-                }
-            });
-        }
-    }
-
-    document.addEventListener('keypress', detectTextInputEvent, true);
-    document.addEventListener('textInput', detectTextInputEvent, true);
 
 }(jQuery, document.documentElement, Array.prototype));
 
@@ -4924,7 +4936,7 @@
 
     function refresh(force) {
         clearTimeout(timeout);
-        if (activeTyper && document.activeElement === activeTyper.element) {
+        if (activeTyper && activeTyper.focused(true)) {
             var canvas = new TyperCanvas();
             if (canvas.editorReflow || canvas.selectionChanged || canvas.pointerMoved) {
                 pointerRegions.splice(0);
@@ -5060,11 +5072,14 @@
         focusin: function (e) {
             activeTyper = e.typer;
             Typer.ui.setZIndex(container, activeTyper.element);
-            refresh();
+            refresh(true);
         },
         focusout: function (e) {
             activeTyper = null;
             $(container).children().detach();
+        },
+        contentChange: function (e) {
+            refresh(true);
         },
         stateChange: function (e) {
             refresh();
@@ -5261,7 +5276,7 @@
         $(paragraphs).find(unwrapSpec).each(function (i, v) {
             if (Typer.sameElementSpec(v.previousSibling, v)) {
                 $(v.childNodes).appendTo(v.previousSibling);
-                tx.removeElement(v);
+                $(v).remove();
             }
         });
     }
@@ -5315,7 +5330,7 @@
                 $(Typer.createTextNode('\u00a0')).insertBefore(newList);
             }
             if (!list.children[0]) {
-                tx.removeElement(list);
+                $(list).remove();
             }
         });
     }
@@ -5336,13 +5351,13 @@
             if (parentList) {
                 $(v).insertAfter(parentList);
                 if (!Typer.trim(tx.typer.extractText(parentList))) {
-                    tx.removeElement(parentList);
+                    $(parentList).remove();
                 }
             } else {
                 $(tx.replaceElement(v, 'p')).insertAfter(list);
             }
             if (!list.children[0]) {
-                tx.removeElement(list);
+                $(list).remove();
             }
         });
     }
@@ -5470,7 +5485,7 @@
         contentChange: function (e) {
             if (!$(e.widget.element).children('li')[0]) {
                 e.typer.invoke(function (tx) {
-                    tx.removeElement(e.widget.element);
+                    $(e.widget.element).remove();
                 });
             }
         },
@@ -5889,22 +5904,23 @@
 
     Typer.ui.addHook('space enter', function (e) {
         if (e.typer.widgetEnabled('link')) {
-            var originalSelection = e.typer.getSelection().clone();
-            var selection = originalSelection.clone();
+            var selection = e.typer.getSelection().clone();
             if (e.data === 'enter') {
                 selection.moveByCharacter(-1);
             }
             if (selection.getCaret('start').moveByWord(-1) && selection.focusNode.widget.id !== 'link' && /^([a-z]+:\/\/\S+)|(\S+@\S+\.\S+)/g.test(selection.getSelectedText())) {
                 var link = RegExp.$1 || ('mailto:' + RegExp.$2);
-                e.typer.snapshot(true);
-                e.typer.select(selection);
                 e.typer.invoke(function (tx) {
+                    if (e.data === 'space') {
+                        tx.insertText(' ');
+                    }
+                    var originalSelection = tx.selection.clone();
+                    e.typer.snapshot(true);
+                    e.typer.select(selection);
                     tx.insertWidget('link', link);
+                    e.typer.select(originalSelection);
                 });
-                e.typer.select(originalSelection);
-                if (e.data === 'space') {
-                    e.preventDefault();
-                }
+                e.preventDefault();
             }
         }
     });
@@ -6158,13 +6174,13 @@
             removeColumn: function (tx) {
                 var info = getSelectionInfo(tx.selection);
                 $(TR_SELECTOR, tx.widget.element).each(function (i, v) {
-                    $(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1).forEach(tx.removeElement);
+                    $($(v).children().splice(info.minColumn, info.maxColumn - info.minColumn + 1)).remove();
                 });
                 tx.selection.moveTo(getRow(tx.widget, info.minRow).children[Math.max(0, info.minColumn - 1)], -0);
             },
             removeRow: function (tx) {
                 var info = getSelectionInfo(tx.selection);
-                $(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1).forEach(tx.removeElement);
+                $($(TR_SELECTOR, tx.widget.element).splice(info.minRow, info.maxRow - info.minRow + 1)).remove();
                 tx.selection.moveTo(getRow(tx.widget, Math.max(0, info.minRow - 1)).children[info.minColumn], -0);
             },
             toggleTableHeader: function (tx) {
@@ -6520,9 +6536,7 @@
         'toolbar:insert': Typer.ui.callout({
             before: '*',
             controls: 'typer:insert:*',
-            enabled: function (toolbar) {
-                return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
-            }
+            requireChildControls: true
         }),
         'widget': Typer.ui.group({
             requireWidget: true,
@@ -7877,6 +7891,9 @@ this.Set = window.Set || (function () {
     Set.prototype = {
         get size() {
             return this.items.length;
+        },
+        has: function (v) {
+            return this.items.indexOf(v) >= 0;
         },
         add: function (v) {
             var items = this.items;

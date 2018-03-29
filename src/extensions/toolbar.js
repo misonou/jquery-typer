@@ -196,9 +196,7 @@
         'toolbar:insert': Typer.ui.callout({
             before: '*',
             controls: 'typer:insert:*',
-            enabled: function (toolbar) {
-                return toolbar.typer.getNode(toolbar.typer.element).nodeType !== Typer.NODE_EDITABLE_INLINE;
-            }
+            requireChildControls: true
         }),
         'widget': Typer.ui.group({
             requireWidget: true,
