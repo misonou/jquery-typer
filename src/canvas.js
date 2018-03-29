@@ -174,7 +174,7 @@
 
     function refresh(force) {
         clearTimeout(timeout);
-        if (activeTyper && document.activeElement === activeTyper.element) {
+        if (activeTyper && activeTyper.focused(true)) {
             var canvas = new TyperCanvas();
             if (canvas.editorReflow || canvas.selectionChanged || canvas.pointerMoved) {
                 pointerRegions.splice(0);
@@ -310,11 +310,14 @@
         focusin: function (e) {
             activeTyper = e.typer;
             Typer.ui.setZIndex(container, activeTyper.element);
-            refresh();
+            refresh(true);
         },
         focusout: function (e) {
             activeTyper = null;
             $(container).children().detach();
+        },
+        contentChange: function (e) {
+            refresh(true);
         },
         stateChange: function (e) {
             refresh();

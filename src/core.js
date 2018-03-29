@@ -1453,9 +1453,18 @@
             var snapshots = [];
             var currentIndex = 0;
             var suppressUntil = 0;
+            var activeWidget;
             var timeout;
 
             function triggerStateChange() {
+                var widget = currentSelection.focusNode.widget;
+                if (activeWidget !== widget) {
+                    if (activeWidget) {
+                        triggerEvent(activeWidget, 'focusout');
+                    }
+                    activeWidget = widget;
+                    triggerEvent(activeWidget, 'focusin');
+                }
                 triggerEvent(EVENT_ALL, 'beforeStateChange');
                 triggerEvent(EVENT_ALL, 'stateChange');
             }
@@ -1530,8 +1539,12 @@
                 snapshot: function (ms) {
                     var cur = +new Date();
                     clearTimeout(timeout);
-                    suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
-                    timeout = setTimeout(takeSnapshot, suppressUntil - cur);
+                    if (ms === true) {
+                        takeSnapshot();
+                    } else {
+                        suppressUntil = Math.max(suppressUntil, cur + (ms || 0));
+                        timeout = setTimeout(takeSnapshot, suppressUntil - cur);
+                    }
                 }
             });
         }
@@ -1551,25 +1564,10 @@
             var modifierCount;
             var modifiedKeyCode;
             var touchObj;
-            var activeWidget;
 
             function getEventName(e, suffix) {
                 var mod = ((e.ctrlKey || e.metaKey) ? 'Ctrl' : '') + (e.altKey ? 'Alt' : '') + (e.shiftKey ? 'Shift' : '');
                 return mod ? lowfirst(mod + capfirst(suffix)) : suffix;
-            }
-
-            function updateWidgetFocus() {
-                var widget = currentSelection.focusNode.widget;
-                if (activeWidget !== widget) {
-                    if (activeWidget && !activeWidget.destroyed) {
-                        triggerEvent(activeWidget, 'focusout');
-                        activeWidget = null;
-                    }
-                    if (widget.id !== WIDGET_ROOT) {
-                        activeWidget = widget;
-                        triggerEvent(activeWidget, 'focusin');
-                    }
-                }
             }
 
             function updateFromNativeInput() {
@@ -1577,7 +1575,6 @@
                 if (!userFocus.has(typer) && activeRange && !rangeEquals(activeRange, createRange(currentSelection))) {
                     undoable.snapshot(200);
                     currentSelection.select(activeRange);
-                    updateWidgetFocus();
                 }
             }
 
@@ -1605,7 +1602,7 @@
                     currentSelection.moveToPoint(props.clientX, props.clientY);
                 }
                 currentSelection.focus();
-                updateWidgetFocus();
+                undoable.snapshot();
                 triggerEvent(is(node, NODE_WIDGET | NODE_INLINE_WIDGET) ? node.widget : EVENT_STATIC, getEventName(e, eventName || e.type), null, props);
             }
 
@@ -1646,6 +1643,7 @@
                 var extendCaret = currentSelection.extendCaret;
                 var scrollParent = getScrollParent(e.target);
                 var scrollTimeout;
+                var lastPos;
                 var mousemoved;
 
                 var scrollParentHandlers = {
@@ -1676,7 +1674,7 @@
                             handlers.mouseup(e);
                             return;
                         }
-                        mousemoved = true;
+                        mousemoved |= e.clientX !== lastPos.clientX || e.clientY !== lastPos.clientY;
                         undoable.snapshot(200);
                         extendCaret.moveToPoint(e.clientX, e.clientY);
                         setTimeout(function () {
@@ -1689,7 +1687,6 @@
                         clearInterval(scrollTimeout);
                         $(document.body).off(handlers);
                         $(scrollParent).off(scrollParentHandlers);
-                        updateWidgetFocus();
                         if (!mousemoved) {
                             handleClick(e, null, 'click');
                         }
@@ -1700,6 +1697,7 @@
                     currentSelection.focus();
                     $(document.body).on(handlers);
                     $(scrollParent).on(scrollParentHandlers);
+                    lastPos = e;
                     mousedown = true;
                 }
                 e.preventDefault();
@@ -1851,7 +1849,6 @@
                     if (!focusRetained(e.relatedTarget || lastTouchedElement)) {
                         typerFocused = false;
                         checkNativeUpdate = null;
-                        updateWidgetFocus();
                         triggerEvent(EVENT_ALL, 'focusout');
 
                         // prevent focus returns to current editor
@@ -1977,8 +1974,8 @@
             hasCommand: function (command) {
                 return !!findWidgetWithCommand(command);
             },
-            focused: function () {
-                return typerFocused;
+            focused: function (strict) {
+                return typerFocused && (!strict || containsOrEquals(topElement, document.activeElement));
             },
             widgetEnabled: function (id) {
                 return widgetOptions.hasOwnProperty(id);
