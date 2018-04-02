@@ -2565,10 +2565,11 @@
         inst.offset = offset;
         inst.wholeTextOffset = (textNode ? inst.offset : 0) + getWholeTextOffset(node, textNode || element);
         inst.beforeSoftBreak = !!beforeSoftBreak;
-        if (inst.selection) {
+        var updated = oldNode !== (textNode || element) || oldOffset !== offset;
+        if (updated && inst.selection) {
             selectionUpdate(inst.selection);
         }
-        return oldNode !== (textNode || element) || oldOffset !== offset;
+        return updated;
     }
 
     function caretSetPosition(inst, element, offset, beforeSoftBreak) {
