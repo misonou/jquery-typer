@@ -1264,11 +1264,6 @@
                         removeNode(nodeToInsert);
                         if (node.widget !== caretNode.widget) {
                             for (var widgetNode = caretNode; is(widgetNode, NODE_ANY_INLINE | NODE_PARAGRAPH) || (is(widgetNode, NODE_EDITABLE_PARAGRAPH) && widgetNode === caretNode); widgetNode = widgetNode.parentNode) {
-                                if (!widgetAllowed(node.widget.id, widgetNode)) {
-                                    nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
-                                    node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
-                                    break;
-                                }
                                 if (content.length === 1 && node.widget.id === widgetNode.widget.id) {
                                     var prop = {
                                         receivedNode: nodeToInsert,
@@ -1279,6 +1274,11 @@
                                         hasInsertedBlock = true;
                                         return;
                                     }
+                                }
+                                if (!widgetAllowed(node.widget.id, widgetNode)) {
+                                    nodeToInsert = createTextNode(node.widget.id === WIDGET_UNKNOWN ? collapseWS(trim(nodeToInsert.textContent)) : extractText(nodeToInsert));
+                                    node = new TyperNode(typer, NODE_INLINE, nodeToInsert);
+                                    break;
                                 }
                             }
                         }
