@@ -188,10 +188,10 @@
 
     Typer.ui.addControls('typer', {
         'contextmenu': Typer.ui.group('history selection clipboard insert *'),
-        'contextmenu:history': Typer.ui.group('typer:history:*'),
-        'contextmenu:selection': Typer.ui.group('typer:selection:*'),
-        'contextmenu:clipboard': Typer.ui.group('typer:clipboard:*'),
-        'contextmenu:insert': Typer.ui.group('typer:toolbar:insert'),
+        'contextmenu:history': Typer.ui.group('typer:history:* *'),
+        'contextmenu:selection': Typer.ui.group('typer:selection:* *'),
+        'contextmenu:clipboard': Typer.ui.group('typer:clipboard:* *'),
+        'contextmenu:insert': Typer.ui.group('typer:toolbar:insert *'),
         'toolbar': Typer.ui.group(),
         'toolbar:insert': Typer.ui.callout({
             before: '*',

@@ -331,7 +331,8 @@ label.typer-ui-dropdown.error .typer-ui-label:after {
     min-width: 7em;
 }
 
-.typer-ui-callout .typer-ui-float {
+.typer-ui-callout .typer-ui-float,
+.typer-ui-dropdown .typer-ui-float {
     display: none;
     left: 100%;
     top: 0;
