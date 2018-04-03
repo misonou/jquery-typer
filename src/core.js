@@ -746,11 +746,10 @@
 
         function getTargetedWidgets(eventMode) {
             switch (eventMode) {
-                case EVENT_ALL:
-                    return widgets.concat(currentSelection.getWidgets());
                 case EVENT_STATIC:
                     return widgets;
                 case EVENT_HANDLER:
+                case EVENT_ALL:
                     return currentSelection.getWidgets().reverse().concat(widgets);
             }
         }
