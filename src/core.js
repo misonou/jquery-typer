@@ -1758,7 +1758,7 @@
                 var clipboardData = e.originalEvent.clipboardData || window.clipboardData;
                 setEventSource('cut', typer);
                 clipboard.content = extractContents(currentSelection, e.type);
-                clipboard.textContent = extractText(currentSelection);
+                clipboard.textContent = extractText(clipboard.content);
                 if (IS_IE) {
                     clipboardData.setData('Text', clipboard.textContent);
                 } else {
