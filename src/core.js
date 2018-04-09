@@ -885,7 +885,6 @@
 
             function updateNode(node) {
                 var oldWidget = node.widget;
-                var oldNodeType = node.nodeType;
                 var parent = node.parentNode;
 
                 node.widget = (oldWidget || '').element !== node.element ? parent.widget : oldWidget;
@@ -912,7 +911,7 @@
                 }
             }
 
-            function visitNode(thisNode) {
+            function visitNode(thisNode, visitChild) {
                 $.each(thisNode.childNodes.slice(0), function (i, v) {
                     if (!containsOrEquals(thisNode.element, v.element)) {
                         removeFromParent(v, true);
@@ -921,9 +920,9 @@
                 $(thisNode.element).children().not('br').each(function (i, v) {
                     var node = nodeMap.get(v) || new TyperNode(nodeSource, 0, v);
                     nodeMap.set(v, node);
-                    if (addChild(thisNode, node)) {
+                    if (addChild(thisNode, node) || visitChild) {
                         updateNode(node);
-                        visitNode(node);
+                        visitNode(node, true);
                     }
                 });
             }
