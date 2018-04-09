@@ -845,6 +845,7 @@
                     } else {
                         // revoke any destroy event registered previously when being removed from old parent
                         iterate(new TyperTreeWalker(node, -1), function (v) {
+                            detachedElements.delete(v.element);
                             if (v.widget.element === v.element) {
                                 registerWidgetEvent(v.widget, 'init');
                             }
@@ -2547,7 +2548,7 @@
                     node: inst.element
                 };
                 inst.typer.getNode(node);
-                for (; detachedElements.has(replace.node); replace = detachedElements.get(replace.node));
+                for (; !containsOrEquals(root, replace.node) && detachedElements.has(replace.node); replace = detachedElements.get(replace.node));
                 inst.moveTo(replace.node, replace.offset);
             }
         }
