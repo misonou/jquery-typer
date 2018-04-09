@@ -2133,6 +2133,9 @@
         createSelection: function (startNode, startOffset, endNode, endOffset) {
             return new TyperSelection(this, createRange(startNode, startOffset, endNode, endOffset));
         },
+        createTreeWalker: function (root, whatToShow, filter) {
+            return new TyperTreeWalker(root || this.rootNode, whatToShow, filter);
+        },
         nodeFromPoint: function (x, y, whatToShow) {
             var element = elementFromPoint(x, y, this.element);
             if (element) {
