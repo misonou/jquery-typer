@@ -76,8 +76,6 @@
     var isFunction = $.isFunction;
     var extend = $.extend;
     var selection = window.getSelection();
-    var setTimeout = window.setTimeout;
-    var clearTimeout = window.clearTimeout;
     var getComputedStyle = window.getComputedStyle;
     var MutationObserver = shim.MutationObserver;
     var WeakMap = shim.WeakMap;
@@ -420,7 +418,7 @@
         return (strict && ((value !== 0 && rangeIntersects(a, b)) || (value === 0 && !rangeEquals(a, b)))) ? NaN : value && value / Math.abs(value);
     }
 
-    function getRect(elm) {
+    function getRect(elm, includeMargin) {
         var rect;
         elm = elm || root;
         if (elm.getRect) {
@@ -432,6 +430,13 @@
             rect = toPlainRect(0, 0, 0, 0);
         } else {
             rect = toPlainRect(elm.getBoundingClientRect());
+            if (includeMargin) {
+                var style = getComputedStyle(elm);
+                rect.top -= Math.max(0, parseFloat(style.marginTop));
+                rect.left -= Math.max(0, parseFloat(style.marginLeft));
+                rect.right += Math.max(0, parseFloat(style.marginRight));
+                rect.bottom += Math.max(0, parseFloat(style.marginBottom));
+            }
         }
         return rect;
     }
@@ -2102,6 +2107,7 @@
         rectCovers: rectCovers,
         pointInRect: pointInRect,
         toPlainRect: toPlainRect,
+        mergeRect: mergeRect,
         getRect: getRect,
         getRects: getRects,
         getAbstractSide: getAbstractSide,
@@ -2132,9 +2138,11 @@
             if (element) {
                 var node = this.getNode(element);
                 if (is(node, NODE_EDITABLE)) {
+                    var mode = getWritingMode(element);
+                    var point = getAbstractRect(toPlainRect(x, y), mode);
                     node = any(node.childNodes, function (v) {
-                        var r = getRect(v.element);
-                        return r.top <= y && r.bottom >= y;
+                        var rect = getAbstractRect(getRect(v.element, true), mode);
+                        return rect.top <= point.y && rect.bottom >= point.y;
                     }) || node;
                 }
                 return closest(node, whatToShow || -1);

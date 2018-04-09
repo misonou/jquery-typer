@@ -15,12 +15,6 @@
         right: 'left',
         bottom: 'top'
     };
-    var MARGIN_PROP = {
-        top: 'marginTop',
-        left: 'marginLeft',
-        right: 'marginRight',
-        bottom: 'marginBottom'
-    };
     var DIR_SIGN = {
         top: -1,
         left: -1,
@@ -267,8 +261,7 @@
         }
         var inset = matchWSDelim(at, 'inset-x inset-y inset') || 'inset-x';
         var winRect = inset === 'inset' ? refRect : getRect(within);
-        var elmRect = getRect(elm);
-        var elmStyle = window.getComputedStyle(elm);
+        var elmRect = getRect(elm, true);
         var margin = {};
         var point = {};
         var fn = function (dir, inset, p, pSize) {
@@ -292,9 +285,9 @@
             return inset ? dir : FLIP_POS[dir];
         };
 
+        var elmRectNoMargin = getRect(elm);
         Object.keys(FLIP_POS).forEach(function (v) {
-            margin[v] = (parseFloat(elmStyle[MARGIN_PROP[v]]) || 0) * DIR_SIGN[v];
-            winRect[v] -= margin[v];
+            margin[v] = elmRect[v] - elmRectNoMargin[v];
         });
         var oDirX = matchWSDelim(at, 'left right center') || 'left';
         var oDirY = matchWSDelim(at, 'top bottom center') || 'bottom';
