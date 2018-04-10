@@ -8,7 +8,7 @@
         text: function (widget) {
             return widget.element.src;
         },
-        insert: function (tx, options) {
+        create: function (tx, options) {
             var element = Typer.createElement(reMediaType.test(options.src || options) ? (RegExp.$2 ? 'video' : RegExp.$3 ? 'audio' : 'img') : 'img');
             element.src = options.src || options;
             if (Typer.is(element, 'video')) {

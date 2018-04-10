@@ -162,7 +162,7 @@
     }
 
     function indentCommand(tx, elements) {
-        elements = elements || outermost(tx.selection.getParagraphElements());
+        elements = $.makeArray(elements || outermost(tx.selection.getParagraphElements()));
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0] || $(v).prev('ul,ol')[0] || $('<ul>').insertBefore(v)[0];
             var newList = list;
@@ -181,7 +181,7 @@
     }
 
     function outdentCommand(tx, elements) {
-        elements = elements || outermost(tx.selection.getParagraphElements());
+        elements = $.makeArray(elements || outermost(tx.selection.getParagraphElements()));
         $.each(elements, function (i, v) {
             var list = $(v).parent('ul,ol')[0];
             var parentList = $(list).parent('li')[0];
@@ -303,10 +303,15 @@
     Typer.widgets.list = {
         element: 'ul,ol',
         editable: 'ul,ol',
-        insert: listCommand,
         textFlow: true,
-        remove: 'keepText',
-        extract: function (e) {},
+        create: listCommand,
+        remove: function (tx) {
+            outdentCommand(tx, tx.widget.element.children);
+        },
+        extract: function (e) {
+            // ensure the list element (UL/OL) is extracted
+            // nothing actually to be done
+        },
         receive: function (e) {
             if (Typer.sameElementSpec(e.widget.element, e.receivedNode)) {
                 e.preventDefault();

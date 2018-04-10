@@ -737,7 +737,9 @@
             };
         }());
 
-        function TyperTransaction() { }
+        function TyperTransaction(widget) {
+            this.widget = widget || null;
+        }
 
         function matchWidgetList(id, prop, needle) {
             var options = widgetOptions[id];
@@ -2038,14 +2040,16 @@
                 insertContents(currentSelection, is(content, Node) || createDocumentFragment(content));
             },
             insertWidget: function (name, options) {
-                if (widgetOptions[name] && isFunction(widgetOptions[name].insert)) {
-                    widgetOptions[name].insert(this, options);
+                var handler = (widgetOptions[name] || '').create;
+                if (isFunction(handler)) {
+                    handler.call(typer, this, options);
                 }
             },
             removeWidget: function (widget) {
-                if (isFunction(widgetOptions[widget.id].remove)) {
-                    widgetOptions[widget.id].remove(this, widget);
-                } else if (widgetOptions[widget.id].remove === 'keepText') {
+                var handler = widgetOptions[widget.id].remove;
+                if (isFunction(handler)) {
+                    handler.call(typer, new TyperTransaction(widget));
+                } else if (handler === 'keepText') {
                     var textContent = extractText(widget.element);
                     insertContents(createRange(widget.element, true), textContent);
                     removeNode(widget.element);

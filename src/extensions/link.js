@@ -15,7 +15,7 @@
     Typer.widgets.link = {
         element: 'a[href]',
         inline: true,
-        insert: function (tx, value) {
+        create: function (tx, value) {
             value = normalizeUrl(value);
             if (tx.selection.focusNode.widget.id === 'link') {
                 tx.invoke('setURL', value);

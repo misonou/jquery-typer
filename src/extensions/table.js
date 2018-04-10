@@ -69,7 +69,7 @@
     Typer.widgets.table = {
         element: 'table',
         editable: 'th,td',
-        insert: function (tx, options) {
+        create: function (tx, options) {
             options = options || {};
             tx.insertHtml('<table>' + repeat(TR_HTML.replace('%', repeat(TD_HTML, options.columns || 2)), options.rows || 2) + '</table>');
         },

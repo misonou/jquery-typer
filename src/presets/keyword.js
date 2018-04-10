@@ -179,7 +179,7 @@
                 element: 'span',
                 inline: true,
                 editable: 'none',
-                insert: function (tx, value) {
+                create: function (tx, value) {
                     tx.insertHtml('<span class="typer-ui-keyword" data-value="' + encode(value.value) + '">' + encode(value.displayText) + '<i>delete</i></span>');
                 },
                 click: function (e) {
