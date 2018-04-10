@@ -85,6 +85,11 @@
         return element;
     }
 
+    function replaceElement(oldElement, newElement) {
+        newElement = Typer.is(newElement, Node) || createElementWithClassName(newElement);
+        return $(newElement).append(oldElement.childNodes).replaceAll(oldElement)[0];
+    }
+
     function applyInlineStyle(tx, wrapElm, unwrapSpec, currentState, styleCheck) {
         var selection = tx.selection;
         var paragraphs = selection.getParagraphElements();
@@ -150,10 +155,10 @@
             if (!$(v).is('ol>li,ul>li')) {
                 var list = $(v).prev().filter(filter)[0] || $(v).next().filter(filter)[0] || $(html).insertAfter(v)[0];
                 $(v)[Typer.comparePosition(v, list) < 0 ? 'prependTo' : 'appendTo'](list);
-                tx.replaceElement(v, 'li');
+                replaceElement(v, 'li');
                 lists.push(list);
             } else if (!$(v.parentNode).filter(filter)[0]) {
-                tx.replaceElement(v.parentNode, $(html)[0]);
+                replaceElement(v.parentNode, $(html)[0]);
                 lists.push(v.parentNode);
             } else if ($(v).is('li') && $.inArray(v.parentNode, lists) < 0) {
                 outdentCommand(tx, [v]);
@@ -170,7 +175,7 @@
                 var prevItem = $(v).prev('li')[0] || $('<li>').insertBefore(v)[0];
                 newList = $(prevItem).children('ul,ol')[0] || $(list.cloneNode(false)).appendTo(prevItem)[0];
             }
-            $(tx.replaceElement(v, 'li')).appendTo(newList);
+            $(replaceElement(v, 'li')).appendTo(newList);
             if ($(newList).parent('li')[0]) {
                 $(Typer.createTextNode('\u00a0')).insertBefore(newList);
             }
@@ -199,7 +204,7 @@
                     $(parentList).remove();
                 }
             } else {
-                $(tx.replaceElement(v, 'p')).insertAfter(list);
+                $(replaceElement(v, 'p')).insertAfter(list);
             }
             if (!list.children[0]) {
                 $(list).remove();
@@ -266,7 +271,7 @@
                 } else {
                     $(tx.selection.getParagraphElements()).not('li').each(function (i, v) {
                         if (m[1] && !Typer.is(v, m[1]) && compatibleFormatting(m[1], v.tagName)) {
-                            tx.replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
+                            replaceElement(v, createElementWithClassName(m[1] || 'p', m[2]));
                         } else {
                             v.className = m[2] || '';
                         }

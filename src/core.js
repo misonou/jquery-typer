@@ -2056,15 +2056,6 @@
                 } else {
                     insertContents(createRange(widget.element), '');
                 }
-            },
-            replaceElement: function (oldElement, newElement) {
-                newElement = is(newElement, Node) || createElement(newElement);
-                $(newElement).append(oldElement.childNodes).insertBefore(oldElement);
-                removeNode(oldElement);
-                return newElement;
-            },
-            removeElement: function (element) {
-                removeNode(element);
             }
         });
 
