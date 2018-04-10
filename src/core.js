@@ -1101,7 +1101,7 @@
             var clearNode = mode !== 'copy';
             var fragment = document.createDocumentFragment();
             var state = is(range, TyperSelection) ? range.clone() : new TyperSelection(typer, range);
-            var isSingleEditable = state.isSingleEditable;
+            var timestamp = currentSelection.timestamp;
             range = state.getRange();
 
             codeUpdate(function () {
@@ -1120,39 +1120,28 @@
                         var handler = is(node, NODE_WIDGET | NODE_EDITABLE | NODE_EDITABLE_PARAGRAPH) && widgetOptions[node.widget.id].extract;
                         var isWidgetHead = node.widget.element === element;
 
-                        if (node === state.focusNode && !isWidgetHead && is(node, NODE_EDITABLE)) {
-                            return 3;
-                        }
-                        if (!handler && !isWidgetHead && is(node, NODE_WIDGET | NODE_EDITABLE)) {
+                        if ((!handler || node === state.focusNode) && !isWidgetHead && is(node, NODE_EDITABLE)) {
                             // ignore widget structure if the widget is partially selected
                             // and there is no extract event handler defined
                             return 3;
                         }
-                        if (cloneNode) {
-                            while (!containsOrEquals(stack[0][0], element)) {
-                                shift();
-                            }
-                            if (handler && (!isWidgetHead || !rangeCovers(range, element))) {
-                                (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).addBack()).each(function (i, v) {
-                                    stack.unshift([v, v.cloneNode(false), node.widget]);
-                                    stack[1][1].appendChild(stack[0][1]);
-                                });
-                            }
+                        while (!containsOrEquals(stack[0][0], element)) {
+                            shift();
+                        }
+                        if (handler && (!isWidgetHead || !rangeCovers(range, element))) {
+                            (isWidgetHead ? $(element) : $(element).parentsUntil(stack[0][0]).addBack()).each(function (i, v) {
+                                stack.unshift([v, v.cloneNode(false), node.widget]);
+                                stack[1][1].appendChild(stack[0][1]);
+                            });
                         }
                         if (rangeCovers(range, element)) {
-                            if (cloneNode) {
-                                var clone = element.cloneNode(true);
-                                $(stack[0][1]).append(element === stack[0][0] ? clone.childNodes : clone);
+                            var appendChild = element === stack[0][0];
+                            var clone = clearNode ? element : element.cloneNode(true);
+                            if (clearNode && !appendChild && is(node, NODE_EDITABLE_PARAGRAPH)) {
+                                // prevent editable paragraph being removed
+                                clone = $(element.cloneNode(false)).append(element.childNodes[0]);
                             }
-                            if (clearNode) {
-                                if (is(node, NODE_EDITABLE)) {
-                                    $(element).html(EMPTY_LINE);
-                                } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
-                                    $(element).html(ZWSP_ENTITIY);
-                                } else {
-                                    removeNode(element);
-                                }
-                            }
+                            $(stack[0][1]).append(appendChild ? clone.childNodes : clone);
                             return 2;
                         }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
@@ -1182,13 +1171,15 @@
                 }
                 if (isFunction(callback)) {
                     // explicitly update the selection
-                    if (state.direction > 0) {
+                    if (currentSelection.timestamp !== timestamp) {
+                        state = currentSelection;
+                    } else if (state.direction > 0) {
                         state.select(range);
                     } else {
                         state.select(createRange(range, false));
                         state.extendCaret.moveTo(createRange(range, true));
                     }
-                    if (!isSingleEditable) {
+                    if (!state.isSingleEditable) {
                         var iterator = state.createTreeWalker(NODE_ANY_BLOCK_EDITABLE, function (v) {
                             return widgetOptions[v.widget.id].textFlow ? 1 : 3;
                         });
@@ -1269,7 +1260,7 @@
                                         caret: caretPoint.clone()
                                     };
                                     if (triggerDefaultPreventableEvent(widgetNode.widget, 'receive', null, prop)) {
-                                        caretPoint = currentSelection.extendCaret.clone();
+                                        caretPoint = currentSelection.clone();
                                         hasInsertedBlock = true;
                                         return;
                                     }
