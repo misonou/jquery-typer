@@ -1230,17 +1230,16 @@
                         }
                         if (is(node, NODE_ANY_ALLOWTEXT)) {
                             var content = createRange(element, range)[method]();
-                            if (cloneNode && content) {
-                                var hasThisElement = is(is(content, DocumentFragment) ? content.firstChild : content, tagName(element));
-                                var fixTextTransform;
-                                if (!hasThisElement) {
+                            var firstChild = is(content, DocumentFragment) ? content.firstChild : content;
+                            var hasThisElement = is(firstChild, tagName(element));
+                            var reqThisElement = !handler;
+                            if (cloneNode && firstChild) {
+                                if (!hasThisElement && reqThisElement) {
                                     content = wrapNode(content, [is(node, NODE_EDITABLE_PARAGRAPH) ? createElement('p') : element]);
-                                    fixTextTransform = true;
-                                } else if (is(node, NODE_EDITABLE_PARAGRAPH)) {
-                                    content = createDocumentFragment(content.firstChild.childNodes);
-                                    fixTextTransform = true;
+                                } else if (hasThisElement && !reqThisElement) {
+                                    content = createDocumentFragment(firstChild.childNodes);
                                 }
-                                if (fixTextTransform) {
+                                if (!handler) {
                                     updateWholeText(content, null, function (v) {
                                         return transformText(v, $.css(element, 'text-transform'));
                                     });
