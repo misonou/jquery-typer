@@ -1404,7 +1404,7 @@
                 doc = createTyperDocument(content);
                 iterator = new TyperDOMNodeIterator(new TyperTreeWalker(doc.rootNode, -1), 5);
             } else {
-                iterator = new TyperDOMNodeIterator(new TyperSelection(typer, range).createTreeWalker(-1), 5, function (v) {
+                iterator = new TyperDOMNodeIterator((is(content, TyperSelection) || new TyperSelection(typer, range)).createTreeWalker(-1), 5, function (v) {
                     return rangeIntersects(range, createRange(v, 'contents')) ? 1 : 2;
                 });
             }
@@ -2431,9 +2431,9 @@
             if (self.startNode === self.endNode) {
                 return is(self.startNode, NODE_PARAGRAPH) ? [self.startNode.element] : [];
             }
-            return iterateToArray(new TyperTreeWalker(self.focusNode, NODE_PARAGRAPH), function (v) {
+            return iterateToArray(selectionCreateTreeWalker(self, NODE_PARAGRAPH), function (v) {
                 return v.element;
-            }, self.startNode, self.endNode);
+            });
         },
         getSelectedElements: function () {
             var self = this;
@@ -2443,7 +2443,7 @@
             return $(selectionIterateTextNodes(self)).parent().get();
         },
         getSelectedText: function () {
-            return this.typer.extractText(this.getRange());
+            return this.typer.extractText(this);
         },
         getSelectedTextNodes: function () {
             var self = this;
