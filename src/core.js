@@ -704,6 +704,62 @@
         });
     }
 
+    function draggable(e, scrollElement, callback) {
+        var deferred = $.Deferred();
+        var lastPos = e;
+        var scrollParent = getScrollParent(isElm(scrollElement) || e.target);
+        var scrollTimeout;
+
+        var handlers = {
+            keydown: function (e) {
+                if (e.which === 27) {
+                    deferred.reject();
+                    handlers.mouseup(e);
+                }
+            },
+            mousemove: function (e) {
+                if (!e.which) {
+                    handlers.mouseup(e);
+                    return;
+                }
+                if (e.clientX !== lastPos.clientX || e.clientY !== lastPos.clientY) {
+                    lastPos = e;
+                    deferred.notify(e.clientX, e.clientY);
+                }
+                e.preventDefault();
+            },
+            mouseup: function (e) {
+                clearInterval(scrollTimeout);
+                $(document.body).off(handlers);
+                $(scrollParent).off(scrollParentHandlers);
+                deferred.resolve();
+            }
+        };
+        var scrollParentHandlers = {
+            mouseout: function (e) {
+                if (!scrollTimeout && (!containsOrEquals(scrollParent, e.relatedTarget) || (scrollParent === root && e.relatedTarget === root))) {
+                    scrollTimeout = setInterval(function () {
+                        if (scrollRectIntoView(scrollParent, toPlainRect(lastPos.clientX - 50, lastPos.clientY - 50, lastPos.clientX + 50, lastPos.clientY + 50))) {
+                            deferred.notify(lastPos.clientX, lastPos.clientY);
+                        } else {
+                            clearInterval(scrollTimeout);
+                            scrollTimeout = null;
+                        }
+                    }, 20);
+                }
+            },
+            mouseover: function (e) {
+                if (e.target !== root) {
+                    clearInterval(scrollTimeout);
+                    scrollTimeout = null;
+                }
+            }
+        };
+        $(document.body).on(handlers);
+        $(scrollParent).on(scrollParentHandlers);
+        return deferred.promise().progress(callback || scrollElement);
+    }
+
     function Typer(topElement, options) {
         if (!is(topElement, Node)) {
             options = topElement;
@@ -1562,7 +1618,6 @@
         }
 
         function normalizeInputEvent() {
-            var mousedown;
             var composition;
             var modifierCount;
             var modifiedKeyCode;
@@ -1642,68 +1697,22 @@
                 }
             }
 
-            $self.mousedown(function (e) {
-                var extendCaret = currentSelection.extendCaret;
-                var scrollParent = getScrollParent(e.target);
-                var scrollTimeout;
-                var lastPos;
-                var mousemoved;
-
-                var scrollParentHandlers = {
-                    mouseout: function (e) {
-                        if (!scrollTimeout && (!containsOrEquals(scrollParent, e.relatedTarget) || (scrollParent === root && e.relatedTarget === root))) {
-                            var lastX = e.clientX;
-                            var lastY = e.clientY;
-                            scrollTimeout = setInterval(function () {
-                                if (scrollRectIntoView(topElement, toPlainRect(lastX - 50, lastY - 50, lastX + 50, lastY + 50))) {
-                                    extendCaret.moveToPoint(lastX, lastY);
-                                } else {
-                                    clearInterval(scrollTimeout);
-                                    scrollTimeout = null;
-                                }
-                            }, 20);
-                        }
-                    },
-                    mouseover: function (e) {
-                        if (e.target !== root) {
-                            clearInterval(scrollTimeout);
-                            scrollTimeout = null;
-                        }
-                    }
-                };
-                var handlers = {
-                    mousemove: function (e) {
-                        if (!e.which && mousedown) {
-                            handlers.mouseup(e);
-                            return;
-                        }
-                        mousemoved |= e.clientX !== lastPos.clientX || e.clientY !== lastPos.clientY;
+            $self.on('mousedown', function (e) {
+                if (e.which === 1) {
+                    var pointerMoved;
+                    var promise = draggable(e, function (x, y) {
+                        pointerMoved = true;
                         undoable.snapshot(200);
-                        extendCaret.moveToPoint(e.clientX, e.clientY);
-                        setTimeout(function () {
-                            currentSelection.focus();
-                        });
-                        e.preventDefault();
-                    },
-                    mouseup: function (e) {
-                        mousedown = false;
-                        clearInterval(scrollTimeout);
-                        $(document.body).off(handlers);
-                        $(scrollParent).off(scrollParentHandlers);
-                        if (!mousemoved) {
+                        currentSelection.extendCaret.moveToPoint(x, y);
+                    });
+                    promise.done(function () {
+                        if (!pointerMoved) {
                             handleClick(e, null, 'click');
                         }
-                    }
-                };
-                if (e.which === 1) {
-                    (e.shiftKey ? extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
-                    currentSelection.focus();
-                    $(document.body).on(handlers);
-                    $(scrollParent).on(scrollParentHandlers);
-                    lastPos = e;
-                    mousedown = true;
+                    });
+                    (e.shiftKey ? currentSelection.extendCaret : currentSelection).moveToPoint(e.clientX, e.clientY);
                 }
-                e.preventDefault();
+                currentSelection.focus();
             });
 
             $self.on('compositionstart compositionend', function (e) {
@@ -1835,10 +1844,8 @@
                 checkNativeUpdate = updateFromNativeInput;
                 if (!typerFocused) {
                     typerFocused = true;
+                    currentSelection.focus();
                     triggerEvent(EVENT_ALL, 'focusin');
-                    if (!mousedown) {
-                        currentSelection.focus();
-                    }
                 }
             });
 
@@ -2113,6 +2120,7 @@
         getRects: getRects,
         getAbstractSide: getAbstractSide,
         elementFromPoint: elementFromPoint,
+        draggable: draggable,
         historyLevel: 100,
         defaultOptions: {
             widgets: {}
