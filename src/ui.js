@@ -771,7 +771,7 @@
     function getElementContainers(control) {
         var arr = [control.element];
         foreachControl(control, function (v) {
-            if (!containsOrEquals(v.element, v.parent.element)) {
+            if (!containsOrEquals(v, v.parent)) {
                 for (var elm = v.element; elm.parentNode && !$.contains(elm.parentNode, arr[0]); elm = elm.parentNode);
                 arr[arr.length] = elm;
             }

@@ -187,10 +187,6 @@
         defineProperty(prototype, 'constructor', fn);
     }
 
-    function slice(arr, start, end) {
-        return array.slice.call(arr || {}, start || 0, end);
-    }
-
     function any(arr, callback) {
         var result;
         $.each(arr, function (i, v) {
@@ -338,6 +334,8 @@
     }
 
     function containsOrEquals(container, contained) {
+        container = (container || '').element || container;
+        contained = (contained || '').element || contained;
         return container === contained || $.contains(container, contained);
     }
 
@@ -422,8 +420,10 @@
         var rect;
         elm = elm || root;
         if (elm.getRect) {
-            rect = elm.getRect();
-        } else if (elm === root) {
+            return elm.getRect();
+        }
+        elm = elm.element || elm;
+        if (elm === root) {
             rect = toPlainRect(0, 0, root.offsetWidth, root.offsetHeight);
         } else if (!containsOrEquals(root, elm)) {
             // IE10 throws Unspecified Error for detached elements
@@ -704,6 +704,21 @@
         });
     }
 
+    function combineNodeFilters() {
+        var args = $.grep(arguments, $.isFunction);
+        return function (node) {
+            var result = 1;
+            for (var i = 0, len = args.length; i < len; i++) {
+                var value = args[i](node);
+                if (value === 2) {
+                    return 2;
+                }
+                result |= value;
+            }
+            return result;
+        };
+    }
+
     function draggable(e, scrollElement, callback) {
         var deferred = $.Deferred();
         var lastPos = e;
@@ -977,7 +992,7 @@
 
             function visitNode(thisNode, visitChild) {
                 $.each(thisNode.childNodes.slice(0), function (i, v) {
-                    if (!containsOrEquals(thisNode.element, v.element)) {
+                    if (!containsOrEquals(thisNode, v)) {
                         removeFromParent(v, true);
                     }
                 });
@@ -1277,7 +1292,7 @@
                 if (containsOrEquals(topElement, content)) {
                     removeNode(content);
                 }
-                content = slice(createDocumentFragment(content).childNodes);
+                content = $.makeArray(createDocumentFragment(content).childNodes);
                 textOnly = content.length === 1 && is(content[0], 'p:not([class])');
             } else {
                 content = $.parseHTML(String(content || '').replace(/\u000d/g, '').replace(/</g, '&lt;').replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>').replace(/.*/, '<p>$&</p>').replace(/\s/g, '\u00a0'));
@@ -2042,7 +2057,6 @@
 
         definePrototype(TyperTransaction, {
             typer: typer,
-            widget: null,
             get selection() {
                 return currentSelection;
             },
@@ -2345,9 +2359,11 @@
 
     function selectionCreateTreeWalker(inst, whatToShow, filter) {
         var range = createRange(inst);
-        return new TyperTreeWalker(inst.focusNode, whatToShow & ~NODE_SHOW_HIDDEN, function (v) {
-            return !rangeIntersects(v.element, range) ? 2 : !filter ? 1 : filter(v);
-        });
+        var d = selectionCache.get(inst).d;
+        var defaultFilter = function (v) {
+            return !rangeIntersects(v.element, range) ? 2 : 1;
+        };
+        return new TyperTreeWalker(inst.focusNode, whatToShow & ~NODE_SHOW_HIDDEN, combineNodeFilters(defaultFilter, d && d.acceptNode && d.acceptNode.bind(d), filter));
     }
 
     function selectionIterateTextNodes(inst) {
@@ -2387,6 +2403,9 @@
             dirtySelections.add(inst);
             return;
         }
+        var cache = selectionCache.get(inst);
+        cache.d = null;
+        cache.m = 0;
         inst.timestamp = performance.now();
         inst.direction = compareRangePosition(inst.extendCaret.getRange(), inst.baseCaret.getRange()) || 0;
         inst.isCaret = !inst.direction;
@@ -2396,7 +2415,6 @@
         }
         var node = inst.typer.getNode(getCommonAncestor(inst.baseCaret.element, inst.extendCaret.element));
         inst.focusNode = closest(node, NODE_WIDGET | NODE_INLINE_WIDGET | NODE_ANY_BLOCK_EDITABLE | NODE_INLINE_EDITABLE);
-        selectionCache.get(inst).m = 0;
         if (inst === inst.typer.getSelection()) {
             if (inst.typer.focused() && !userFocus.has(inst.typer)) {
                 inst.focus();
@@ -2476,13 +2494,19 @@
         },
         select: function (startNode, startOffset, endNode, endOffset) {
             var self = this;
-            return selectionAtomic(function () {
+            var result;
+            selectionAtomic(function () {
                 if (startNode === 'word') {
-                    return self.getCaret('start').moveByWord(-1) + self.getCaret('end').moveByWord(1) > 0;
+                    result = self.getCaret('start').moveByWord(-1) + self.getCaret('end').moveByWord(1) > 0;
+                } else {
+                    var range = createRange(startNode, startOffset, endNode, endOffset);
+                    result = self.baseCaret.moveTo(range, true) + self.extendCaret.moveTo(range, false) > 0;
                 }
-                var range = createRange(startNode, startOffset, endNode, endOffset);
-                return self.baseCaret.moveTo(createRange(range, true)) + self.extendCaret.moveTo(createRange(range, false)) > 0;
             });
+            if (startNode.acceptNode) {
+                selectionCache.get(self).d = startNode;
+            }
+            return result;
         },
         selectAll: function () {
             return this.select(this.typer.element, 'contents');
@@ -2507,6 +2531,7 @@
                 inst.baseCaret.moveTo(self.baseCaret);
                 inst.extendCaret.moveTo(self.extendCaret);
             });
+            selectionCache.get(inst).d = selectionCache.get(self).d;
             return inst;
         },
         widgetAllowed: function (id) {
@@ -2519,7 +2544,7 @@
             var self = this;
             return selectionAtomic(function () {
                 return TyperCaret.prototype[v].apply(self.baseCaret, arguments) + self.collapse('base') > 0;
-            }, slice(arguments));
+            }, arguments);
         };
     });
     $.each('getWidgets getParagraphElements getSelectedElements getSelectedText getSelectedTextNodes'.split(' '), function (i, v) {
@@ -2527,7 +2552,7 @@
         TyperSelection.prototype[v] = function () {
             var cache = selectionCache.get(this);
             if (!(cache.m & (1 << i))) {
-                cache[v] = fn.apply(this, arguments);
+                cache[v] = cache.d && cache.d[v] ? cache.d[v](this) : fn.apply(this);
                 cache.m |= (1 << i);
             }
             return cache[v];
@@ -2948,7 +2973,7 @@
             if (is(node, TyperCaret)) {
                 return caretSetPositionRaw(this, node.node, node.element, node.textNode, node.offset, node.beforeSoftBreak);
             }
-            var range = is(node, Range) || createRange(node, offset);
+            var range = createRange(node, offset);
             if (range && containsOrEquals(this.typer.element, range.startContainer)) {
                 return caretSetPosition(this, range.startContainer, range.startOffset);
             }

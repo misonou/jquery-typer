@@ -34,7 +34,7 @@
         if (position) {
             toolbar.position = 'fixed';
         } else if (toolbar.position !== 'fixed') {
-            var rect = Typer.getRect((toolbar.widget || toolbar.typer).element);
+            var rect = Typer.getRect(toolbar.widget || toolbar.typer);
             if (rect.left === 0 && rect.top === 0 && rect.width === 0 && rect.height === 0) {
                 // invisible element or IE bug related - https://connect.microsoft.com/IE/feedback/details/881970
                 return;
