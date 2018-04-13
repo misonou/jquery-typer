@@ -666,7 +666,7 @@
             }
         } finally {
             if (executionContext[0] === control) {
-                while ($.when(executionContext[0].promise).state() !== 'pending' && executionContext.shift() && executionContext[0]);
+                while ((!executionContext[0].promise || executionContext[0].promise.state() !== 'pending') && executionContext.shift() && executionContext[0]);
             }
         }
     }
