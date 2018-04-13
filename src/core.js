@@ -958,10 +958,16 @@
                         }
                     }
                 });
-                if (currentSelection) {
+                if (dirtyNodes.size && currentSelection) {
                     selectionAtomic(function () {
-                        caretEnsureState(currentSelection.baseCaret);
-                        caretEnsureState(currentSelection.extendCaret);
+                        var range = currentSelection.getRange();
+                        var needUpdate;
+                        dirtyNodes.forEach(function (v) {
+                            needUpdate |= rangeIntersects(range, v.element);
+                        });
+                        if (needUpdate) {
+                            selectionUpdate(currentSelection);
+                        }
                     });
                 }
                 if (beforeSize !== changedWidgets.size) {
