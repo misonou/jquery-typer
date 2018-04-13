@@ -2137,7 +2137,7 @@
                     var point = getAbstractRect(toPlainRect(x, y), mode);
                     node = any(node.childNodes, function (v) {
                         var rect = getAbstractRect(getRect(v.element, true), mode);
-                        return rect.top <= point.y && rect.bottom >= point.y;
+                        return rect.top <= point.top && rect.bottom >= point.top;
                     }) || node;
                 }
                 return closest(node, whatToShow || -1);
