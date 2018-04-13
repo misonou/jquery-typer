@@ -1,3 +1,24 @@
+## 0.11.3 / 2018-04-13
+
+- Add `typer.createTreeWalker`
+- Add `copy` event source to distinguish to `cut` in `extract` event
+- Support table cell selection and copying, pasting, and deleting table rows and columns
+- Improve `typer.nodeFromPoint` to cater margin
+- `extract` event is now also fired in `copy` event
+- (Breaking) renamed `insert` to `create` for handling widget insertion (because of name collision to `insert` keystroke)
+- (Breaking) removed `removeElement` and `replaceElement` from `TyperTransaction`
+- (Breaking) major update to canvas
+- Fix: selection timestamp updated when either caret did not actually moved
+- Fix: `receive` event not fired if caret position does not allow the widget itself
+- Fix: handlers of content widgets fired after static widgets for preventable events like `keystroke`
+- Fix: text copied to clipboard did not correspond correctly to rich text version
+- Fix: associated widget did not update after subtree modification
+- Fix: prevent circular reference and infinite loop when updating caret position
+- Fix: `getParagraphElements` and `getSelectedText` returns hidden parts
+- Fix: selection cache not refresh after DOM modification
+- Fix: missing paragraph element when extracting editable paragraph
+- Fix: UI component execution stack not cleared after promise is resolved or rejected
+
 ## 0.11.2 / 2018-03-29
 
 - Improvement on line search for `moveToLineEnd` and `moveByLine`

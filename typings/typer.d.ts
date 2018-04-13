@@ -1,6 +1,6 @@
 type NodeFilterResult = 1 | 2 | 3;
 type Rangeish = Range | Node | TyperRangeish;
-type Rectish = Rect | ClientRect | TyperRectish;
+type Rectish = TyperRect | ClientRect | TyperRectish;
 type Pointish = Point | Offset | MouseEvent | Touch;
 type CaretPoint = 'base' | 'extend' | 'start' | 'end';
 type SelectMode = 'word';
@@ -33,7 +33,7 @@ interface TyperEventHandler<T extends TyperEvent> {
     (event: T): any;
 }
 
-interface Rect {
+interface TyperRect {
     top: number;
     left: number;
     right: number;
@@ -57,7 +57,7 @@ interface TyperRangeish {
 }
 
 interface TyperRectish {
-    getRect(): Rect;
+    getRect(): TyperRect;
 }
 
 interface TyperCommand {
@@ -163,9 +163,7 @@ interface TyperTransaction {
     insertText(text: string): void;
     insertHtml(content: string | Node): void;
     insertWidget(name: string, options: Dictionary<any>): void;
-    removeElement(element: Element): void;
     removeWidget(widget: TyperWidget): void;
-    trackChange(node: Node | TyperNode | TyperWidget): void;
 }
 
 interface TyperWidget {
@@ -186,8 +184,8 @@ interface TyperWidgetDefinition extends Dictionary<any>, TyperEventReceiver {
     options?: Dictionary<any>;
     commands?: Dictionary<TyperCommand>;
     text?: (widget: TyperWidget) => string;
-    insert?: (tx: TyperTransaction, options: Dictionary<any>) => void;
-    remove?: 'keepText' | ((tx: TyperTransaction, widget: TyperWidget) => void);
+    create?: (tx: TyperTransaction, options: Dictionary<any>) => void;
+    remove?: 'keepText' | ((tx: TyperTransaction) => void);
 }
 
 interface TyperCaret extends TyperRangeish, TyperRectish {
@@ -198,7 +196,7 @@ interface TyperCaret extends TyperRangeish, TyperRectish {
     readonly offset: number;
 
     getRange(): Range;
-    getRect(): Rect;
+    getRect(): TyperRect;
     clone(): TyperCaret;
     moveTo(range: Rangeish): boolean;
     moveTo(node: Node, offset: number): boolean;
@@ -325,6 +323,7 @@ interface TyperStatic {
     comparePosition(a: Node, b: Node): number;
     compareRangePosition(a: Rangeish, b: Rangeish): number;
     containsOrEquals(a: Node, b: Node): boolean;
+    containsOrEquals(a: TyperNode, b: TyperNode): boolean;
     rangeIntersects(a: Rangeish, b: Rangeish): boolean;
     rangeCovers(a: Rangeish, b: Rangeish): boolean;
     rangeEquals(a: Rangeish, b: Rangeish): boolean;
@@ -348,10 +347,11 @@ interface TyperStatic {
     createRange(range: Range, collapse?: boolean): Range;
     createRange(start: Range, end: Range): Range;
 
-    getRect(): Rect;
-    getRect(element: Element): Rect;
-    toPlainRect(rect: DOMRect | ClientRect): Rect;
-    toPlainRect(left: number, top: number, right: number, bottom: number): Rect;
+    getRect(): TyperRect;
+    getRect(element: Element | TyperNode | TyperWidget | Typer, includeMargin?: boolean): TyperRect;
+    toPlainRect(rect: DOMRect | ClientRect): TyperRect;
+    toPlainRect(left: number, top: number): TyperRect;
+    toPlainRect(left: number, top: number, right: number, bottom: number): TyperRect;
 
     preset(element: Element, name: string, options: TyperOptions): Typer;
 }
@@ -489,7 +489,7 @@ interface TyperUIStatic {
     setZIndex(element: Element, over: Element): void;
     cssFromPoint(x: number, y: number, origin?: Element, parent?: Element): object;
     cssFromPoint(point: Pointish, origin?: Element, parent?: Element): object;
-    cssFromRect(rect: Rect, parent?: Element): object;
+    cssFromRect(rect: Rectish, parent?: Element): object;
 
     define(name: string, base?: object, ctor?: Function): Function;
 

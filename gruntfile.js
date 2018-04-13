@@ -3,7 +3,7 @@ module.exports = function (grunt) {
 
     grunt.initConfig({
         pkg: grunt.file.readJSON('package.json'),
-        imports: 'jQuery, window, document, Object, String, Array, Math, Node, Range, DocumentFragment, RegExp',
+        imports: 'jQuery, window, document, Object, String, Array, Math, Node, Range, DocumentFragment, RegExp, parseFloat, setTimeout, clearTimeout',
         concat: {
             shim: {
                 options: {
