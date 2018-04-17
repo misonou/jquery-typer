@@ -1,8 +1,8 @@
 (function ($, Typer) {
     'use strict';
 
-    function encode(v) {
-        var a = document.createTextNode(v.replace(/\s/g, '\u00a0')),
+    function encode(v, keepWS) {
+        var a = document.createTextNode(keepWS ? v : v.replace(/\s/g, '\u00a0')),
             b = document.createElement('div');
         b.appendChild(a);
         return b.innerHTML;
@@ -180,7 +180,7 @@
                 inline: true,
                 editable: 'none',
                 create: function (tx, value) {
-                    tx.insertHtml('<span class="typer-ui-keyword" data-value="' + encode(value.value) + '">' + encode(value.displayText) + '<i>delete</i></span>');
+                    tx.insertHtml('<span class="typer-ui-keyword" data-value="' + encode(value.value, true) + '">' + encode(value.displayText) + '<i>delete</i></span>');
                 },
                 click: function (e) {
                     if (e.target !== e.widget.element) {
