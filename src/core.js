@@ -1426,13 +1426,7 @@
                         if (lastNode) {
                             caretPoint.getRange().insertNode(nodeToInsert);
                             normalizeWhitespace(caretNode.element);
-                            if (isLineBreak || is(node, NODE_INLINE_WIDGET)) {
-                                // ensure there is a text insertion point after an inline widget
-                                var textNode = $(createTextNode()).insertAfter(lastNode)[0];
-                                caretPoint.moveTo(textNode, -0);
-                            } else {
-                                caretPoint.moveTo(lastNode, -0);
-                            }
+                            caretPoint.moveTo(lastNode, -0);
                         }
                         paragraphAsInline = forcedInline;
                     } else {
@@ -2608,26 +2602,30 @@
 
     function caretSetPosition(inst, element, offset, beforeSoftBreak) {
         var textNode, end;
-        if (!isBR(element)) {
-            if (element.firstChild) {
-                end = offset === element.childNodes.length;
-                element = element.childNodes[offset] || element.lastChild;
-                offset = end ? element.length : 0;
-            }
-            textNode = isText(element);
+        if (isElm(element)) {
+            end = offset === element.childNodes.length;
+            element = element.childNodes[offset] || element.lastChild || element;
+            offset = end ? element.length : 0;
         }
         var node = inst.typer.getNode(element);
-        if (is(node, NODE_WIDGET | NODE_INLINE_WIDGET)) {
-            element = node.element;
+        if (is(node, NODE_WIDGET)) {
             textNode = null;
-        }
-        if (!is(node, NODE_ANY_ALLOWTEXT | NODE_WIDGET | NODE_INLINE_WIDGET)) {
+        } else if (is(node, NODE_INLINE_WIDGET)) {
+            node = node.parentNode;
+            element = node.element;
+            textNode = isText(end ? element.nextSibling : element.previousSibling) || $(createTextNode())[end ? 'insertAfter' : 'insertBefore'](element)[0];
+            offset = 1;
+        } else if (!is(node, NODE_ANY_ALLOWTEXT)) {
             var child = any(node.childNodes, function (v) {
-                return comparePosition(textNode, v.element) < 0;
+                return comparePosition(element, v.element) < 0;
             });
             node = child || node.lastChild || node;
             textNode = null;
             end = !child;
+        } else if (isBR(element)) {
+            textNode = isText(element.nextSibling) || $(createTextNode()).insertAfter(element)[0];
+        } else {
+            textNode = isText(element);
         }
         if (inst.selection && inst === inst.selection.extendCaret && is(node.previousSibling, NODE_WIDGET) === inst.selection.baseCaret.node) {
             node = node.previousSibling;
