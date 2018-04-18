@@ -66,7 +66,7 @@
         iconset: 'material',
         label: '<span class="typer-ui-label"><br x:t="labelIcon"/><br x:t="labelText"/></span>',
         labelText: function (ui, control) {
-            if (control.is('textbox') || (!control.contextualParent.showButtonLabel && ui.getIcon(control))) {
+            if (control.is('textbox') || (!control.showButtonLabel && ui.getIcon(control))) {
                 return '';
             }
             return '<span x:bind="(_:label)"></span>';
@@ -176,7 +176,7 @@
             });
         },
         executed: function (ui, control) {
-            if (!control.is('textbox') && (ui.is('contextmenu') || (control.contextualParent.is('callout dropdown') && control.contextualParent.hideCalloutOnExecute !== false))) {
+            if ((ui.is('contextmenu') || control.contextualParent.is('callout dropdown')) && control.hideCalloutOnExecute !== false) {
                 ui.hide(ui.is('contextmenu') ? null : control.contextualParent);
             }
         },

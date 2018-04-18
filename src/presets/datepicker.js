@@ -117,6 +117,7 @@
         defaultNS: 'calendar',
         controls: '*',
         showButtonLabel: false,
+        hideCalloutOnExecute: false,
         mode: 'day',
         min: null,
         max: null,
@@ -222,6 +223,7 @@
     Typer.ui.define('clock', {
         type: 'clock',
         defaultNS: 'clock',
+        hideCalloutOnExecute: false,
         controls: '*',
         step: 1,
         init: function (ui, self) {

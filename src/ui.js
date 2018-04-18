@@ -1228,7 +1228,9 @@
         }
     });
 
-    inheritProperty(controlExtensions, 'pinDirection');
+    $.each('hideCalloutOnExecute pinDirection showButtonLabel'.split(' '), function (i, v) {
+        inheritProperty(controlExtensions, v);
+    });
 
     /* ********************************
      * Built-in Control Types
@@ -1353,6 +1355,7 @@
         file: {},
         textbox: {
             preset: 'textbox',
+            hideCalloutOnExecute: false,
             get value() {
                 return this.preset.getValue();
             },
