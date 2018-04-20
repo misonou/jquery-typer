@@ -541,6 +541,30 @@
         return containsOrEquals(container, element) ? element : null;
     }
 
+    function observe(element, callback) {
+        var wrapper = function (records, inst) {
+            records = records.filter(function (v) {
+                // filter out changes due to sizzle engine
+                // to prevent accessive invocation due to querying elements through jQuery
+                return v.attributeName !== 'id' || ((v.oldValue || '').slice(0, 6) !== 'sizzle' && (v.target.id !== (v.oldValue || '')));
+            });
+            if (records[0]) {
+                callback(records, inst);
+            }
+        };
+        var observer = new MutationObserver(wrapper);
+        observer.observe(element, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeOldValue: true,
+            characterData: true
+        });
+        return function () {
+            wrapper(observer.takeRecords(), observer);
+        };
+    }
+
     function createDocumentFragment(node) {
         return is(node, DocumentFragment) || $(document.createDocumentFragment()).append(node)[0];
     }
@@ -875,7 +899,7 @@
             var nodeMap = new WeakMap();
             var changedWidgets = new Set();
             var initOrDestroyWidgets = new Set();
-            var observer = new MutationObserver(handleMutations);
+            var checkMutations = fireEvent ? observe(rootElement, handleMutations) : $.noop;
 
             function triggerWidgetEvents(source) {
                 setEventSource.apply(null, source);
@@ -1016,7 +1040,7 @@
                     if (node) {
                         if (v.addedNodes[0] || v.removedNodes[0]) {
                             dirtyNodes.add(node);
-                        } else if (trackChange && (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'id' && v.attributeName !== 'style'))) {
+                        } else if (trackChange && (!v.attributeName || (v.target !== rootElement && v.attributeName !== 'style'))) {
                             changedWidgets.add(node.widget);
                         }
                     }
@@ -1048,10 +1072,7 @@
             }
 
             function getNode(element) {
-                var mutations = observer.takeRecords();
-                if (mutations[0]) {
-                    handleMutations(mutations);
-                }
+                checkMutations();
                 if (isText(element) || isBR(element)) {
                     element = element.parentNode || element;
                 }
@@ -1063,14 +1084,6 @@
 
             if (!rootElement.parentNode) {
                 rootElement = is(rootElement, DocumentFragment) || createDocumentFragment(rootElement);
-            }
-            if (fireEvent) {
-                observer.observe(rootElement, {
-                    subtree: true,
-                    childList: true,
-                    attributes: true,
-                    characterData: true
-                });
             }
             var rootNode = new TyperNode(nodeSource, topNodeType, rootElement, new TyperWidget(nodeSource, WIDGET_ROOT, topElement, options));
             nodeMap.set(rootElement, rootNode);
@@ -2128,6 +2141,7 @@
         getRects: getRects,
         getAbstractSide: getAbstractSide,
         elementFromPoint: elementFromPoint,
+        observe: observe,
         draggable: draggable,
         historyLevel: 100,
         defaultOptions: {
